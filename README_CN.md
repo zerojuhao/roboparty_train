@@ -68,6 +68,22 @@ python robolab/scripts/rsl_rl/train.py --task=<ENV_NAME> --headless --logger=ten
 ```bash
 python robolab/scripts/rsl_rl/play.py --task=<ENV_NAME> --num_envs=1
 ```
+### 测试(AMP)
+```bash
+python robolab/scripts/rsl_rl/play_amp.py --task=Atom01-AMP-Play --num_envs=1
+```
+### 测试(Beyondmimic)
+```bash
+python robolab/scripts/rsl_rl/play_bm.py --task=Atom01-BeyondMimic --num_envs=1
+```
+### 测试(Parkour)
+```bash
+python robolab/scripts/rsl_rl/play_parkour.py --task=Atom01-Parkour-Play --num_envs=1
+```
+导出 onnx 模型时, 请设置 `num_envs=1` 并添加 `--exportonnx`
+```bash
+python robolab/scripts/rsl_rl/play_parkour.py --task=Atom01-Parkour-Play --num_envs=1 --exportonnx
+```
 
 ### Sim2Sim
 ```bash
@@ -87,3 +103,4 @@ python robolab/scripts/mujoco/sim2sim_atom01.py --load_model "{exported/policy.p
 * [legged_gym](https://github.com/leggedrobotics/legged_gym)
 * [legged_lab](https://github.com/zitongbai/legged_lab)
 * [robot_lab](https://github.com/fan-ziqi/robot_lab)
+* [InstinctLab](https://github.com/project-instinct/InstinctLab)

@@ -68,6 +68,22 @@ python robolab/scripts/rsl_rl/train.py --task=<ENV_NAME> --headless --logger=ten
 ```bash
 python robolab/scripts/rsl_rl/play.py --task=<ENV_NAME> --num_envs=1
 ```
+### Play(AMP)
+```bash
+python robolab/scripts/rsl_rl/play_amp.py --task=Atom01-AMP-Play --num_envs=1
+```
+### Play(Beyondmimic)
+```bash
+python robolab/scripts/rsl_rl/play_bm.py --task=Atom01-BeyondMimic --num_envs=1
+```
+### Play(Parkour)
+```bash
+python robolab/scripts/rsl_rl/play_parkour.py --task=Atom01-Parkour-Play --num_envs=1
+```
+To export onnx model, please set `num_envs=1` and use `--exportonnx`
+```bash
+python robolab/scripts/rsl_rl/play_parkour.py --task=Atom01-Parkour-Play --num_envs=1 --exportonnx
+```
 
 ### Sim2Sim
 ```bash
@@ -86,3 +102,4 @@ This project repository builds upon the shoulders of giants.
 * [legged_gym](https://github.com/leggedrobotics/legged_gym)
 * [legged_lab](https://github.com/zitongbai/legged_lab)
 * [robot_lab](https://github.com/fan-ziqi/robot_lab)
+* [InstinctLab](https://github.com/project-instinct/InstinctLab)
