@@ -1,9 +1,9 @@
-# ATOM01-Train
+# roboparty_train
 
 [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
 [![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.3.2-silver)](https://isaac-sim.github.io/IsaacLab)
 [![RSL_RL](https://img.shields.io/badge/RSL_RL-3.3.0-silver)](https://github.com/leggedrobotics/rsl_rl)
-[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://docs.python.org/3/whatsnew/3.11.html)
 [![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/22.04/)
 [![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
 [![License](https://img.shields.io/badge/license-BSD--3-yellow.svg)](https://opensource.org/licenses/BSD-3-Clause)
@@ -13,45 +13,56 @@
 
 ## Overview
 
-This repository provides a workflow for training a legged robot using IsaacLab. It provides high transparency and low refactoring difficulty of the environment, and uses isaaclab components to simplify the workflow. The codebase is built on IsaacLab, supports Sim2Sim transfer to MuJoCo, and features a modular architecture for seamless customization and extension. 
+`roboparty_train` is the Roboparty training workspace for RPO locomotion policies. It keeps Roboparty task definitions, motion-retargeting tools, MuJoCo Sim2Sim scripts, and RSL-RL training entry points outside the upstream Isaac Lab tree.
 
-**Maintainer**: Zhihao Liu
-**Contact**: ZhihaoLiu_hit@163.com
+The repository is organized as a thin workspace with two Git submodules:
 
-**Key Features:**
+- `robolab`: Roboparty Isaac Lab extension, environments, scripts, and robot assets.
+- `rsl_rl`: Roboparty-compatible RSL-RL dependency snapshot.
 
-- `Easy to Reorganize` Provides a direct workflow, allowing for fine-grained definition of environment logic.
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that the development efforts remain self-contained.
-- `Long-term support` This repository will be updated with the updates of isaac sim and isaac lab, and will be supported for a long time.
+**Maintainer**: RoboParty
+**Support**: GitHub Issues
 
+## Features
 
+- RPO training environments built on Isaac Lab.
+- RSL-RL training, evaluation, and policy export entry points.
+- AMP, BeyondMimic, and Parkour workflows.
+- MuJoCo Sim2Sim scripts for policy transfer checks.
+- Motion retargeting utilities for datasets prepared with [GMR](https://github.com/Roboparty/GMR).
 
-## Installation
+## Requirements
 
-ATOM01-Train is built against the latest version of Isaacsim/IsaacLab. It is recommended to follow the latest updates of ATOM01-Train.
+- Python 3.11.
+- Isaac Sim 5.1.0 and Isaac Lab 2.3.2.
+- Ubuntu 22.04 x64 or Windows x64.
 
-- Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html). We recommend using the conda installation as it simplifies calling Python scripts from the terminal.
+Install Isaac Lab by following the [official installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html). Run the commands below in the Python environment used by Isaac Lab.
 
-- Clone this repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
+## Clone
+
+Clone this repository outside the Isaac Lab source tree. Use `--recursive` so that `robolab` and `rsl_rl` are populated immediately:
 
 ```bash
-git clone https://github.com/Roboparty/roboparty_train.git
+git clone --recursive https://github.com/Roboparty/roboparty_train.git
+cd roboparty_train
 ```
 
-- Using a python interpreter that has Isaac Lab installed, install the library
+If you already cloned the repository and `robolab` or `rsl_rl` is empty, initialize the submodules manually:
 
 ```bash
 cd roboparty_train
 git submodule update --init --recursive
-cd robolab
-pip install -e .
-cd ..
-cd rsl_rl
-pip install -e .
-cd ..
 ```
 
-- Verify that the extension is correctly installed by running the following command to print all the available environments in the extension:
+## Install
+
+```bash
+pip install -e ./robolab
+pip install -e ./rsl_rl
+```
+
+Verify that the extension is installed by listing the available environments:
 
 ```bash
 python robolab/scripts/tools/list_envs.py
@@ -60,46 +71,70 @@ python robolab/scripts/tools/list_envs.py
 ## Usage
 
 ### Train
+
 ```bash
 python robolab/scripts/rsl_rl/train.py --task=<ENV_NAME> --headless --logger=tensorboard --num_envs=8192
 ```
 
 ### Play
+
 ```bash
 python robolab/scripts/rsl_rl/play.py --task=<ENV_NAME> --num_envs=1
 ```
-### Play(AMP)
+
+### Play AMP
+
 ```bash
 python robolab/scripts/rsl_rl/play_amp.py --task=RPO-AMP-Play --num_envs=1
 ```
-### Play(Beyondmimic)
+
+### Play BeyondMimic
+
 ```bash
 python robolab/scripts/rsl_rl/play_bm.py --task=RPO-BeyondMimic --num_envs=1
 ```
-### Play(Parkour)
+
+### Play Parkour
+
 ```bash
 python robolab/scripts/rsl_rl/play_parkour.py --task=RPO-Parkour-Play --num_envs=1
 ```
-To export onnx model, please set `num_envs=1` and use `--exportonnx`
+
+To export an ONNX model, set `num_envs=1` and add `--exportonnx`:
+
 ```bash
 python robolab/scripts/rsl_rl/play_parkour.py --task=RPO-Parkour-Play --num_envs=1 --exportonnx
 ```
 
 ### Sim2Sim
+
 ```bash
 python robolab/scripts/mujoco/sim2sim_rpo.py --load_model "{exported/policy.pt model full path here}"
 ```
 
 ### Prepare Motion Data
-To obtain dataset for AMP and BeyondMimic, please visit [GMR](https://github.com/Roboparty/GMR).
 
-The joint order in the dataset obtained via GMR corresponds to the order in Robot URDF and XML, which differs from the one used in Isaac Lab. Therefore, we need to prepare a `.yaml` file which contains joint mapping information like the one showed in `scripts/tools/retarget/config/rpo.yaml`, and then reorder the joint sequence using `scripts/tools/retarget/dataset_retarget.py` before training.
+To prepare datasets for AMP and BeyondMimic, see [GMR](https://github.com/Roboparty/GMR).
+
+The joint order in datasets produced by GMR follows the robot URDF/XML order, which differs from the order used by Isaac Lab. Prepare a joint mapping file such as `robolab/scripts/tools/retarget/config/rpo.yaml`, then reorder the joint sequence before training:
+
+```bash
+python robolab/scripts/tools/retarget/dataset_retarget.py
+```
+
+## Troubleshooting
+
+- Empty `robolab` or `rsl_rl` directory: run `git submodule update --init --recursive`.
+- Missing Isaac Lab imports: activate the Python environment used by Isaac Lab before installing or running scripts.
+- Missing RPO task name: run `python robolab/scripts/tools/list_envs.py` and copy the exact task id.
 
 ## References and Thanks
-This project repository builds upon the shoulders of giants.
-* [IsaacLab](https://github.com/isaac-sim/IsaacLab)
-* [rsl_rl](https://github.com/leggedrobotics/rsl_rl)
-* [legged_gym](https://github.com/leggedrobotics/legged_gym)
-* [legged_lab](https://github.com/zitongbai/legged_lab)
-* [robot_lab](https://github.com/fan-ziqi/robot_lab)
-* [InstinctLab](https://github.com/project-instinct/InstinctLab)
+
+This project builds on the following open-source projects:
+
+- [IsaacLab](https://github.com/isaac-sim/IsaacLab)
+- [rsl_rl](https://github.com/leggedrobotics/rsl_rl)
+- [legged_gym](https://github.com/leggedrobotics/legged_gym)
+- [legged_lab](https://github.com/zitongbai/legged_lab)
+- [robot_lab](https://github.com/fan-ziqi/robot_lab)
+- [InstinctLab](https://github.com/project-instinct/InstinctLab)
