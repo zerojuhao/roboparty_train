@@ -38,6 +38,7 @@ class RoboPartyActuator(DelayedPDActuator):
         super().__init__(cfg, *args, **kwargs)
 
         self._joint_vel = torch.zeros_like(self.computed_effort)
+        self._rfi_noise = torch.zeros_like(self.computed_effort)
         self._keep_velocity = resolve_joint_parameter(
             cfg.keep_velocity, None, self.joint_names, self._num_envs, self._device
         )
@@ -69,11 +70,26 @@ class RoboPartyActuator(DelayedPDActuator):
     def rated_velocity(self) -> torch.Tensor:
         return self._rated_velocity
 
+    def reset(self, env_ids=None):
+        super().reset(env_ids)
+        if env_ids is None:
+            self._rfi_noise.zero_()
+        else:
+            self._rfi_noise[env_ids] = 0.0
+
     def compute(
         self, control_action: ArticulationActions, joint_pos: torch.Tensor, joint_vel: torch.Tensor
     ) -> ArticulationActions:
         self._joint_vel[:] = joint_vel
-        return super().compute(control_action, joint_pos, joint_vel)
+        control_action = super().compute(control_action, joint_pos, joint_vel)
+        if self.cfg.rfi_lim > 0.0:
+            self._rfi_noise[:] = (
+                2.0 * torch.rand_like(self._rfi_noise) - 1.0
+            ) * self.cfg.rfi_lim * self.effort_limit
+            self.computed_effort += self._rfi_noise
+            self.applied_effort = self._clip_effort(self.computed_effort)
+            control_action.joint_efforts = self.applied_effort
+        return control_action
 
     def _clip_effort(self, effort: torch.Tensor) -> torch.Tensor:
         joint_vel_abs = self._joint_vel.abs()
@@ -101,3 +117,6 @@ class RoboPartyActuatorCfg(DelayedPDActuatorCfg):
 
     rated_velocity: dict[str, float] | float = MISSING
     """Rated speed of the continuous operating point in rad/s."""
+
+    rfi_lim: float = 0.0
+    """Per-step random feed-forward torque as a fraction of effort limits."""

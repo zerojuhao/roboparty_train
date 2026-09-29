@@ -118,8 +118,8 @@ class UFOEventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 1.6),
-            "dynamic_friction_range": (0.3, 1.2),
+            "static_friction_range": (0.3, 1.7),
+            "dynamic_friction_range": (0.3, 1.7),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 64,
         },
@@ -129,49 +129,30 @@ class UFOEventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
-            "com_range": {"x": (-0.04, 0.04), "y": (-0.04, 0.04), "z": (-0.04, 0.04)},
+            "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.03, 0.03)},
         },
     )
     randomize_default_joint_pos = EventTerm(
         func=mdp.events.randomize_default_joint_pos,
-        mode="startup",
-        params={"offset_range": (-0.01, 0.01)},
-    )
-    add_base_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
-            "mass_distribution_params": (-2.0, 2.0),
-            "operation": "add",
-        },
+        mode="reset",
+        params={"offset_range": (-0.15, 0.15)},
     )
     scale_link_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=["left_.*_link", "right_.*_link"]),
-            "mass_distribution_params": (0.8, 1.2),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "mass_distribution_params": (0.9, 1.1),
             "operation": "scale",
         },
     )
     scale_actuator_gains = EventTerm(
         func=mdp.randomize_actuator_gains,
-        mode="startup",
+        mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-            "stiffness_distribution_params": (0.8, 1.2),
-            "damping_distribution_params": (0.8, 1.2),
-            "operation": "scale",
-        },
-    )
-    scale_joint_parameters = EventTerm(
-        func=mdp.randomize_joint_parameters,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-            "friction_distribution_params": (0.8, 1.2),
-            "armature_distribution_params": (0.8, 1.2),
+            "stiffness_distribution_params": (0.7, 1.3),
+            "damping_distribution_params": (0.7, 1.3),
             "operation": "scale",
         },
     )
@@ -183,10 +164,10 @@ class UFOEventCfg:
             "velocity_range": {
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),
-                "z": (-0.2, 0.2),
-                "roll": (-0.52, 0.52),
-                "pitch": (-0.52, 0.52),
-                "yaw": (-0.78, 0.78),
+                "z": (0.0, 0.0),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
             },
         },
     )
