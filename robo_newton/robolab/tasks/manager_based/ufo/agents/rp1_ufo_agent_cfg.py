@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from isaaclab.utils.configclass import configclass
 from isaaclab_rl.rsl_rl.rl_cfg import RslRlBaseRunnerCfg
@@ -49,6 +50,17 @@ AUX_REWARDS_SCALING = {
 
 
 @configclass
+class FbCprDiscriminatorCfg:
+    """Network and objective settings for the FB-CPR discriminator."""
+
+    hidden_dims: list[int] = [1024, 1024, 1024]
+    """Hidden layer widths, following the AMP discriminator config style."""
+
+    loss_type: Literal["bce", "gan", "lsgan", "wgan"] = "bce"
+    """Discriminator objective. H200's default is the stable BCE form."""
+
+
+@configclass
 class FbCprAlgorithmCfg:
     """Placeholder algorithm config for the unified entrypoints.
 
@@ -75,10 +87,18 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
 
     z_dim: int = 256
     norm_z: bool = True
-    # Value/policy network width. The trained 2048-wide run used only ~7-20%
-    # effective rank per layer, so the default is narrowed to 1024.
-    net_hidden_dim: int = 1024
+    # Network sizes are explicit so each branch can be tuned without changing
+    # the FB agent implementation.
+    actor_hidden_dim: int = 1024
+    actor_hidden_layers: int = 6
+    forward_hidden_dim: int = 1024
+    forward_hidden_layers: int = 6
+    critic_hidden_dim: int = 1024
+    critic_hidden_layers: int = 6
+    backward_hidden_dim: int = 256
+    backward_hidden_layers: int = 1
     net_embedding_layers: int = 2
+    discriminator: FbCprDiscriminatorCfg = FbCprDiscriminatorCfg()
     # Share one trunk between the discriminator and auxiliary critic heads.
     # Both losses are optimized together in one backward/optimizer step.
     shared_value_net: bool = True

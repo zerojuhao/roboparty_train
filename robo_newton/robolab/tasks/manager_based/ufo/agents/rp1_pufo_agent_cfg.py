@@ -5,6 +5,8 @@ from __future__ import annotations
 from isaaclab.utils.configclass import configclass
 from isaaclab_rl.rsl_rl.rl_cfg import RslRlBaseRunnerCfg
 
+from .rp1_ufo_agent_cfg import FbCprDiscriminatorCfg
+
 
 @configclass
 class PufoAlgorithmCfg:
@@ -21,7 +23,7 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     num_steps_per_env: int = 1
     max_iterations: int = 375000
     save_interval: int = 2000
-    seed: int = 52
+    seed: int = 42
 
     visual_enabled: bool = True
     depth_shape: tuple[int, int, int] = (8, 18, 32)
@@ -41,8 +43,16 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
 
     z_dim: int = 256
     norm_z: bool = True
-    net_hidden_dim: int = 1024
+    actor_hidden_dim: int = 1024
+    actor_hidden_layers: int = 6
+    forward_hidden_dim: int = 1024
+    forward_hidden_layers: int = 6
+    critic_hidden_dim: int = 1024
+    critic_hidden_layers: int = 6
+    backward_hidden_dim: int = 256
+    backward_hidden_layers: int = 1
     net_embedding_layers: int = 2
+    discriminator: FbCprDiscriminatorCfg = FbCprDiscriminatorCfg()
     critic_ensemble_members: int = 2
     shared_value_net: bool = True
     context_critic_hidden_dim: int = 1024

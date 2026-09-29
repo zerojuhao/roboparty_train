@@ -404,12 +404,19 @@ class VisualResidualActor(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, obs_dim, z_dim, hidden_dim=1024, hidden_layers=3):
+    def __init__(self, obs_dim, z_dim, hidden_dims=(1024, 1024, 1024)):
         super().__init__()
-        seq = [nn.Linear(obs_dim + z_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Tanh()]
-        for _ in range(hidden_layers - 1):
-            seq += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU()]
-        seq += [nn.Linear(hidden_dim, 1)]
+        hidden_dims = tuple(int(width) for width in hidden_dims)
+        if not hidden_dims or any(width <= 0 for width in hidden_dims):
+            raise ValueError(f"Discriminator hidden_dims must be positive, got {hidden_dims!r}.")
+        seq = [
+            nn.Linear(obs_dim + z_dim, hidden_dims[0]),
+            nn.LayerNorm(hidden_dims[0]),
+            nn.Tanh(),
+        ]
+        for input_dim, output_dim in zip(hidden_dims, hidden_dims[1:]):
+            seq += [nn.Linear(input_dim, output_dim), nn.ReLU()]
+        seq += [nn.Linear(hidden_dims[-1], 1)]
         self.trunk = nn.Sequential(*seq)
 
     def compute_logits(self, obs, z):

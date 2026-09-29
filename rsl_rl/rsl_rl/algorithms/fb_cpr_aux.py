@@ -79,7 +79,14 @@ class FbCprAuxAgent:
         self.full_obs_dim = sum(self.obs_dims[k] for k in self.full_keys)
         z_dim = cfg.z_dim
         self.z_dim = z_dim
-        self.hidden_dim = int(getattr(cfg, "net_hidden_dim", 1024))
+        self.actor_hidden_dim = int(getattr(cfg, "actor_hidden_dim", 1024))
+        self.actor_hidden_layers = int(getattr(cfg, "actor_hidden_layers", 6))
+        self.forward_hidden_dim = int(getattr(cfg, "forward_hidden_dim", 1024))
+        self.forward_hidden_layers = int(getattr(cfg, "forward_hidden_layers", 6))
+        self.critic_hidden_dim = int(getattr(cfg, "critic_hidden_dim", 1024))
+        self.critic_hidden_layers = int(getattr(cfg, "critic_hidden_layers", 6))
+        self.backward_hidden_dim = int(getattr(cfg, "backward_hidden_dim", 256))
+        self.backward_hidden_layers = int(getattr(cfg, "backward_hidden_layers", 1))
         self.embedding_layers = int(getattr(cfg, "net_embedding_layers", 2))
         self.shared_value_net = bool(getattr(cfg, "shared_value_net", False))
         # Preserve the original pessimistic value estimate when a task config
@@ -92,8 +99,8 @@ class FbCprAuxAgent:
                 self.actor_keys,
                 z_dim,
                 action_dim,
-                hidden_dim=self.hidden_dim,
-                hidden_layers=6,
+                hidden_dim=self.actor_hidden_dim,
+                hidden_layers=self.actor_hidden_layers,
                 embedding_layers=self.embedding_layers,
                 depth_shape=self.depth_shape,
                 estimate_velocity=bool(getattr(cfg, "estimated_velocity_enabled", True)),
@@ -101,28 +108,63 @@ class FbCprAuxAgent:
         else:
             self._actor = ResidualActor(
                 self.actor_obs_dim, z_dim, action_dim,
-                hidden_dim=self.hidden_dim, hidden_layers=6, embedding_layers=self.embedding_layers,
+                hidden_dim=self.actor_hidden_dim,
+                hidden_layers=self.actor_hidden_layers,
+                embedding_layers=self.embedding_layers,
             )
-        self._backward_map = BackwardMap(self.privileged_obs_dim, z_dim, hidden_dim=256, hidden_layers=1)
+        self._backward_map = BackwardMap(
+            self.privileged_obs_dim,
+            z_dim,
+            hidden_dim=self.backward_hidden_dim,
+            hidden_layers=self.backward_hidden_layers,
+        )
         self._forward_map = ResidualForwardMap(
             self.full_obs_dim, z_dim, action_dim,
-            hidden_dim=self.hidden_dim, hidden_layers=6, num_parallel=2,
+            hidden_dim=self.forward_hidden_dim,
+            hidden_layers=self.forward_hidden_layers,
+            num_parallel=2,
         )
         if self.shared_value_net:
             self._critic_shared = SharedCriticMap(
                 self.full_obs_dim, z_dim, action_dim,
-                hidden_dim=self.hidden_dim, hidden_layers=6, num_parallel=self.critic_members,
+                hidden_dim=self.critic_hidden_dim,
+                hidden_layers=self.critic_hidden_layers,
+                num_parallel=self.critic_members,
             )
         else:
             self._critic = ResidualForwardMap(
                 self.full_obs_dim, z_dim, action_dim,
-                hidden_dim=self.hidden_dim, hidden_layers=6, num_parallel=self.critic_members, output_dim=1,
+                hidden_dim=self.critic_hidden_dim,
+                hidden_layers=self.critic_hidden_layers,
+                num_parallel=self.critic_members,
+                output_dim=1,
             )
             self._aux_critic = ResidualForwardMap(
                 self.full_obs_dim, z_dim, action_dim,
-                hidden_dim=self.hidden_dim, hidden_layers=6, num_parallel=self.critic_members, output_dim=1,
+                hidden_dim=self.critic_hidden_dim,
+                hidden_layers=self.critic_hidden_layers,
+                num_parallel=self.critic_members,
+                output_dim=1,
             )
-        self._discriminator = Discriminator(self.privileged_obs_dim, z_dim, hidden_dim=1024, hidden_layers=3)
+        discriminator_cfg = getattr(cfg, "discriminator", None)
+        self.discriminator_loss = str(
+            getattr(discriminator_cfg, "loss_type", getattr(cfg, "discriminator_loss", "bce"))
+        ).lower()
+        if self.discriminator_loss not in {"bce", "gan", "lsgan", "wgan"}:
+            raise ValueError(
+                "discriminator loss must be one of 'bce', 'gan', 'lsgan', or 'wgan', "
+                f"got {self.discriminator_loss!r}."
+            )
+        discriminator_hidden_dims = getattr(
+            discriminator_cfg,
+            "hidden_dims",
+            getattr(cfg, "discriminator_hidden_dims", (1024, 1024, 1024)),
+        )
+        self._discriminator = Discriminator(
+            self.privileged_obs_dim,
+            z_dim,
+            hidden_dims=discriminator_hidden_dims,
+        )
 
         self._target_forward_map = copy.deepcopy(self._forward_map)
         self._target_backward_map = copy.deepcopy(self._backward_map)
@@ -560,9 +602,22 @@ class FbCprAuxAgent:
             unlabeled_logits = self._discriminator.compute_logits(obs=train_obs, z=train_z)
         expert_logits = expert_logits.float()
         unlabeled_logits = unlabeled_logits.float()
-        expert_loss = -F.logsigmoid(expert_logits)
-        unlabeled_loss = F.softplus(unlabeled_logits)
-        loss = torch.mean(expert_loss + unlabeled_loss)
+        if self.discriminator_loss == "bce":
+            expert_loss = -F.logsigmoid(expert_logits)
+            unlabeled_loss = F.softplus(unlabeled_logits)
+            loss = torch.mean(expert_loss + unlabeled_loss)
+        elif self.discriminator_loss == "gan":
+            expert_loss = F.softplus(-expert_logits)
+            unlabeled_loss = F.softplus(unlabeled_logits)
+            loss = 0.5 * (expert_loss.mean() + unlabeled_loss.mean())
+        elif self.discriminator_loss == "lsgan":
+            expert_loss = 0.5 * (expert_logits - 1.0).square()
+            unlabeled_loss = 0.5 * (unlabeled_logits + 1.0).square()
+            loss = expert_loss.mean() + unlabeled_loss.mean()
+        else:
+            expert_loss = -expert_logits
+            unlabeled_loss = unlabeled_logits
+            loss = expert_loss.mean() + unlabeled_loss.mean()
         if grad_penalty is not None and grad_penalty > 0:
             wgan_gp = self.gradient_penalty_wgan(expert_obs, expert_z, train_obs, train_z)
             loss = loss + grad_penalty * wgan_gp
