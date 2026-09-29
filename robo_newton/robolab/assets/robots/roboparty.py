@@ -258,7 +258,6 @@ RP1_24DOF_CFG = ArticulationCfg(
             },
             min_delay=0,
             max_delay=2,
-            rfi_lim=0.1,
             friction=0.1,
             dynamic_friction=0.1,
             viscous_friction={
@@ -301,6 +300,7 @@ RP1_UFO_CFG = RP1_24DOF_CFG.replace(
                 ".*elbow.*": 2.5,
                 ".*_wrist_joint": 1.5,
             },
+            rfi_lim=0.1,
         ),
     },
 )
