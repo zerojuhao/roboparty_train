@@ -23,8 +23,8 @@ newton_migration/*.pt
 *.pt
 
 # Datasets stay on the training host until the repository is ready for them.
-robolab/
-newton_migration/data
+/robolab/
+newton_migration/data/
 newton_migration/ufo_data/motions/
 
 # Archived source trees and old Git metadata

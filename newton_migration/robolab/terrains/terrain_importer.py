@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+import numpy as np
+import torch
+import trimesh
+from typing import TYPE_CHECKING
+
+import isaaclab.sim as sim_utils
+from isaaclab.terrains import SubTerrainBaseCfg, TerrainGenerator
+from isaaclab.terrains import TerrainImporter as TerrainImporterBase
+from isaaclab.utils.timer import Timer
+
+if TYPE_CHECKING:
+    from .terrain_importer_cfg import TerrainImporterCfg
+    from .virtual_obstacle import VirtualObstacleBase
+
+
+class TerrainImporter(TerrainImporterBase):
+    def __init__(self, cfg: TerrainImporterCfg):
+        self._virtual_obstacles = {}
+        for name, virtual_obstacle_cfg in cfg.virtual_obstacles.items():
+            if virtual_obstacle_cfg is None:
+                continue
+            virtual_obstacle = virtual_obstacle_cfg.class_type(virtual_obstacle_cfg)
+            self._virtual_obstacles[name] = virtual_obstacle
+
+        if cfg.terrain_type == "hacked_generator":
+            self._hacked_terrain_type = "hacked_generator"
+            cfg.terrain_type = "plane"
+            super().__init__(cfg)
+            return
+
+        if cfg.terrain_type == "generator":
+            # Keep terrain_generator reference (IsaacLab base discards it after import).
+            cfg.validate()
+            self.cfg = cfg
+            self.device = sim_utils.SimulationContext.instance().device  # type: ignore
+            self.terrain_prim_paths = list()
+            self.terrain_origins = None
+            self.env_origins = None
+            self._terrain_flat_patches = dict()
+            if self.cfg.terrain_generator is None:
+                raise ValueError("Input terrain type is 'generator' but no value provided for 'terrain_generator'.")
+            self.terrain_generator = self.cfg.terrain_generator.class_type(
+                cfg=self.cfg.terrain_generator, device=self.device
+            )
+            self.import_mesh("terrain", self.terrain_generator.terrain_mesh)
+            if self.cfg.use_terrain_origins:
+                self.configure_env_origins(self.terrain_generator.terrain_origins)
+            else:
+                self.configure_env_origins()
+            self._terrain_flat_patches = self.terrain_generator.flat_patches
+            self.set_debug_vis(self.cfg.debug_vis)
+            return
+
+        super().__init__(cfg)
+
+    @property
+    def virtual_obstacles(self) -> dict[str, VirtualObstacleBase]:
+        """Get the virtual obstacles representing the edges.
+        TODO: Make the returned value more general.
+        """
+        # still pointing the same VirtualObstacleBase objects but the dict is a copy.
+        return self._virtual_obstacles.copy()
+
+    @property
+    def subterrain_specific_cfgs(self) -> list[SubTerrainBaseCfg] | None:
+        """Get the specific configurations for all subterrains."""
+        # This is a placeholder. The actual implementation should return the specific configurations.
+        return (
+            self.terrain_generator.subterrain_specific_cfgs
+            if hasattr(self, "terrain_generator") and hasattr(self.terrain_generator, "subterrain_specific_cfgs")
+            else None
+        )
+
+    """
+    Operations - Import.
+    """
+
+    def import_mesh(self, name: str, mesh: trimesh.Trimesh):
+        """Import a mesh into the simulation.
+        NOTE: By designing this interface, IsaacLab's terrain importer calls import_mesh only once when startup.
+
+        Args:
+            name: The name of the mesh.
+            mesh: The trimesh object to import.
+        """
+        mesh.merge_vertices()
+        mesh.update_faces(mesh.unique_faces())  # remove duplicate faces
+        mesh.remove_unreferenced_vertices()
+        # Generate virtual obstacles based on the imported mesh.
+        # NOTE: generate virtual obstacle first because it might modify the mesh.
+        for name, virtual_obstacle in self._virtual_obstacles.items():
+            with Timer(f"Generate virtual obstacle {name}"):
+                virtual_obstacle.generate(mesh, device=self.device)
+
+        super().import_mesh(name, mesh)
+
+    def import_ground_plane(self, name: str, size: tuple[float, float] = (2.0e6, 2.0e6)):
+        """
+        ## NOTE
+        This is a hack to fit the self-defined tasks and guide the control flow to a self-defined implementation.
+        In this case, we won't need to change the code of IsaacLab.
+        """
+        if getattr(self, "_hacked_terrain_type", None) == "hacked_generator":
+            # check config is provided
+            if self.cfg.terrain_generator is None:
+                raise ValueError("Input terrain type is 'generator' but no value provided for 'terrain_generator'.")
+            # generate the terrain
+            self.terrain_generator = getattr(
+                self.cfg.terrain_generator,
+                "class_type",
+                TerrainGenerator,
+            )(cfg=self.cfg.terrain_generator, device=self.device)
+            self.import_mesh("terrain", self.terrain_generator.terrain_mesh)
+            # configure the terrain origins based on the terrain generator
+            self.configure_env_origins(self.terrain_generator.terrain_origins)
+            # refer to the flat patches
+            self._terrain_flat_patches = self.terrain_generator.flat_patches
+        else:
+            # Call the base class implementation.
+            super().import_ground_plane(name, size)
+
+    def set_debug_vis(self, debug_vis: bool) -> bool:
+        """Set the debug visualization flag.
+
+        Args:
+            vis: True to enable debug visualization, False to disable.
+        """
+        results = super().set_debug_vis(debug_vis)
+
+        for name, virtual_obstacle in self._virtual_obstacles.items():
+            if debug_vis:
+                virtual_obstacle.visualize()
+            else:
+                virtual_obstacle.disable_visualizer()
+
+        return results
+
+    def configure_env_origins(self, origins: np.ndarray | torch.Tensor | None = None):
+        """Configure the environment origins.
+
+        Args:
+            origins: The origins of the environments. Shape is (num_envs, 3).
+        """
+        if origins is None and getattr(self, "_hacked_terrain_type", None) == "hacked_generator":
+            # In case of None override, we don't need to do anything
+            pass
+        else:
+            return super().configure_env_origins(origins)
+
+    def _compute_env_origins_curriculum(self, num_envs: int, origins: torch.Tensor) -> torch.Tensor:
+        """Compute env origins; optionally allocate columns by sub-terrain proportion.
+
+        When ``terrain_generator.one_col_per_subterrain`` is True, environment counts follow
+        each sub-terrain's ``proportion``. Otherwise, environments are split uniformly across
+        columns (Isaac Lab default).
+        """
+        # extract number of rows and cols
+        num_rows, num_cols = origins.shape[:2]
+        # maximum initial level possible for the terrains
+        if self.cfg.max_init_terrain_level is None:
+            max_init_level = num_rows - 1
+        else:
+            max_init_level = min(self.cfg.max_init_terrain_level, num_rows - 1)
+        # store maximum terrain level possible
+        self.max_terrain_level = num_rows
+        # define all terrain levels and types available
+        self.terrain_levels = torch.randint(0, max_init_level + 1, (num_envs,), device=self.device)
+
+        terrain_gen_cfg = self.cfg.terrain_generator
+        if terrain_gen_cfg is not None and getattr(terrain_gen_cfg, "one_col_per_subterrain", False):
+            # one column per sub-terrain: allocate envs by normalized proportion
+            proportions = np.array(
+                [sub_cfg.proportion for sub_cfg in terrain_gen_cfg.sub_terrains.values()], dtype=np.float64
+            )
+            proportions /= np.sum(proportions)
+            raw = proportions * num_envs
+            counts = np.floor(raw).astype(np.int64)
+            remainder = num_envs - int(counts.sum())
+            if remainder > 0:
+                counts[np.argsort(-(raw - counts))[:remainder]] += 1
+            self.terrain_types = torch.repeat_interleave(
+                torch.arange(num_cols, device=self.device),
+                torch.as_tensor(counts, device=self.device, dtype=torch.long),
+            )
+        else:
+            self.terrain_types = torch.div(
+                torch.arange(num_envs, device=self.device), (num_envs / num_cols), rounding_mode="floor"
+            ).to(torch.long)
+
+        # create tensor based on number of environments
+        env_origins = torch.zeros(num_envs, 3, device=self.device)
+        env_origins[:] = origins[self.terrain_levels, self.terrain_types]
+        return env_origins
