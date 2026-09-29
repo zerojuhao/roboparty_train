@@ -35,6 +35,8 @@ class RoboPartyActuator(DelayedPDActuator):
             cfg.effort_limit = cfg.effort_limit_sim
         if cfg.velocity_limit is None:
             cfg.velocity_limit = cfg.velocity_limit_sim
+        if not 0.0 <= cfg.rfi_lim <= 1.0:
+            raise ValueError(f"RoboPartyActuator rfi_lim must be in [0, 1], got {cfg.rfi_lim}.")
         super().__init__(cfg, *args, **kwargs)
 
         self._joint_vel = torch.zeros_like(self.computed_effort)
