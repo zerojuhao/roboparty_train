@@ -128,8 +128,7 @@ class AuxRewardTests(unittest.TestCase):
         torch.testing.assert_close(no_contact, torch.zeros_like(no_contact))
 
         env.common_step_counter += 1
-        weight = robot.body_mass.sum(dim=-1)
-        env.scene["contact_forces"].data.net_normal_forces_w[:, :2, 2] = weight.unsqueeze(-1) * 0.1
+        env.scene["contact_forces"].data.net_normal_forces_w[:, :2, 2] = 2.0
         loaded_contact = REWARDS.compute_aux_rewards(env)["penalty_slippage"]
         self.assertTrue(torch.all(loaded_contact > 0))
 

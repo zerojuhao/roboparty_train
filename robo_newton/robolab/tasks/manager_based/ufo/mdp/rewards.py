@@ -123,14 +123,14 @@ def _tangential_contact_speed(
     contact_force: torch.Tensor,
     body_velocity: torch.Tensor,
     robot_weight: torch.Tensor,
+    force_threshold: float = 1.0,
 ) -> torch.Tensor:
-    """Match H200's loaded tangential foot-speed penalty."""
-    weight = robot_weight.reshape(-1, 1).clamp_min(1.0e-6)
+    """Penalize foot velocity tangent to a currently loaded contact."""
     force_norm = torch.linalg.vector_norm(contact_force, dim=-1)
     force_direction = contact_force / force_norm.unsqueeze(-1).clamp_min(1.0e-6)
     normal_velocity = (body_velocity * force_direction).sum(dim=-1, keepdim=True)
     tangent_velocity = body_velocity - normal_velocity * force_direction
-    loaded = force_norm / weight > 0.05
+    loaded = force_norm > force_threshold
     return (torch.linalg.vector_norm(tangent_velocity, dim=-1) * loaded).sum(dim=1)
 
 
