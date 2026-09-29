@@ -104,20 +104,12 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     eval_num_motions: int = 0
     prioritization: bool = False
     aux_rewards: list[str] = [
-        "penalty_torques",
         "penalty_action_rate",
         "limits_dof_pos",
-        "height_gated_undesired_contacts",
         "penalty_slippage",
-        "heading_tracking",
-        "velocity_tracking",
     ]
     aux_rewards_scaling: dict[str, float] = {
-        "penalty_torques": 0.0,
         "penalty_action_rate": -0.1,
         "limits_dof_pos": -10.0,
-        "height_gated_undesired_contacts": -1.0,
         "penalty_slippage": -2.0,
-        "heading_tracking": -1.0,
-        "velocity_tracking": -1.0,
     }
