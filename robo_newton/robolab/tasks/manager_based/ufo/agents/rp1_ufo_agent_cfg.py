@@ -119,7 +119,7 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     critic_pessimism_penalty: float = 0.5
     aux_critic_pessimism_penalty: float = 0.5
     reg_coeff: float = 0.01
-    reg_coeff_aux: float = 0.03
+    reg_coeff_aux: float = 0.02
     scale_reg: bool = True
     ortho_coef: float = 100.0
     stddev_clip: float = 0.3
