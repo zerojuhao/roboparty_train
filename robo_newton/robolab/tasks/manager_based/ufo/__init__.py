@@ -14,3 +14,13 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rp1_ufo_agent_cfg:RP1UFORunnerCfg",
     },
 )
+
+gym.register(
+    id="RP1-PUFO",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.pufo_env_cfg:RP1PUFOEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rp1_pufo_agent_cfg:RP1PUFORunnerCfg",
+    },
+)

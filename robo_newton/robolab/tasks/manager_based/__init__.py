@@ -36,4 +36,3 @@ Manager-based tasks.
 from .amp import *
 from .beyondmimic import *
 from .parkour import *
-from .pufo import *

@@ -10,7 +10,15 @@ from isaaclab.envs.mdp.observations import base_ang_vel, joint_pos_rel, joint_ve
 
 from .commands import UFOMotionCommand, UFOMotionCommandCfg
 from .observations import local_self_obs
-from . import events, observations, rewards, terminations
+from .pufo_observations import (
+    depth_image as pufo_depth_image,
+    heading_context as pufo_heading_context,
+    local_self_obs as pufo_local_self_obs,
+    terrain_priv as pufo_terrain_priv,
+    velocity_command as pufo_velocity_command,
+    velocity_target_yaw as pufo_velocity_target_yaw,
+)
+from . import events, observations, pufo_rewards, rewards, terminations
 
 __all__ = [
     "JointPositionActionCfg",
@@ -23,10 +31,17 @@ __all__ = [
     "randomize_rigid_body_com",
     "randomize_rigid_body_mass",
     "randomize_rigid_body_material",
+    "pufo_depth_image",
+    "pufo_heading_context",
+    "pufo_local_self_obs",
+    "pufo_terrain_priv",
+    "pufo_velocity_command",
+    "pufo_velocity_target_yaw",
     "UFOMotionCommand",
     "UFOMotionCommandCfg",
     "events",
     "observations",
+    "pufo_rewards",
     "rewards",
     "terminations",
 ]

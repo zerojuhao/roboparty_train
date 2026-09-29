@@ -323,7 +323,7 @@ class FbCprRunner:
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
         if self.visual_enabled:
-            from robolab.tasks.manager_based.pufo.mdp.rewards import compute_aux_rewards, initialize_aux_rewards
+            from robolab.tasks.manager_based.ufo.mdp.pufo_rewards import compute_aux_rewards, initialize_aux_rewards
         else:
             from robolab.tasks.manager_based.ufo.mdp.rewards import compute_aux_rewards, initialize_aux_rewards
 
