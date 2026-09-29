@@ -2,9 +2,9 @@
 
 The task code runs on Isaac Lab 3.0 with Newton/MJWarp by default. The Isaac Lab SDK is `/home/zym/roboparty_train/IsaacLab-3.0` on `4090-48-2`. It is pinned to commit `4392f7ed1090ae7d5acaed218f136d353e80d299` on the `release/3.0.0` branch, matching `4090-48-amdin:/home/amdin/Luo1imasi/demo/IsaacLab`; this is a branch snapshot, not a tagged 3.0 GA release. Training uses the Conda environment `isaaclab_zym`, with Newton 1.6.0, MJWarp 3.12.0, Warp 1.17.0, Torch 2.11.0+cu128, and RSL-RL 5.5.1. Entering `/home/zym/roboparty_train` automatically activates this environment in an interactive Bash shell.
 
-The repository owns the dataset directory directly at `/home/zym/roboparty_train/data`; it is a real directory, not a symlink. Previous legacy source trees are archived under `archives/`; the root-level `robolab`, `rsl_rl`, and `scripts` directories are the active code.
+The Newton project lives under `/home/zym/roboparty_train/robo_newton`, following the RoboLab layout. Its `data` directory is a real directory, not a symlink. Previous legacy source trees are archived under `archives/`; the repository-level `rsl_rl` and `ufo_data` directories remain shared local dependencies and assets.
 
-Run from `/home/zym/roboparty_train`:
+Run from `/home/zym/roboparty_train/robo_newton`:
 
 ```bash
 source /data/conda/etc/profile.d/conda.sh

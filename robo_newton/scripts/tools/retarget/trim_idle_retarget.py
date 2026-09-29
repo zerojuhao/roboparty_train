@@ -11,9 +11,9 @@ Output pkls match rp1_24dof_lab: fps, root_pos, root_rot (wxyz), dof_pos (lab
 order), loop_mode, key_body_pos.
 
 Example:
-    python robolab/scripts/tools/retarget/trim_idle_retarget.py \
-        --input_dir robolab/data/motions/rp1_sim2sim_executed \
-        --output_dir robolab/data/motions/rp1_sim2sim_executed_lab \
+    python scripts/tools/retarget/trim_idle_retarget.py \
+        --input_dir data/motions/rp1_sim2sim_executed \
+        --output_dir data/motions/rp1_sim2sim_executed_lab \
         --headless --device cuda:0
 """
 
@@ -33,19 +33,19 @@ parser.add_argument("--robot", type=str, default="rp1_24dof", choices=["rpo", "r
 parser.add_argument(
     "--input_dir",
     type=str,
-    default="robolab/data/motions/rp1_sim2sim_executed",
+    default="data/motions/rp1_sim2sim_executed",
     help="Directory of clip folders, each containing executed.csv.",
 )
 parser.add_argument(
     "--output_dir",
     type=str,
-    default="robolab/data/motions/rp1_sim2sim_executed_lab",
+    default="data/motions/rp1_sim2sim_executed_lab",
     help="Directory for converted .pkl files (same layout as rp1_24dof_lab, but a separate folder).",
 )
 parser.add_argument(
     "--config_file",
     type=str,
-    default="robolab/scripts/tools/retarget/config/rp1_24dof.yaml",
+    default="scripts/tools/retarget/config/rp1_24dof.yaml",
 )
 parser.add_argument("--loop", type=str, choices=["wrap", "clamp"], default="clamp")
 parser.add_argument("--csv_fps", type=float, default=50.0, help="Fallback FPS if CSV has no sample_rate comment.")

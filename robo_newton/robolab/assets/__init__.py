@@ -31,7 +31,8 @@
 
 import os
 
-# Conveniences to other module directories via relative paths
+# Conveniences to other module directories via project-relative paths.
 ISAAC_ASSET_DIR = os.path.abspath(os.path.dirname(__file__))
-ISAAC_DATA_DIR = os.path.join(os.path.join(os.path.dirname(__file__), "../../data"))
-UFO_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../ufo_data"))
+ROBO_NEWTON_DIR = os.path.abspath(os.path.join(ISAAC_ASSET_DIR, "../.."))
+ISAAC_DATA_DIR = os.path.join(ROBO_NEWTON_DIR, "data")
+UFO_DATA_DIR = os.path.abspath(os.path.join(ROBO_NEWTON_DIR, "..", "ufo_data"))

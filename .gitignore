@@ -23,8 +23,11 @@ IsaacLab-3.0/
 *.pt
 
 # Datasets stay on the training host until the repository is ready for them.
-/data/
+/robo_newton/data/
 /ufo_data/motions/
+
+# Local package metadata.
+/robo_newton/*.egg-info/
 
 # Archived source trees and old Git metadata
 archives/

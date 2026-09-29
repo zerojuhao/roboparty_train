@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(description="Screenshot the 45x60 high-platform
 parser.add_argument(
     "--output_file",
     type=str,
-    default="robolab/data/motions/rp1_sim2sim_executed_lab/high_platforms_45x60.png",
+    default=str(Path(__file__).resolve().parents[2] / "data/motions/rp1_sim2sim_executed_lab/high_platforms_45x60.png"),
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()

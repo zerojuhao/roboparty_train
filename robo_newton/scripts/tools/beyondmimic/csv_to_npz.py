@@ -41,6 +41,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+from pathlib import Path
 import numpy as np
 
 from isaaclab.app import AppLauncher
@@ -48,7 +49,7 @@ from isaaclab.app import AppLauncher
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Replay motion from csv file and output to npz file.")
 parser.add_argument("--input_file", "-f", type=str, 
-                    default="robolab/data/motions/rpo_bm/getup.csv", 
+                    default=str(Path(__file__).resolve().parents[3] / "data/motions/rpo_bm/getup.csv"), 
                     help="The path to the input motion csv file.")
 parser.add_argument("--input_fps", type=int, default=30, help="The fps of the input motion.")
 parser.add_argument(

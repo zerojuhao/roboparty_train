@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import torch
 from tensordict import TensorDict
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rsl_rl"))
+_project_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(_project_root.parent / "rsl_rl"))
 
 from rsl_rl.models import ParkourModel
 from rsl_rl.algorithms.ppo_amp import PPOAMP

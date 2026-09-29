@@ -54,7 +54,7 @@ LAB_DOF = [
     "right_wrist_joint",
 ]
 
-REPO = Path("/home/zym/roboparty_train/robolab")
+REPO = Path(__file__).resolve().parents[3]
 SRC_DIRS = [
     REPO / "data/motions/rp1_24dof_lab",
     REPO / "data/motions/stairs_flat_rp1_24dof_120fps_lab",

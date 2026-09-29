@@ -68,20 +68,20 @@ parser.add_argument(
 parser.add_argument(
     "--input_dir",
     type=str,
-    default="rp1_getup_gmr",
-    help="Directory containing input GMR .pkl files (default: robolab/data/motions/<robot>_gmr)",
+    default=None,
+    help="Directory containing input GMR .pkl files (default: data/motions/<robot>_gmr)",
 )
 parser.add_argument(
     "--output_dir",
     type=str,
-    default="rp1_getup_lab",
-    help="Directory to write converted .pkl files (default: robolab/data/motions/<robot>_lab)",
+    default=None,
+    help="Directory to write converted .pkl files (default: data/motions/<robot>_lab)",
 )
 parser.add_argument(
     "--config_file",
     type=str,
-    default="robolab/scripts/tools/retarget/config/rp1_24dof.yaml",
-    help="Path to YAML config (default: robolab/scripts/tools/retarget/config/<robot>.yaml)",
+    default=None,
+    help="Path to YAML config (default: scripts/tools/retarget/config/<robot>.yaml)",
 )
 parser.add_argument(
     "--loop",
@@ -100,12 +100,13 @@ parser.add_argument(
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
+_project_root = Path(__file__).resolve().parents[3]
 if args_cli.input_dir is None:
-    args_cli.input_dir = f"robolab/data/motions/{args_cli.robot}_gmr"
+    args_cli.input_dir = str(_project_root / "data" / "motions" / f"{args_cli.robot}_gmr")
 if args_cli.output_dir is None:
-    args_cli.output_dir = f"robolab/data/motions/{args_cli.robot}_lab"
+    args_cli.output_dir = str(_project_root / "data" / "motions" / f"{args_cli.robot}_lab")
 if args_cli.config_file is None:
-    args_cli.config_file = f"robolab/scripts/tools/retarget/config/{args_cli.robot}.yaml"
+    args_cli.config_file = str(_project_root / "scripts" / "tools" / "retarget" / "config" / f"{args_cli.robot}.yaml")
 
 """Launch Omniverse App"""
 app_launcher = AppLauncher(args_cli)

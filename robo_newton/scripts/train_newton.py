@@ -14,7 +14,9 @@ wp.config.enable_backward = False
 _physx_schema = Path(ovphysx.__file__).parent / "plugins" / "usd" / "PhysxSchema" / "resources"
 Plug.Registry().RegisterPlugins(str(_physx_schema / "plugInfo.json"))
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rsl_rl"))
+_project_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(_project_root.parent / "rsl_rl"))
 
 import robolab.tasks  # noqa: F401, E402
 from isaaclab_rl.entrypoints import run_train_cli  # noqa: E402
