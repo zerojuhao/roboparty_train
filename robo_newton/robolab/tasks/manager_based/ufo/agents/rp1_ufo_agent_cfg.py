@@ -98,7 +98,10 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     backward_hidden_dim: int = 256
     backward_hidden_layers: int = 1
     net_embedding_layers: int = 2
-    discriminator: FbCprDiscriminatorCfg = FbCprDiscriminatorCfg()
+    discriminator: FbCprDiscriminatorCfg = FbCprDiscriminatorCfg(
+        hidden_dims=[1024, 1024, 1024],
+        loss_type="bce",
+    )
     # Share one trunk between the discriminator and auxiliary critic heads.
     # Both losses are optimized together in one backward/optimizer step.
     shared_value_net: bool = True
