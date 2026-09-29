@@ -74,7 +74,7 @@ def ufo_obs_dict(obs_buf: dict, history: "HistoryHandler", with_history: bool = 
 
 
 def pufo_obs_dict(obs_buf: dict, history: "HistoryHandler", with_history: bool = True) -> dict:
-    """Build the H200 PUFO contract without importing any parkour code."""
+    """Build the independent H200 PUFO observation contract."""
     obs = ufo_obs_dict(obs_buf, history, with_history)
     obs["depth_image"] = obs_buf["visual"]
     obs["heading"] = obs_buf["heading"]
