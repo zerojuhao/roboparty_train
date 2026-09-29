@@ -276,6 +276,133 @@ class ResidualActor(nn.Module):
         return TruncatedNormal(mu, std)
 
 
+class _FixedAdaptiveAvgPool2x4(nn.Module):
+    """Static pooling used by the fixed-shape PUFO depth encoder."""
+
+    def __init__(self, height: int, width: int):
+        super().__init__()
+        self.height = height
+        self.width = width
+
+    def forward(self, x):
+        if tuple(x.shape[-2:]) != (self.height, self.width):
+            raise ValueError(f"Expected feature map {(self.height, self.width)}, got {tuple(x.shape[-2:])}")
+        rows = torch.stack(
+            tuple(
+                x[..., i * self.height // 2 : ((i + 1) * self.height + 1) // 2, :].mean(dim=-2)
+                for i in range(2)
+            ),
+            dim=-2,
+        )
+        return torch.stack(
+            tuple(
+                rows[..., i * self.width // 4 : ((i + 1) * self.width + 3) // 4].mean(dim=-1)
+                for i in range(4)
+            ),
+            dim=-1,
+        )
+
+
+class DepthEncoder(nn.Module):
+    """Encode eight temporal depth frames into one deployable latent."""
+
+    def __init__(self, channels=8, height=18, width=32, latent_dim=256):
+        super().__init__()
+        self.channels = int(channels)
+        self.height = int(height)
+        self.width = int(width)
+        feature_height = ((height + 1) // 2 + 1) // 2
+        feature_width = ((width + 1) // 2 + 1) // 2
+        self.frame_cnn = nn.Sequential(
+            nn.Conv2d(1, 16, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, 3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            nn.ReLU(),
+            _FixedAdaptiveAvgPool2x4(feature_height, feature_width),
+            nn.Flatten(),
+        )
+        self.frame_projection = nn.Sequential(nn.Linear(64 * 2 * 4, 256), nn.ReLU())
+        self.gru = nn.GRU(256, latent_dim, batch_first=True)
+
+    def forward(self, depth):
+        expected = (self.channels, self.height, self.width)
+        if depth.ndim != 4 or tuple(depth.shape[1:]) != expected:
+            raise ValueError(
+                f"Expected depth [B, {expected[0]}, {expected[1]}, {expected[2]}], got {tuple(depth.shape)}"
+            )
+        depth = depth.float()
+        if depth.max().detach() > 1.0:
+            depth = depth / 255.0
+        batch = depth.shape[0]
+        features = self.frame_projection(
+            self.frame_cnn(depth.reshape(batch * self.channels, 1, self.height, self.width))
+        )
+        _, hidden = self.gru(features.reshape(batch, self.channels, -1))
+        return hidden[-1]
+
+
+class VisualResidualActor(nn.Module):
+    """PUFO actor: proprioception, context and temporal depth."""
+
+    def __init__(
+        self,
+        obs_dims,
+        obs_keys,
+        z_dim,
+        action_dim,
+        hidden_dim=2048,
+        hidden_layers=6,
+        embedding_layers=2,
+        depth_shape=(8, 18, 32),
+        estimate_velocity=True,
+    ):
+        super().__init__()
+        self.obs_keys = tuple(obs_keys)
+        self.depth_key = "depth_image"
+        self.depth_encoder = DepthEncoder(*depth_shape, latent_dim=256)
+        state_dim = sum(obs_dims[key] for key in self.obs_keys)
+        estimator_state_dim = sum(obs_dims[key] for key in ("state", "last_action", "history_actor"))
+        self.estimate_velocity = bool(estimate_velocity)
+        if self.estimate_velocity:
+            self.velocity_estimator = nn.Sequential(
+                nn.Linear(estimator_state_dim + 256, 512),
+                nn.ELU(),
+                nn.Linear(512, 256),
+                nn.ELU(),
+                nn.Linear(256, 3),
+            )
+            state_dim += 3
+        self.embed_z = residual_embedding(state_dim + z_dim, hidden_dim, embedding_layers)
+        self.embed_s = residual_embedding(state_dim, hidden_dim, embedding_layers)
+        self.fusion = Block(hidden_dim + 256, hidden_dim, True)
+        self.policy = nn.Sequential(
+            *[ResidualBlock(hidden_dim) for _ in range(hidden_layers)],
+            Block(hidden_dim, action_dim, False),
+        )
+
+    def forward(self, obs, z, std):
+        state = torch.cat([obs[key] for key in self.obs_keys], dim=-1)
+        depth_latent = self.depth_encoder(obs[self.depth_key])
+        velocity_estimate = None
+        if self.estimate_velocity:
+            estimator_state = torch.cat(
+                [obs[key] for key in ("state", "last_action", "history_actor")], dim=-1
+            )
+            velocity_estimate = self.velocity_estimator(torch.cat([estimator_state, depth_latent], dim=-1))
+            state = torch.cat([state, velocity_estimate.detach()], dim=-1)
+        z_embedding = self.embed_z(torch.cat([state, z], dim=-1))
+        state_embedding = self.embed_s(state)
+        fused = self.fusion(torch.cat([state_embedding, z_embedding, depth_latent], dim=-1))
+        mean = torch.tanh(self.policy(fused))
+        dist = TruncatedNormal(mean, torch.ones_like(mean) * std)
+        if velocity_estimate is not None:
+            dist.velocity_estimate = velocity_estimate
+        return dist
+
+
+
 class Discriminator(nn.Module):
     def __init__(self, obs_dim, z_dim, hidden_dim=1024, hidden_layers=3):
         super().__init__()

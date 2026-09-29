@@ -10,5 +10,6 @@ from .fb_cpr_aux import FbCprAuxAgent
 from .multi_reward_ppo_amp import MultiRewardPPOAMP
 from .ppo import PPO
 from .ppo_amp import PPOAMP
+from .pufo import PufoAgent
 
-__all__ = ["PPO", "PPOAMP", "MultiRewardPPOAMP", "Distillation", "FbCprAuxAgent"]
+__all__ = ["PPO", "PPOAMP", "MultiRewardPPOAMP", "Distillation", "FbCprAuxAgent", "PufoAgent"]

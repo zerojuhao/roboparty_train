@@ -25,6 +25,7 @@ from .fb_networks import (
     EMA,
     ObsNormalizer,
     ResidualActor,
+    VisualResidualActor,
     ResidualForwardMap,
     SharedCriticMap,
     soft_update_params,
@@ -67,10 +68,15 @@ class FbCprAuxAgent:
             bool(getattr(cfg, "use_fused_adam", False)) and torch.device(device).type == "cuda"
         )
         self.action_dim = action_dim
-        self.obs_dims = {k: obs_dims[k] for k in OBS_ORDER if k in obs_dims}
-        self.actor_obs_dim = sum(self.obs_dims[k] for k in ACTOR_KEYS if k in self.obs_dims)
-        self.privileged_obs_dim = sum(self.obs_dims[k] for k in PRIVILEGED_KEYS)
-        self.full_obs_dim = sum(self.obs_dims.values())
+        self.obs_dims = {k: obs_dims[k] for k in obs_dims if k != "depth_image"}
+        self.actor_keys = tuple(getattr(cfg, "actor_obs_keys", ACTOR_KEYS))
+        self.full_keys = tuple(getattr(cfg, "full_obs_keys", FULL_KEYS))
+        self.privileged_keys = tuple(getattr(cfg, "privileged_obs_keys", PRIVILEGED_KEYS))
+        self.visual_enabled = bool(getattr(cfg, "visual_enabled", False))
+        self.depth_shape = tuple(getattr(cfg, "depth_shape", (8, 18, 32)))
+        self.actor_obs_dim = sum(self.obs_dims[k] for k in self.actor_keys)
+        self.privileged_obs_dim = sum(self.obs_dims[k] for k in self.privileged_keys)
+        self.full_obs_dim = sum(self.obs_dims[k] for k in self.full_keys)
         z_dim = cfg.z_dim
         self.z_dim = z_dim
         self.hidden_dim = int(getattr(cfg, "net_hidden_dim", 1024))
@@ -80,10 +86,23 @@ class FbCprAuxAgent:
         # does not explicitly choose an ensemble size.
         self.critic_members = int(getattr(cfg, "critic_ensemble_members", 2))
 
-        self._actor = ResidualActor(
-            self.actor_obs_dim, z_dim, action_dim,
-            hidden_dim=self.hidden_dim, hidden_layers=6, embedding_layers=self.embedding_layers,
-        )
+        if self.visual_enabled:
+            self._actor = VisualResidualActor(
+                self.obs_dims,
+                self.actor_keys,
+                z_dim,
+                action_dim,
+                hidden_dim=self.hidden_dim,
+                hidden_layers=6,
+                embedding_layers=self.embedding_layers,
+                depth_shape=self.depth_shape,
+                estimate_velocity=bool(getattr(cfg, "estimated_velocity_enabled", True)),
+            )
+        else:
+            self._actor = ResidualActor(
+                self.actor_obs_dim, z_dim, action_dim,
+                hidden_dim=self.hidden_dim, hidden_layers=6, embedding_layers=self.embedding_layers,
+            )
         self._backward_map = BackwardMap(self.privileged_obs_dim, z_dim, hidden_dim=256, hidden_layers=1)
         self._forward_map = ResidualForwardMap(
             self.full_obs_dim, z_dim, action_dim,
@@ -223,29 +242,49 @@ class FbCprAuxAgent:
     # --------------------------------------------------------------- inputs
 
     def _parts(self, obs):
-        return {k: obs[k] for k in self.obs_dims if k in obs}
+        parts = {k: obs[k] for k in self.obs_dims if k in obs}
+        if self.visual_enabled and "depth_image" in obs:
+            parts["depth_image"] = obs["depth_image"]
+        return parts
 
     def _norm_parts(self, obs):
         with torch.no_grad():
-            return self._obs_normalizer.normalize_dict(self._parts(obs))
+            parts = self._obs_normalizer.normalize_dict(self._parts(obs))
+        if self.visual_enabled and "depth_image" in obs:
+            parts["depth_image"] = obs["depth_image"]
+        return parts
+
+    def _actor_input(self, parts):
+        if self.visual_enabled:
+            keys = [*self.actor_keys, "depth_image"]
+            if "velocity_target_yaw" in parts:
+                keys.append("velocity_target_yaw")
+            return {key: parts[key] for key in keys}
+        return torch.cat([parts[key] for key in self.actor_keys], dim=-1)
+
+    def _full_input(self, parts):
+        return torch.cat([parts[key] for key in self.full_keys], dim=-1)
+
+    def _privileged_input(self, parts):
+        return torch.cat([parts[key] for key in self.privileged_keys], dim=-1)
+
+    def _actor_forward(self, parts, z):
+        return self._actor(self._actor_input(parts), z, self.cfg.actor_std)
 
     def _actor_in(self, obs):
-        p = self._norm_parts(obs)
-        return torch.cat([p[k] for k in ACTOR_KEYS if k in p], dim=-1)
+        return self._actor_input(self._norm_parts(obs))
 
     def _full_in(self, obs):
-        p = self._norm_parts(obs)
-        return torch.cat([p[k] for k in FULL_KEYS if k in p], dim=-1)
+        return self._full_input(self._norm_parts(obs))
 
     def _b_in(self, obs):
-        p = self._norm_parts(obs)
-        return torch.cat([p[k] for k in PRIVILEGED_KEYS], dim=-1)
+        return self._privileged_input(self._norm_parts(obs))
 
     # --------------------------------------------------------------- acting
 
     @torch.no_grad()
     def act(self, obs, z, mean=False):
-        dist = self._actor(self._actor_in(obs), z, self.cfg.actor_std)
+        dist = self._actor_forward(self._norm_parts(obs), z)
         if mean:
             return dist.mean
         return dist.sample()
@@ -496,20 +535,18 @@ class FbCprAuxAgent:
                         buffer.div_(world_size)
 
     def _b_in_from_parts(self, p):
-        return torch.cat([p[k] for k in PRIVILEGED_KEYS], dim=-1)
+        return self._privileged_input(p)
 
     def _full_in_from_parts(self, p):
-        return torch.cat([p[k] for k in FULL_KEYS if k in p], dim=-1)
+        return self._full_input(p)
 
     def _actor_in_from_parts(self, p):
-        return torch.cat([p[k] for k in ACTOR_KEYS if k in p], dim=-1)
+        return self._actor_input(p)
 
     def _sample_target_actions(self, next_parts, z, count):
         with torch.no_grad():
             with self._autocast_context():
-                distribution = self._actor(
-                    self._actor_in_from_parts(next_parts), z, self.cfg.actor_std
-                )
+                distribution = self._actor_forward(next_parts, z)
                 actions = tuple(
                     distribution.sample(clip=self.cfg.stddev_clip) for _ in range(count)
                 )
@@ -735,16 +772,18 @@ class FbCprAuxAgent:
         cfg = self.cfg
         self.actor_optimizer.zero_grad(set_to_none=True)
         with self._autocast_context():
-            action = self._actor(actor_obs, z, cfg.actor_std).sample(clip=cfg.stddev_clip)
+            action_dist = self._actor_forward(actor_obs, z)
+            action = action_dist.sample(clip=cfg.stddev_clip)
         action = action.float()
 
         if self.shared_value_net:
-            frozen_modules = (self._critic_shared, self._forward_map)
+            frozen_modules = [self._critic_shared, self._forward_map]
         else:
-            frozen_modules = (self._critic, self._aux_critic, self._forward_map)
-        frozen_params = [
-            p for module in frozen_modules for p in module.parameters()
-        ]
+            frozen_modules = [self._critic, self._aux_critic, self._forward_map]
+        for name in ("_heading_critic", "_velocity_critic"):
+            if hasattr(self, name):
+                frozen_modules.append(getattr(self, name))
+        frozen_params = [p for module in frozen_modules for p in module.parameters()]
         requires_grad = [p.requires_grad for p in frozen_params]
         for param in frozen_params:
             param.requires_grad_(False)
@@ -762,6 +801,16 @@ class FbCprAuxAgent:
             qs_aux = qs_aux.float()
             _, _, q_aux = self._targets_uncertainty(qs_aux, cfg.actor_pessimism_penalty)
 
+            q_heading = torch.zeros_like(q_aux)
+            if hasattr(self, "_heading_critic"):
+                qs_heading = self._heading_critic(full_obs, z, action).float()
+                _, _, q_heading = self._targets_uncertainty(qs_heading, cfg.actor_pessimism_penalty)
+
+            q_velocity = torch.zeros_like(q_heading)
+            if hasattr(self, "_velocity_critic"):
+                qs_velocity = self._velocity_critic(full_obs, z, action).float()
+                _, _, q_velocity = self._targets_uncertainty(qs_velocity, cfg.actor_pessimism_penalty)
+
             fs = fs.float()
             qs_fb = (fs * z).sum(-1)
             _, _, q_fb = self._targets_uncertainty(qs_fb, cfg.actor_pessimism_penalty)
@@ -772,18 +821,36 @@ class FbCprAuxAgent:
                 - q_aux.mean() * cfg.reg_coeff_aux * weight
                 - q_fb.mean()
             )
+            if hasattr(self, "_heading_critic"):
+                actor_loss = actor_loss - q_heading.mean() * float(getattr(cfg, "reg_coeff_heading", 0.0)) * weight
+            if hasattr(self, "_velocity_critic"):
+                actor_loss = actor_loss - q_velocity.mean() * float(getattr(cfg, "reg_coeff_velocity", 0.0)) * weight
+            estimator_loss = None
+            if hasattr(action_dist, "velocity_estimate") and isinstance(actor_obs, dict) and "velocity_target_yaw" in actor_obs:
+                estimator_loss = F.smooth_l1_loss(
+                    action_dist.velocity_estimate.float(),
+                    actor_obs["velocity_target_yaw"].detach().float(),
+                )
+                actor_loss = actor_loss + float(getattr(cfg, "velocity_estimator_loss_coef", 1.0)) * estimator_loss
             actor_loss.backward()
         finally:
             for param, enabled in zip(frozen_params, requires_grad):
                 param.requires_grad_(enabled)
         self._avg_grad(self._actor.parameters())
         self.actor_optimizer.step()
-        return {
+        metrics = {
             "actor_loss": actor_loss.detach(),
             "Q_discriminator": q_disc.mean().detach(),
             "Q_aux": q_aux.mean().detach(),
             "Q_fb": q_fb.mean().detach(),
         }
+        if hasattr(self, "_heading_critic"):
+            metrics["Q_heading"] = q_heading.mean().detach()
+        if hasattr(self, "_velocity_critic"):
+            metrics["Q_velocity"] = q_velocity.mean().detach()
+        if estimator_loss is not None:
+            metrics["velocity_estimator_loss"] = estimator_loss.detach()
+        return metrics
 
     @staticmethod
     def _targets_uncertainty(preds, pessimism_penalty):

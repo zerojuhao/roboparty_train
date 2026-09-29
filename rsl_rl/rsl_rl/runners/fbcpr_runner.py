@@ -13,6 +13,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from ..algorithms.fb_cpr_aux import FbCprAuxAgent
+from ..algorithms.pufo import PufoAgent
 from ..storage.replay_buffer import ReplayBuffer, TrajectoryDictBuffer
 
 HISTORY_KEYS = ("actions", "base_ang_vel", "joint_pos", "joint_vel", "projected_gravity")
@@ -40,9 +41,15 @@ def ufo_obs_dims(critic_dim: int) -> dict[str, int]:
     }
 
 
-def make_ufo_history(num_envs: int, device) -> "HistoryHandler":
+def make_ufo_history(num_envs: int, device, history_lengths=None) -> "HistoryHandler":
     dims = {name: part.stop - part.start for name, part in UFO_POLICY_SLICES.items()}
-    return HistoryHandler(num_envs, UFO_HISTORY_LENGTHS, dims, device)
+    return HistoryHandler(num_envs, history_lengths or UFO_HISTORY_LENGTHS, dims, device)
+
+
+def pufo_obs_dims(critic_dim: int) -> dict[str, int]:
+    dims = ufo_obs_dims(critic_dim)
+    dims.update({"heading": 2, "velocity_command": 3, "velocity_target_yaw": 3})
+    return dims
 
 
 def ufo_current_obs_values(obs_buf: dict) -> dict[str, torch.Tensor]:
@@ -62,6 +69,17 @@ def ufo_obs_dict(obs_buf: dict, history: "HistoryHandler", with_history: bool = 
     }
     if with_history:
         obs["history_actor"] = history.flat()
+    return obs
+
+
+
+def pufo_obs_dict(obs_buf: dict, history: "HistoryHandler", with_history: bool = True) -> dict:
+    """Build the H200 PUFO contract without importing any parkour code."""
+    obs = ufo_obs_dict(obs_buf, history, with_history)
+    obs["depth_image"] = obs_buf["visual"]
+    obs["heading"] = obs_buf["heading"]
+    obs["velocity_command"] = obs_buf["velocity_command"]
+    obs["velocity_target_yaw"] = obs_buf["velocity_target_yaw"]
     return obs
 
 
@@ -180,17 +198,22 @@ class FbCprRunner:
         if not math.isfinite(self.max_episode_length_s) or self.max_episode_length_s <= 0.0:
             raise ValueError("max_episode_length_s must be finite and positive.")
 
-        obs_dims = ufo_obs_dims(int(sum(mgr.observation_manager.group_obs_dim["critic"])))
+        self.visual_enabled = bool(getattr(train_cfg, "visual_enabled", False))
+        critic_dim = int(sum(mgr.observation_manager.group_obs_dim["critic"]))
+        obs_dims = pufo_obs_dims(critic_dim) if self.visual_enabled else ufo_obs_dims(critic_dim)
         self.obs_dims = obs_dims
-        self.agent = FbCprAuxAgent(obs_dims, mgr.action_manager.total_action_dim, train_cfg, device=self.device)
+        agent_class = PufoAgent if self.visual_enabled else FbCprAuxAgent
+        self.agent = agent_class(obs_dims, mgr.action_manager.total_action_dim, train_cfg, device=self.device)
         self._broadcast_agent_state()
 
-        self.history = make_ufo_history(self.num_envs, device)
+        history_lengths = {"actions": 8, "base_ang_vel": 8, "joint_pos": 8, "joint_vel": 8, "projected_gravity": 8}
+        self.history = make_ufo_history(self.num_envs, device, history_lengths if self.visual_enabled else None)
 
+        replay_device = "cpu" if self.visual_enabled else device
         self.replay = {"train": ReplayBuffer(
             capacity=self.cfg.buffer_size,
             num_envs=self.num_envs,
-            device=device,
+            device=replay_device,
             output_key_t=("observation", "action", "z", "aux_rewards"),
             output_key_tp1=("observation", "terminated"),
             end_key="truncated",
@@ -265,6 +288,8 @@ class FbCprRunner:
         self._expert_built = True
 
     def _obs_dict(self, obs_buf: dict, with_history=True):
+        if self.visual_enabled:
+            return pufo_obs_dict(obs_buf, self.history, with_history)
         return ufo_obs_dict(obs_buf, self.history, with_history)
 
     def _current_obs_values(self, obs_buf: dict) -> dict:
@@ -282,7 +307,10 @@ class FbCprRunner:
     # ---------------------------------------------------------------- learn
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
-        from robolab.tasks.manager_based.ufo.mdp.rewards import compute_aux_rewards, initialize_aux_rewards
+        if self.visual_enabled:
+            from robolab.tasks.manager_based.pufo.mdp.rewards import compute_aux_rewards, initialize_aux_rewards
+        else:
+            from robolab.tasks.manager_based.ufo.mdp.rewards import compute_aux_rewards, initialize_aux_rewards
 
         if not self._expert_built:
             self._build_expert_buffer()
@@ -347,8 +375,14 @@ class FbCprRunner:
                     step_reward = term if step_reward is None else step_reward + term
                 self._reward_buf += step_reward
 
+            transition_obs = obs_dict
+            if self.visual_enabled:
+                transition_obs = dict(obs_dict)
+                transition_obs["depth_image"] = (
+                    transition_obs["depth_image"].clamp(0.0, 1.0).mul(255.0).round().to(torch.uint8)
+                )
             transition = {
-                "observation": obs_dict,
+                "observation": transition_obs,
                 "action": action,
                 "z": self._z,
                 "aux_rewards": aux,
