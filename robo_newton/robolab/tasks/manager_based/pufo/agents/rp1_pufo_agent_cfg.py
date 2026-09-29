@@ -117,7 +117,7 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
         "penalty_action_rate": -0.1,
         "limits_dof_pos": -10.0,
         "penalty_body_impact": -1.0,
-        "penalty_slippage": -4.0,
+        "penalty_slippage": -2.0,
         "penalty_ankle_roll": -1.0,
         "feet_stumble": -2.0,
     }

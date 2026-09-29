@@ -247,6 +247,7 @@ def compute_aux_rewards(env: ManagerBasedEnv) -> dict[str, torch.Tensor]:
     contact_sensor = env.scene["contact_forces"]
     contact_data = contact_sensor.data
     normal_history = _t(contact_data.net_normal_forces_w_history)
+    normal_forces = _t(contact_data.net_normal_forces_w)
     peak_forces = _peak_contact_forces(normal_history)
     robot_weight = _t(robot.data.body_mass).sum(dim=-1)
 
@@ -277,7 +278,7 @@ def compute_aux_rewards(env: ManagerBasedEnv) -> dict[str, torch.Tensor]:
     )
 
     aux["penalty_slippage"] = _tangential_contact_speed(
-        peak_forces[:, feet_idx], body_velocity[:, feet_idx], robot_weight
+        normal_forces[:, feet_idx], body_velocity[:, feet_idx], robot_weight
     )
 
     # WBC-shared regularization terms.

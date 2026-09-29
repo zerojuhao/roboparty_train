@@ -61,7 +61,10 @@ def make_env(num_bodies=5):
     )
     actuators = Actuators(all_joints=actuator)
     actuators.applied_effort = actuator.applied_effort
-    sensor = SimpleNamespace(data=SimpleNamespace(net_normal_forces_w_history=torch.randn(n, 3, b, 3)))
+    sensor = SimpleNamespace(data=SimpleNamespace(
+        net_normal_forces_w=torch.randn(n, b, 3),
+        net_normal_forces_w_history=torch.randn(n, 3, b, 3),
+    ))
     return SimpleNamespace(
         scene={"robot": SimpleNamespace(data=data, actuators=actuators), "contact_forces": sensor},
         num_envs=n, device="cpu", step_dt=0.02, common_step_counter=0,
@@ -112,6 +115,23 @@ class AuxRewardTests(unittest.TestCase):
         torch.testing.assert_close(REWARDS._com_angular_momentum(env), 2.0 * momentum)
         self.assertEqual(env._ufo_feet_ids.tolist(), [0, 1])
         self.assertEqual(env._ufo_undesired_body_ids.tolist(), [2, 3, 4])
+
+    def test_slippage_requires_loaded_current_foot_contact(self):
+        env = make_env()
+        REWARDS.initialize_aux_rewards(env)
+        robot = env.scene["robot"].data
+        robot.body_link_lin_vel_w.zero_()
+        robot.body_link_lin_vel_w[:, :2, 0] = 1.0
+        env.scene["contact_forces"].data.net_normal_forces_w.zero_()
+        env.scene["contact_forces"].data.net_normal_forces_w_history.fill_(100.0)
+        no_contact = REWARDS.compute_aux_rewards(env)["penalty_slippage"]
+        torch.testing.assert_close(no_contact, torch.zeros_like(no_contact))
+
+        env.common_step_counter += 1
+        weight = robot.body_mass.sum(dim=-1)
+        env.scene["contact_forces"].data.net_normal_forces_w[:, :2, 2] = weight.unsqueeze(-1) * 0.1
+        loaded_contact = REWARDS.compute_aux_rewards(env)["penalty_slippage"]
+        self.assertTrue(torch.all(loaded_contact > 0))
 
     def test_rate_keeps_finite_history_and_reset_protection(self):
         env = make_env()
