@@ -1,0 +1,31 @@
+# Python and local tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.vscode/
+
+# Isaac Lab installations are external SDKs, not repository sources.
+IsaacLab/
+IsaacLab-3.0/
+
+# Training outputs and experiment logs
+newton_migration/checkpoints/
+newton_migration/logs/
+newton_migration/wandb/
+newton_migration/amp_data/
+newton_migration/outputs/
+newton_migration/*.npz
+newton_migration/*.mp4
+newton_migration/*.pt
+*.npz
+*.mp4
+*.pt
+
+# Datasets stay on the training host until the repository is ready for them.
+robolab/
+newton_migration/data
+newton_migration/ufo_data/motions/
+
+# Archived source trees and old Git metadata
+archives/
