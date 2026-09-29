@@ -46,9 +46,14 @@ def make_ufo_history(num_envs: int, device, history_lengths=None) -> "HistoryHan
     return HistoryHandler(num_envs, history_lengths or UFO_HISTORY_LENGTHS, dims, device)
 
 
-def pufo_obs_dims(critic_dim: int) -> dict[str, int]:
+def pufo_obs_dims(critic_dim: int, terrain_priv_dim: int) -> dict[str, int]:
     dims = ufo_obs_dims(critic_dim)
-    dims.update({"heading": 2, "velocity_command": 3, "velocity_target_yaw": 3})
+    dims.update({
+        "heading": 2,
+        "velocity_command": 3,
+        "velocity_target_yaw": 3,
+        "terrain_priv": terrain_priv_dim,
+    })
     return dims
 
 
@@ -80,6 +85,7 @@ def pufo_obs_dict(obs_buf: dict, history: "HistoryHandler", with_history: bool =
     obs["heading"] = obs_buf["heading"]
     obs["velocity_command"] = obs_buf["velocity_command"]
     obs["velocity_target_yaw"] = obs_buf["velocity_target_yaw"]
+    obs["terrain_priv"] = obs_buf["terrain_priv"]
     return obs
 
 
@@ -199,8 +205,17 @@ class FbCprRunner:
             raise ValueError("max_episode_length_s must be finite and positive.")
 
         self.visual_enabled = bool(getattr(train_cfg, "visual_enabled", False))
+        if self.visual_enabled:
+            self._mgr_env._pufo_velocity_error_scale_mps = float(
+                getattr(train_cfg, "velocity_error_scale_mps", 0.5)
+            )
         critic_dim = int(sum(mgr.observation_manager.group_obs_dim["critic"]))
-        obs_dims = pufo_obs_dims(critic_dim) if self.visual_enabled else ufo_obs_dims(critic_dim)
+        terrain_priv_dim = int(sum(mgr.observation_manager.group_obs_dim.get("terrain_priv", ())))
+        obs_dims = (
+            pufo_obs_dims(critic_dim, terrain_priv_dim)
+            if self.visual_enabled
+            else ufo_obs_dims(critic_dim)
+        )
         self.obs_dims = obs_dims
         agent_class = PufoAgent if self.visual_enabled else FbCprAuxAgent
         self.agent = agent_class(obs_dims, mgr.action_manager.total_action_dim, train_cfg, device=self.device)

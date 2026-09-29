@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import torch
+import torch.nn.functional as F
 
 from isaaclab.envs import ManagerBasedEnv
 from isaaclab.utils.math import matrix_from_quat
@@ -32,6 +33,12 @@ def initialize_aux_rewards(env: ManagerBasedEnv) -> None:
     names = robot.data.body_names
     feet = [i for i, name in enumerate(names) if "ankle_roll_link" in name][:2]
     env._ufo_feet_ids = torch.tensor(feet, dtype=torch.long, device=env.device)
+    joint_names = list(getattr(robot.data, "joint_names", ()))
+    env._ufo_ankle_roll_ids = torch.tensor(
+        [i for i, name in enumerate(joint_names) if "ankle_roll" in name],
+        dtype=torch.long,
+        device=env.device,
+    )
     env._ufo_undesired_body_ids = torch.tensor(
         [i for i in range(len(names)) if i not in feet], dtype=torch.long, device=env.device
     )
@@ -71,6 +78,60 @@ def _height_gated_undesired_contacts(
     # BeyondMimic/IsaacLab counts every body with an undesired contact.  The
     # smooth gate makes this a fractional count near the ground.
     return (height_gate * undesired_contact.float()).sum(dim=1)
+
+
+def _peak_contact_forces(normal_forces_w_history: torch.Tensor) -> torch.Tensor:
+    """Select the strongest contact-force sample for every body."""
+    force_norm = torch.linalg.vector_norm(normal_forces_w_history, dim=-1)
+    peak_index = force_norm.argmax(dim=1, keepdim=True)
+    gather_index = peak_index.unsqueeze(-1).expand(-1, -1, -1, 3)
+    return torch.gather(normal_forces_w_history, dim=1, index=gather_index).squeeze(1)
+
+
+def _body_contact_severity(
+    contact_force: torch.Tensor,
+    body_velocity: torch.Tensor,
+    robot_weight: torch.Tensor,
+) -> torch.Tensor:
+    """Match H200's loaded-contact impact penalty for non-foot bodies."""
+    if contact_force.shape[1] == 0:
+        return torch.zeros(contact_force.shape[0], device=contact_force.device, dtype=contact_force.dtype)
+    weight = robot_weight.reshape(-1, 1).clamp_min(1.0e-6)
+    force_norm = torch.linalg.vector_norm(contact_force, dim=-1)
+    force_direction = contact_force / force_norm.unsqueeze(-1).clamp_min(1.0e-6)
+    impact_velocity = torch.relu((body_velocity * force_direction).sum(dim=-1))
+    force_ratio = torch.relu(force_norm / weight - 0.05)
+    force_severity = F.smooth_l1_loss(
+        force_ratio,
+        torch.zeros_like(force_ratio),
+        beta=0.25,
+        reduction="none",
+    )
+    impact_gain = 1.0 + torch.clamp(impact_velocity, min=0.0, max=2.0).square()
+    return torch.clamp((force_severity * impact_gain).sum(dim=1), max=4.0)
+
+
+def _feet_stumble_penalty(foot_force_history: torch.Tensor) -> torch.Tensor:
+    """Penalize horizontal-dominant foot impacts using H200's thresholds."""
+    force_xy = torch.linalg.vector_norm(foot_force_history[..., :2], dim=-1)
+    force_z = torch.abs(foot_force_history[..., 2])
+    excess = torch.relu(force_xy - force_z - 20.0)
+    return torch.clamp(excess / 100.0, max=1.0).amax(dim=(1, 2))
+
+
+def _tangential_contact_speed(
+    contact_force: torch.Tensor,
+    body_velocity: torch.Tensor,
+    robot_weight: torch.Tensor,
+) -> torch.Tensor:
+    """Match H200's loaded tangential foot-speed penalty."""
+    weight = robot_weight.reshape(-1, 1).clamp_min(1.0e-6)
+    force_norm = torch.linalg.vector_norm(contact_force, dim=-1)
+    force_direction = contact_force / force_norm.unsqueeze(-1).clamp_min(1.0e-6)
+    normal_velocity = (body_velocity * force_direction).sum(dim=-1, keepdim=True)
+    tangent_velocity = body_velocity - normal_velocity * force_direction
+    loaded = force_norm / weight > 0.05
+    return (torch.linalg.vector_norm(tangent_velocity, dim=-1) * loaded).sum(dim=1)
 
 
 def _finite_bounded_penalty(penalty: torch.Tensor, max_penalty: float) -> torch.Tensor:
@@ -186,6 +247,8 @@ def compute_aux_rewards(env: ManagerBasedEnv) -> dict[str, torch.Tensor]:
     contact_sensor = env.scene["contact_forces"]
     contact_data = contact_sensor.data
     normal_history = _t(contact_data.net_normal_forces_w_history)
+    peak_forces = _peak_contact_forces(normal_history)
+    robot_weight = _t(robot.data.body_mass).sum(dim=-1)
 
     aux = {}
     aux["penalty_torques"] = torch.sum(torch.square(torques), dim=1)
@@ -195,18 +258,27 @@ def compute_aux_rewards(env: ManagerBasedEnv) -> dict[str, torch.Tensor]:
     aux["limits_dof_pos"] = torch.sum((-(dof_pos - lower).clip(max=0.0)) + ((dof_pos - upper).clip(min=0.0)), dim=1)
 
     feet_idx = env._ufo_feet_ids
+    body_idx = env._ufo_undesired_body_ids
+    body_velocity = _t(robot.data.body_link_lin_vel_w)
+    aux["penalty_body_impact"] = _body_contact_severity(
+        peak_forces[:, body_idx], body_velocity[:, body_idx], robot_weight
+    )
+    ankle_roll_idx = env._ufo_ankle_roll_ids
+    aux["penalty_ankle_roll"] = (
+        torch.sum(torch.square(dof_pos[:, ankle_roll_idx]), dim=1)
+        if ankle_roll_idx.numel()
+        else torch.zeros(dof_pos.shape[0], device=dof_pos.device, dtype=dof_pos.dtype)
+    )
+    aux["feet_stumble"] = _feet_stumble_penalty(normal_history[:, :, feet_idx, :])
     aux["height_gated_undesired_contacts"] = _height_gated_undesired_contacts(
         normal_history,
         _t(robot.data.body_link_pos_w)[..., 2],
         env._ufo_undesired_body_ids,
     )
 
-    # IsaacLab/WBC-style slip penalty: planar (XY) foot speed while the foot is
-    # in contact, with contact from the 3-frame force-history max
-    # (matches isaaclab_tasks.core.velocity.mdp.feet_slide).
-    slip_contact = normal_history[:, :, feet_idx, :].norm(dim=-1).amax(dim=1) > 1.0
-    foot_vel_xy = _t(robot.data.body_link_lin_vel_w)[:, feet_idx, :2]
-    aux["penalty_slippage"] = torch.sum(torch.norm(foot_vel_xy, dim=-1) * slip_contact, dim=1)
+    aux["penalty_slippage"] = _tangential_contact_speed(
+        peak_forces[:, feet_idx], body_velocity[:, feet_idx], robot_weight
+    )
 
     # WBC-shared regularization terms.
     joint_acc = _t(robot.data.joint_acc)

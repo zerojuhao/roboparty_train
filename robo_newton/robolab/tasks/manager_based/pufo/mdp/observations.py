@@ -11,6 +11,13 @@ from isaaclab.utils.math import quat_apply, quat_apply_inverse
 from robolab.tasks.manager_based.ufo.mdp.motion_observations import compute_humanoid_observations_max
 
 
+TERRAIN_PRIV_X_MIN = -0.4
+TERRAIN_PRIV_X_MAX = 1.6
+TERRAIN_PRIV_Y_MIN = -0.6
+TERRAIN_PRIV_Y_MAX = 0.6
+TERRAIN_PRIV_RESOLUTION = 0.1
+
+
 def _tensor(value):
     return value if isinstance(value, torch.Tensor) else value.torch
 
@@ -45,6 +52,32 @@ def depth_image(
     if image.ndim != 4:
         raise ValueError(f"PUFO depth must be [env, frames, height, width], got {tuple(image.shape)}")
     return image.clamp(0.0, 2.5).div(2.5)
+
+
+def terrain_priv(
+    env: ManagerBasedEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("terrain_priv"),
+    clip: float = 0.5,
+) -> torch.Tensor:
+    """Return H200-style ground-height deltas on the robot-heading ray grid."""
+    sensor = env.scene[sensor_cfg.name]
+    hit_heights = _tensor(sensor.data.ray_hits_w)[..., 2]
+    if hit_heights.ndim != 2 or hit_heights.shape[-1] % 2 == 0:
+        raise ValueError(f"PUFO terrain_priv expects an odd flattened ray grid, got {tuple(hit_heights.shape)}")
+    num_x = round((TERRAIN_PRIV_X_MAX - TERRAIN_PRIV_X_MIN) / TERRAIN_PRIV_RESOLUTION) + 1
+    num_y = round((TERRAIN_PRIV_Y_MAX - TERRAIN_PRIV_Y_MIN) / TERRAIN_PRIV_RESOLUTION) + 1
+    if hit_heights.shape[-1] != num_x * num_y:
+        raise ValueError(
+            "PUFO terrain_priv ray count does not match the H200 grid: "
+            f"expected {num_x * num_y}, got {hit_heights.shape[-1]}"
+        )
+    # GridPatternCfg(ordering="xy") flattens x fastest; (0, 0) is x index 4, y index 6.
+    reference_index = (
+        round(-TERRAIN_PRIV_Y_MIN / TERRAIN_PRIV_RESOLUTION) * num_x
+        + round(-TERRAIN_PRIV_X_MIN / TERRAIN_PRIV_RESOLUTION)
+    )
+    reference = hit_heights[:, reference_index : reference_index + 1]
+    return torch.nan_to_num(reference - hit_heights, nan=0.0, posinf=clip, neginf=-clip).clamp(-clip, clip)
 
 
 def _motion_state(env: ManagerBasedEnv):
@@ -94,6 +127,7 @@ __all__ = [
     "depth_image",
     "heading_context",
     "local_self_obs",
+    "terrain_priv",
     "velocity_command",
     "velocity_target_yaw",
 ]

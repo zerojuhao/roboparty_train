@@ -18,7 +18,7 @@ from isaaclab.envs.mdp.observations import (
 
 from robolab.tasks.manager_based.ufo.mdp import events, terminations
 from . import rewards
-from .observations import depth_image, heading_context, local_self_obs, velocity_command, velocity_target_yaw
+from .observations import depth_image, heading_context, local_self_obs, terrain_priv, velocity_command, velocity_target_yaw
 
 __all__ = [
     "JointPositionActionCfg",
@@ -35,6 +35,7 @@ __all__ = [
     "depth_image",
     "heading_context",
     "local_self_obs",
+    "terrain_priv",
     "velocity_command",
     "velocity_target_yaw",
     "events",

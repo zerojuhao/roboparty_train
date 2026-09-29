@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 
 from robolab.tasks.manager_based.ufo.mdp.rewards import (
     compute_aux_rewards as _compute_ufo_aux_rewards,
@@ -28,18 +29,23 @@ def _reference_velocity_yaw(env):
 
 def heading_tracking(env):
     from .observations import heading_context
-    return heading_context(env).pow(2).sum(dim=-1)
+    return heading_context(env)[:, 0]
 
 
-def velocity_tracking(env):
+def velocity_tracking(env, error_scale_mps: float = 0.5):
     actual, target = _reference_velocity_yaw(env)
-    return (actual - target).pow(2).sum(dim=-1)
+    error = (actual[:, :2] - target[:, :2]) / float(error_scale_mps)
+    scaled_norm = torch.linalg.vector_norm(error, dim=-1)
+    return F.huber_loss(scaled_norm, torch.zeros_like(scaled_norm), reduction="none", delta=1.0)
 
 
 def compute_aux_rewards(env):
     aux = dict(_compute_ufo_aux_rewards(env))
     aux["heading_tracking"] = heading_tracking(env)
-    aux["velocity_tracking"] = velocity_tracking(env)
+    aux["velocity_tracking"] = velocity_tracking(
+        env,
+        float(getattr(env, "_pufo_velocity_error_scale_mps", 0.5)),
+    )
     return aux
 
 

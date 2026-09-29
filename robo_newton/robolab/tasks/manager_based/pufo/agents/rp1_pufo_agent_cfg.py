@@ -33,6 +33,7 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
         "privileged_state",
         "last_action",
         "history_actor",
+        "terrain_priv",
         "heading",
         "velocity_command",
         "velocity_target_yaw",
@@ -86,6 +87,7 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     reg_coeff_aux: float = 0.02
     reg_coeff_heading: float = 0.002
     reg_coeff_velocity: float = 0.002
+    velocity_error_scale_mps: float = 0.5
     velocity_estimator_loss_coef: float = 1.0
     scale_reg: bool = True
     ortho_coef: float = 100.0
@@ -100,16 +102,22 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     use_bf16_amp: bool = True
     matmul_precision: str = "high"
 
-    eval_interval_iterations: int = 0
+    eval_interval_iterations: int = 400
     eval_num_motions: int = 0
     prioritization: bool = False
     aux_rewards: list[str] = [
         "penalty_action_rate",
         "limits_dof_pos",
+        "penalty_body_impact",
         "penalty_slippage",
+        "penalty_ankle_roll",
+        "feet_stumble",
     ]
     aux_rewards_scaling: dict[str, float] = {
         "penalty_action_rate": -0.1,
         "limits_dof_pos": -10.0,
-        "penalty_slippage": -2.0,
+        "penalty_body_impact": -1.0,
+        "penalty_slippage": -4.0,
+        "penalty_ankle_roll": -1.0,
+        "feet_stumble": -2.0,
     }
