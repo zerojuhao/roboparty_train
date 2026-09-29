@@ -118,7 +118,7 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     actor_pessimism_penalty: float = 0.5
     critic_pessimism_penalty: float = 0.5
     aux_critic_pessimism_penalty: float = 0.5
-    reg_coeff: float = 0.03
+    reg_coeff: float = 0.01
     reg_coeff_aux: float = 0.03
     scale_reg: bool = True
     ortho_coef: float = 100.0
