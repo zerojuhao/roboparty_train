@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-from typing import Literal
 
 from isaaclab.utils.configclass import configclass
 from isaaclab_rl.rsl_rl.rl_cfg import RslRlBaseRunnerCfg
+
+from .fb_cpr_cfg import FbCprDiscriminatorCfg
 
 AUX_REWARDS = (
     "penalty_torques",
@@ -50,17 +51,6 @@ AUX_REWARDS_SCALING = {
 
 
 @configclass
-class FbCprDiscriminatorCfg:
-    """Network and objective settings for the FB-CPR discriminator."""
-
-    hidden_dims: list[int] = [1024, 1024, 1024]
-    """Hidden layer widths, following the AMP discriminator config style."""
-
-    loss_type: Literal["bce", "gan", "lsgan", "wgan"] = "bce"
-    """Discriminator objective. H200's default is the stable BCE form."""
-
-
-@configclass
 class FbCprAlgorithmCfg:
     """Placeholder algorithm config for the unified entrypoints.
 
@@ -101,6 +91,7 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     discriminator: FbCprDiscriminatorCfg = FbCprDiscriminatorCfg(
         hidden_dims=[1024, 1024, 1024],
         loss_type="bce",
+        reward_type="log_odds",
     )
     # Share one trunk between the discriminator and auxiliary critic heads.
     # Both losses are optimized together in one backward/optimizer step.

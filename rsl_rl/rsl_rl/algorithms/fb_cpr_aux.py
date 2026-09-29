@@ -146,24 +146,23 @@ class FbCprAuxAgent:
                 num_parallel=self.critic_members,
                 output_dim=1,
             )
-        discriminator_cfg = getattr(cfg, "discriminator", None)
-        self.discriminator_loss = str(
-            getattr(discriminator_cfg, "loss_type", getattr(cfg, "discriminator_loss", "bce"))
-        ).lower()
+        # The runner receives serialized config dictionaries from the training entrypoint.
+        discriminator_cfg = cfg.discriminator
+        if not isinstance(discriminator_cfg, dict):
+            discriminator_cfg = vars(discriminator_cfg)
+        self.discriminator_loss = discriminator_cfg["loss_type"].lower()
+        self.discriminator_reward_type = discriminator_cfg["reward_type"].lower()
         if self.discriminator_loss not in {"bce", "gan", "lsgan", "wgan"}:
             raise ValueError(
                 "discriminator loss must be one of 'bce', 'gan', 'lsgan', or 'wgan', "
                 f"got {self.discriminator_loss!r}."
             )
-        discriminator_hidden_dims = getattr(
-            discriminator_cfg,
-            "hidden_dims",
-            getattr(cfg, "discriminator_hidden_dims", (1024, 1024, 1024)),
-        )
+        if self.discriminator_reward_type not in {"log_odds", "amp", "softplus", "raw"}:
+            raise ValueError(f"Unsupported discriminator reward: {self.discriminator_reward_type!r}.")
         self._discriminator = Discriminator(
             self.privileged_obs_dim,
             z_dim,
-            hidden_dims=discriminator_hidden_dims,
+            hidden_dims=discriminator_cfg["hidden_dims"],
         )
 
         self._target_forward_map = copy.deepcopy(self._forward_map)
@@ -703,14 +702,24 @@ class FbCprAuxAgent:
             "orth_loss_offdiag": orth_offdiag.detach(),
         }
 
+    def discriminator_reward_from_logits(self, logits):
+        logits = logits.float()
+        if self.discriminator_reward_type == "log_odds":
+            probability = torch.sigmoid(logits).clamp(1e-7, 1 - 1e-7)
+            return probability.log() - (1 - probability).log()
+        if self.discriminator_reward_type == "amp":
+            return (1.0 - 0.25 * (logits - 1.0).square()).clamp_min(0.0)
+        if self.discriminator_reward_type == "softplus":
+            return F.softplus(logits)
+        return logits
+
     def update_critic(self, obs, b_obs, action, discount, next_obs, z, next_action):
         cfg = self.cfg
         num_parallel = self.critic_members
         with torch.no_grad():
             with self._autocast_context():
                 reward_logits = self._discriminator.compute_logits(obs=b_obs, z=z)
-            probability = torch.sigmoid(reward_logits.float()).clamp(1e-7, 1 - 1e-7)
-            reward = probability.log() - (1 - probability).log()
+            reward = self.discriminator_reward_from_logits(reward_logits)
             with self._autocast_context():
                 next_qs = self._target_critic(next_obs, z, next_action)
             next_qs = next_qs.float()
@@ -779,8 +788,7 @@ class FbCprAuxAgent:
         with torch.no_grad():
             with self._autocast_context():
                 reward_logits = self._discriminator.compute_logits(obs=b_obs, z=z)
-            probability = torch.sigmoid(reward_logits.float()).clamp(1e-7, 1 - 1e-7)
-            reward = probability.log() - (1 - probability).log()
+            reward = self.discriminator_reward_from_logits(reward_logits)
             with self._autocast_context():
                 next_qs = self._target_critic_shared(next_obs, z, next_action)[0]
                 next_aux_qs = self._target_critic_shared(next_obs, z, next_aux_action)[1]

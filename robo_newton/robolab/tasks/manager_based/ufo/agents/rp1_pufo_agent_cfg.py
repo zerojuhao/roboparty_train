@@ -5,7 +5,7 @@ from __future__ import annotations
 from isaaclab.utils.configclass import configclass
 from isaaclab_rl.rsl_rl.rl_cfg import RslRlBaseRunnerCfg
 
-from .rp1_ufo_agent_cfg import FbCprDiscriminatorCfg
+from .fb_cpr_cfg import FbCprDiscriminatorCfg
 
 
 @configclass
@@ -55,6 +55,7 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     discriminator: FbCprDiscriminatorCfg = FbCprDiscriminatorCfg(
         hidden_dims=[1024, 1024, 1024],
         loss_type="bce",
+        reward_type="log_odds",
     )
     critic_ensemble_members: int = 2
     shared_value_net: bool = True
