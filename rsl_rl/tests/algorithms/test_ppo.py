@@ -379,6 +379,7 @@ class TestMixedPrecision:
         before = [p.clone() for p in ppo.actor.parameters()]
         loss_dict = ppo.update()
 
+        assert all(isinstance(value, float) for value in loss_dict.values())
         assert all(torch.isfinite(torch.tensor(v)) for v in loss_dict.values())
         after = list(ppo.actor.parameters())
         assert any(not torch.equal(b, a) for b, a in zip(before, after)), "actor params should change"

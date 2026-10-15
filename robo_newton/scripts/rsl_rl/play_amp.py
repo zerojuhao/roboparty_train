@@ -50,6 +50,24 @@ import cli_args  # isort: skip
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument("--eval_steps", type=int, default=0,
+                    help="Run bounded headless evaluation and print tracking metrics without exporting models.")
+parser.add_argument("--amp_observation_dump", type=str,
+                    help="Save discriminator inputs every 10 steps during bounded evaluation for offline diagnosis.")
+parser.add_argument("--stochastic_actions", action="store_true",
+                    help="Sample the policy's learned action distribution instead of using its mean.")
+parser.add_argument(
+    "--speed_ramp_max",
+    type=float,
+    default=None,
+    help="Override playback commands with a forward-speed ramp ending at this speed in m/s.",
+)
+parser.add_argument(
+    "--video_renderer",
+    choices=("newton_gl", "newton_rtx"),
+    default="newton_gl",
+    help="Newton visualizer used for video capture.",
+)
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
@@ -71,6 +89,8 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli, hydra_args = parser.parse_known_args()
+if args_cli.amp_observation_dump and args_cli.eval_steps <= 0:
+    parser.error("--amp_observation_dump requires --eval_steps > 0")
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
@@ -93,6 +113,7 @@ installed_version = metadata.version("rsl-rl-lib")
 """Rest everything follows."""
 
 import copy
+import json
 import gymnasium as gym
 import os
 import time
@@ -100,15 +121,18 @@ import torch
 
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
+import isaaclab.sim as sim_utils
 from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,
     DirectRLEnvCfg,
     ManagerBasedRLEnvCfg,
+    VideoRecorderCfg,
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
+from isaaclab_visualizers.newton import NewtonGLVisualizerCfg, NewtonRTXVisualizerCfg
 
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, handle_deprecated_rsl_rl_cfg
 
@@ -225,6 +249,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
 
+    if args_cli.speed_ramp_max is not None:
+        if args_cli.speed_ramp_max <= 0.0:
+            raise ValueError("--speed_ramp_max must be positive")
+        command_cfg = getattr(env_cfg.commands, "single_axis_velocity", None)
+        if command_cfg is None:
+            raise ValueError("--speed_ramp_max requires a single_axis_velocity command")
+        command_cfg.resampling_time_range = (1.0e6, 1.0e6)
+        command_cfg.rel_standing_envs = 0.0
+        command_cfg.ranges.lin_vel_x = (0.0, 0.0)
+        command_cfg.ranges.lin_vel_y = (0.0, 0.0)
+        command_cfg.ranges.ang_vel_z = (0.0, 0.0)
+
     # handle deprecated configurations
     agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
 
@@ -253,24 +289,65 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
 
+    # Video recording is driven from env.step() in Isaac Lab 3.0. The legacy
+    # gymnasium RecordVideo wrapper receives no frames from ManagerBasedRLEnv.
+    if args_cli.video:
+        # Keep the training collision plane and friction unchanged, but use a
+        # quieter recording-only material so the robots remain legible.
+        env_cfg.scene.terrain.visual_material = sim_utils.PreviewSurfaceCfg(
+            diffuse_color=(0.16, 0.18, 0.20), roughness=0.85
+        )
+        if args_cli.speed_ramp_max is not None:
+            env_cfg.scene.env_spacing = 1.6
+            resolution = (1920, 1080)
+            camera_eye = (5.5, -7.0, 3.2)
+            camera_lookat = (0.0, 0.0, 1.0)
+        else:
+            resolution = tuple(env_cfg.viewer.resolution)
+            camera_eye = tuple(env_cfg.viewer.eye)
+            camera_lookat = tuple(env_cfg.viewer.lookat)
+        visualizer_cls = NewtonRTXVisualizerCfg if args_cli.video_renderer == "newton_rtx" else NewtonGLVisualizerCfg
+        visualizer_kwargs = {
+            "eye": camera_eye,
+            "lookat": camera_lookat,
+            "max_visible_envs": env_cfg.scene.num_envs,
+            "headless": True,
+            "window_width": resolution[0],
+            "window_height": resolution[1],
+            "focal_length": 26.0,
+            "streaming_view": False,
+            "enable_live_plots": False,
+            "enable_markers": False,
+        }
+        if args_cli.video_renderer == "newton_rtx":
+            visualizer_kwargs["rtx_environment"] = "studio"
+        env_cfg.sim.visualizer_cfgs = [
+            visualizer_cls(**visualizer_kwargs)
+        ]
+        video_cfg = VideoRecorderCfg(
+            source=f"visualizer:{args_cli.video_renderer}",
+            output_dir=os.path.join(log_dir, "videos", "play"),
+            video_length=args_cli.video_length,
+            video_interval=0,
+            output_filename_prefix=(
+                f"rp1_amp_speed_ramp_{args_cli.speed_ramp_max:g}_"
+                if args_cli.speed_ramp_max is not None
+                else f"rp1_amp_many_robots_{args_cli.video_renderer}_"
+            )
+            + (
+                f"{os.path.splitext(os.path.basename(resume_path))[0]}"
+            ),
+        )
+        env_cfg.video_recorders = [video_cfg]
+        print("[INFO] Recording video with Isaac Lab's internal recorder.")
+        print_dict(video_cfg.to_dict(), nesting=4)
+
     # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = gym.make(args_cli.task, cfg=env_cfg)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
-
-    # wrap for video recording
-    if args_cli.video:
-        video_kwargs = {
-            "video_folder": os.path.join(log_dir, "videos", "play"),
-            "step_trigger": lambda step: step == 0,
-            "video_length": args_cli.video_length,
-            "disable_logger": True,
-        }
-        print("[INFO] Recording videos during training.")
-        print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
@@ -279,15 +356,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # load previously trained model
     if agent_cfg.class_name == "OnPolicyRunner":
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    elif agent_cfg.class_name == "AMPRunner":
-        from rsl_rl.runners import AMPRunner
-        runner = AMPRunner(
-            env,
-            agent_cfg.to_dict(),
-            log_dir=None,
-            device=agent_cfg.device,
-            allow_empty_discriminator_routes=True,
-        )
     elif agent_cfg.class_name == "DistillationRunner":
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
@@ -297,54 +365,153 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # obtain the trained policy for inference
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-    # extract the neural network module
-    # we do this in a try-except to maintain backwards compatibility.
-    try:
-        # version 2.3 onwards
-        policy_nn = runner.alg.policy
-    except AttributeError:
-        # version 2.2 and below
-        policy_nn = runner.alg.actor_critic
+    policy_nn = runner.alg.get_policy()
 
-    # extract the normalizer
-    if hasattr(policy_nn, "actor_obs_normalizer"):
-        normalizer = policy_nn.actor_obs_normalizer
-    elif hasattr(policy_nn, "student_obs_normalizer"):
-        normalizer = policy_nn.student_obs_normalizer
-    else:
-        normalizer = None
-
-    # export policy to onnx/jit
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    # Export through the runner so model-specific estimators are preserved.
+    if not args_cli.eval_steps:
+        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+        runner.export_policy_to_jit(export_model_dir, filename="policy.pt")
+        runner.export_policy_to_onnx(export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
 
     # reset environment
     obs = env.get_observations()
     timestep = 0
+    robot = env.unwrapped.scene["robot"]
+    command_term = None
+    if args_cli.speed_ramp_max is not None:
+        command_term = env.unwrapped.command_manager.get_term("single_axis_velocity")
+        command_term.vel_command_b.zero_()
+        command_term.is_standing_env.zero_()
+    initial_joint_pos = robot.data.joint_pos.torch.clone()
+    initial_root_pos = robot.data.root_pos_w.torch.clone()
+    evaluation_samples = []
+    evaluation_resets = 0
+    amp_samples = {}
+    if args_cli.amp_observation_dump:
+        amp_settle_steps = min(round(1.0 / dt), args_cli.eval_steps // 10)
+        amp_group_names = list(dict.fromkeys(
+            group
+            for route in runner.alg.routes.values()
+            for obs_set in (route["policy_obs_set"], route["demonstration_obs_set"])
+            for group in runner.alg.amp_obs_groups[obs_set]
+        ))
+        amp_samples = {name: [] for name in amp_group_names}
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
+            if command_term is not None:
+                hold_start = max(1, round(args_cli.video_length * 0.1))
+                hold_end = max(hold_start + 1, round(args_cli.video_length * 0.8))
+                ramp_fraction = min(1.0, max(0.0, (timestep - hold_start) / (hold_end - hold_start)))
+                commanded_speed = args_cli.speed_ramp_max * ramp_fraction
+                command_term.vel_command_b[:, 0] = commanded_speed
+                command_term.vel_command_b[:, 1:] = 0.0
+                command_term.is_standing_env.zero_()
+                if env.unwrapped.sim.visualizers:
+                    group_x = robot.data.root_pos_w.torch[:, 0].mean().item()
+                    env.unwrapped.sim.visualizers[0].set_camera_view(
+                        (group_x + 5.5, -7.0, 3.2), (group_x, 0.0, 1.0)
+                    )
             # agent stepping
-            actions = policy(obs)
+            actions = policy(obs, stochastic_output=True) if args_cli.stochastic_actions else policy(obs)
+            if args_cli.eval_steps:
+                commanded = env.unwrapped.command_manager.get_command("single_axis_velocity").clone()
             # env stepping
             obs, _, dones, _ = env.step(actions)
             # reset recurrent states for episodes that have terminated
             policy_nn.reset(dones)
+            if args_cli.eval_steps:
+                actual = torch.cat((robot.data.root_lin_vel_b.torch[:, :2],
+                                    robot.data.root_ang_vel_b.torch[:, 2:3]), dim=-1)
+                evaluation_samples.append(torch.stack((commanded, actual), dim=1).cpu())
+                evaluation_resets += int(dones.sum().item())
+            if amp_samples and timestep >= amp_settle_steps and (timestep - amp_settle_steps) % 10 == 0:
+                # Skip reset histories; retain raw, unnormalized discriminator inputs.
+                history_steps = max(route["disc_obs_steps"] for route in runner.alg.routes.values())
+                valid = env.unwrapped.episode_length_buf > history_steps
+                for name in amp_samples:
+                    amp_samples[name].append(obs[name][valid].detach().cpu())
+        timestep += 1
         if args_cli.video:
-            timestep += 1
+            if args_cli.speed_ramp_max is not None and timestep in {
+                1,
+                args_cli.video_length // 3,
+                2 * args_cli.video_length // 3,
+                args_cli.video_length,
+            }:
+                actual_speed = robot.data.root_lin_vel_b.torch[:, 0]
+                print(
+                    f"[INFO] Speed ramp at step {timestep}: command={commanded_speed:.3f} m/s, "
+                    f"actual_mean={actual_speed.mean().item():.3f} m/s, "
+                    f"actual_std={actual_speed.std().item():.3f} m/s"
+                )
+            if timestep in {max(1, args_cli.video_length // 2), args_cli.video_length}:
+                joint_delta = (robot.data.joint_pos.torch - initial_joint_pos).abs()
+                root_delta_xy = torch.linalg.vector_norm(
+                    robot.data.root_pos_w.torch[:, :2] - initial_root_pos[:, :2], dim=1
+                )
+                print(
+                    f"[INFO] Playback motion at step {timestep}: "
+                    f"joint_delta_mean={joint_delta.mean().item():.4f} rad, "
+                    f"joint_delta_max={joint_delta.max().item():.4f} rad, "
+                    f"root_xy_displacement_mean={root_delta_xy.mean().item():.4f} m, "
+                    f"action_abs_mean={actions.abs().mean().item():.4f}"
+                )
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
+
+        if args_cli.eval_steps and timestep >= args_cli.eval_steps:
+            break
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
+
+    if evaluation_samples:
+        # Match the MuJoCo recorder's one-second (or 10%) settling period.
+        settle_steps = min(round(1.0 / dt), len(evaluation_samples) // 10)
+        samples = torch.stack(evaluation_samples[settle_steps:])
+        command, actual = samples.unbind(dim=2)
+        evaluation_summary = {
+            "checkpoint": resume_path, "steps": timestep, "num_envs": env.unwrapped.num_envs,
+            "stochastic_actions": args_cli.stochastic_actions,
+            "reset_count": evaluation_resets,
+            "command_mean_xy_yaw": command.mean(dim=(0, 1)).tolist(),
+            "actual_mean_xy_yaw": actual.mean(dim=(0, 1)).tolist(),
+            "tracking_mae_xy_yaw": (actual - command).abs().mean(dim=(0, 1)).tolist(),
+        }
+        print("EVALUATION=" + json.dumps(evaluation_summary), flush=True)
+
+    if amp_samples:
+        manager = env.unwrapped.observation_manager
+        dump = {
+            "checkpoint": resume_path,
+            "evaluation": evaluation_summary,
+            "task": args_cli.task,
+            "seed": env_cfg.seed,
+            "settle_steps": amp_settle_steps,
+            "sample_interval_steps": 10,
+            "step_dt": dt,
+            "routes": runner.alg.routes,
+            "amp_cfg": runner.alg.amp_cfg,
+            "obs_groups": runner.alg.amp_obs_groups,
+            "layouts": {
+                name: {"terms": manager.active_terms[name], "shapes": manager.group_obs_term_dim[name]}
+                for name in amp_samples
+            },
+            "observations": {name: torch.cat(samples) for name, samples in amp_samples.items()},
+        }
+        dump_path = os.path.abspath(args_cli.amp_observation_dump)
+        os.makedirs(os.path.dirname(dump_path), exist_ok=True)
+        with open(dump_path, "xb") as output:
+            torch.save(dump, output)
+        print(f"AMP_OBSERVATION_DUMP={dump_path}", flush=True)
 
     # close the simulator
     env.close()

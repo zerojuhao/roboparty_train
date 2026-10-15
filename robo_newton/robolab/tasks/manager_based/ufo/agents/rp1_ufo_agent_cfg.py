@@ -2,52 +2,14 @@
 
 from __future__ import annotations
 
-import os
-
 from isaaclab.utils.configclass import configclass
 from isaaclab_rl.rsl_rl.rl_cfg import RslRlBaseRunnerCfg
 
-from .fb_cpr_cfg import FbCprDiscriminatorCfg
-
-AUX_REWARDS = (
-    "penalty_torques",
-    "penalty_action_rate",
-    "limits_dof_pos",
-    "height_gated_undesired_contacts",
-    "penalty_slippage",
-    # Regularization terms shared with the WBC task.
-    "joint_acc_l2",
-    "joint_velocity_l2",
-    "joint_energy",
-    "joint_rated_velocity",
-    "joint_rated_effort",
-    "action_jerk_l2",
-    "angular_momentum_rate_l2",
-    "yaw_angular_momentum_l2",
+from .fb_cpr_cfg import (
+    FbCprDiscriminatorCfg,
+    FbCprMlpModelCfg,
+    FbCprResidualModelCfg,
 )
-
-# Aux reward aggregation scalings. The eight original UFO terms use the
-# original FB agent preset values (humanoidverse/agents/presets/fb.py,
-# cartwheel_aux_safe=False), except penalty_torques which follows the RP1
-# WbcRewardsCfg joint_torques_l2 weight (-1e-5) instead of the original 0.0,
-# and undesired contacts which use BeyondMimic's per-body count semantics
-# with a stronger UFO-specific coefficient.
-# The WBC-shared regularization terms keep the RP1 WbcRewardsCfg weights.
-AUX_REWARDS_SCALING = {
-    "penalty_action_rate": -0.2,
-    "limits_dof_pos": -10.0,
-    "penalty_slippage": -2.0,
-    "height_gated_undesired_contacts": -0.5,
-    "penalty_torques": -1e-5,
-    "joint_acc_l2": -5.0e-7,
-    "joint_velocity_l2": -2e-4,
-    "joint_energy": -1e-4,
-    "joint_rated_velocity": -0.05,
-    "joint_rated_effort": -0.04,
-    "action_jerk_l2": -0.02,
-    "angular_momentum_rate_l2": -5e-5,
-    "yaw_angular_momentum_l2": -1e-3,
-}
 
 
 @configclass
@@ -58,7 +20,7 @@ class FbCprAlgorithmCfg:
     the entrypoint helpers (e.g. the Distillation checkpoint selector).
     """
 
-    class_name: str = "FbCprAux"
+    class_name: str = "FbCprAuxAgent"
 
 
 @configclass
@@ -68,36 +30,69 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
 
     experiment_name: str = "rp1_ufo"
     wandb_project: str = "rp1_ufo"
+    logger: str = "wandb"
 
     num_steps_per_env: int = 1
-    max_iterations: int = 375000
-    num_env_steps: int = 384_000_000
-    save_interval: int = 2000
+    max_iterations: int = 1_000_000
+    num_env_steps: int = 1_000_000_000
+    checkpoint_interval_steps: int = 9_600_000
+    checkpoint_replay: bool = True
+    replay_checkpoint_keep: int = 1
+    resume_replay_warmup_steps: int = 10_240
     seed: int = 52
 
     z_dim: int = 256
     norm_z: bool = True
-    # Network sizes are explicit so each branch can be tuned without changing
-    # the FB agent implementation.
-    actor_hidden_dim: int = 1024
-    actor_hidden_layers: int = 6
-    forward_hidden_dim: int = 1024
-    forward_hidden_layers: int = 6
-    critic_hidden_dim: int = 1024
-    critic_hidden_layers: int = 6
-    backward_hidden_dim: int = 256
-    backward_hidden_layers: int = 1
-    net_embedding_layers: int = 2
+    actor = FbCprResidualModelCfg(
+        hidden_dim=1024,
+        hidden_layers=6,
+        embedding_layers=2,
+        activation="mish",
+        layer_norm=True,
+    )
+    forward_map = FbCprResidualModelCfg(
+        hidden_dim=1024,
+        hidden_layers=6,
+        embedding_layers=6,
+        activation="mish",
+        layer_norm=True,
+    )
+    backward_map = FbCprMlpModelCfg(
+        hidden_dims=[256],
+        activation="relu",
+        first_activation="tanh",
+        layer_norm=True,
+    )
+    critic = FbCprResidualModelCfg(
+        hidden_dim=1024,
+        hidden_layers=6,
+        embedding_layers=6,
+        activation="mish",
+        layer_norm=True,
+    )
+    # Used only when shared_value_net=False; otherwise critic defines the shared trunk.
+    aux_critic = FbCprResidualModelCfg(
+        hidden_dim=1024,
+        hidden_layers=6,
+        embedding_layers=6,
+        activation="mish",
+        layer_norm=True,
+    )
     discriminator: FbCprDiscriminatorCfg = FbCprDiscriminatorCfg(
         hidden_dims=[1024, 1024, 1024],
+        activation="relu",
+        first_activation="tanh",
+        layer_norm=True,
         loss_type="bce",
         reward_type="log_odds",
     )
     # Share one trunk between the discriminator and auxiliary critic heads.
     # Both losses are optimized together in one backward/optimizer step.
-    shared_value_net: bool = True
+    # Match H200 FB-CPR: discriminator and auxiliary critics have independent trunks.
+    shared_value_net: bool = False
     # Keep two independently parameterized members for pessimistic estimates.
     critic_ensemble_members: int = 2
+    forward_ensemble_members: int = 2
     batch_size: int = 1024
     discount: float = 0.98
     buffer_size: int = 5_120_000
@@ -152,7 +147,10 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
 
     # Original 384M run evaluated every 3.2M env steps; 400 iterations x 8192
     # env steps = 3.28M.
-    eval_interval_iterations: int = 400
+    eval_interval_steps: int = 3_200_000
+    log_interval_steps: int = 384_000
+    eval_num_envs: int = 256
+    eval_timeout_s: float = 1800.0
     eval_num_motions: int = 0
 
     # Original-UFO EMD prioritization (workspace.py): per-clip joint-space EMD
@@ -162,28 +160,3 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     prioritization_max_val: float = 2.0
     prioritization_scale: float = 1.5
     prioritization_mode: str = "exp"  # lin | exp | bin
-
-    aux_rewards: list[str] = list(AUX_REWARDS)
-    aux_rewards_scaling: dict[str, float] = dict(AUX_REWARDS_SCALING)
-
-    def __post_init__(self) -> None:
-        parent_post_init = getattr(super(), "__post_init__", None)
-        if callable(parent_post_init):
-            parent_post_init()
-        bf16 = os.environ.get("UFO_BF16_AMP")
-        if bf16 is not None:
-            self.use_bf16_amp = bf16.strip().lower() in ("1", "true", "yes")
-            print(f"[UFO_PREC] use_bf16_amp -> {self.use_bf16_amp}", flush=True)
-        precision = os.environ.get("UFO_MATMUL_PRECISION")
-        if precision:
-            self.matmul_precision = precision.strip().lower()
-            print(f"[UFO_PREC] matmul_precision -> {self.matmul_precision}", flush=True)
-        fused_adam = os.environ.get("UFO_FUSED_ADAM")
-        if fused_adam is not None:
-            self.use_fused_adam = fused_adam.strip().lower() in ("1", "true", "yes")
-            print(f"[UFO_PERF] use_fused_adam -> {self.use_fused_adam}", flush=True)
-        compile_mode = os.environ.get("UFO_TORCH_COMPILE_MODE")
-        if compile_mode is not None:
-            compile_mode = compile_mode.strip().lower()
-            self.torch_compile_mode = None if compile_mode in ("", "0", "none", "off") else compile_mode
-            print(f"[UFO_PERF] torch_compile_mode -> {self.torch_compile_mode}", flush=True)

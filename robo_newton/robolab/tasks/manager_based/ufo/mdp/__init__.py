@@ -15,10 +15,11 @@ from .pufo_observations import (
     heading_context as pufo_heading_context,
     local_self_obs as pufo_local_self_obs,
     terrain_priv as pufo_terrain_priv,
+    transition_kinematics as pufo_transition_kinematics,
     velocity_command as pufo_velocity_command,
     velocity_target_yaw as pufo_velocity_target_yaw,
 )
-from . import events, observations, pufo_rewards, rewards, terminations
+from . import curriculums, events, observations, rewards, terminations
 
 __all__ = [
     "JointPositionActionCfg",
@@ -35,13 +36,14 @@ __all__ = [
     "pufo_heading_context",
     "pufo_local_self_obs",
     "pufo_terrain_priv",
+    "pufo_transition_kinematics",
     "pufo_velocity_command",
     "pufo_velocity_target_yaw",
     "UFOMotionCommand",
     "UFOMotionCommandCfg",
+    "curriculums",
     "events",
     "observations",
-    "pufo_rewards",
     "rewards",
     "terminations",
 ]

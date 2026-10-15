@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -159,6 +160,45 @@ class TestComputeLoss:
         loss = sym.compute_loss(actor, batch, NUM_ENVS)
 
         assert loss.requires_grad
+
+    def test_reuses_cached_action_means(self) -> None:
+        """An augmented PPO batch should not require a second actor forward."""
+        sym = Symmetry(
+            env=None,
+            data_augmentation_func=_negate_augmentation,
+            use_data_augmentation=True,
+            use_mirror_loss=True,
+        )
+        batch = _make_batch()
+        sym.augment_batch(batch, NUM_ENVS)
+        cached_means = torch.randn(2 * NUM_ENVS, NUM_ACTIONS, requires_grad=True)
+
+        def fail_actor(_obs: TensorDict) -> torch.Tensor:
+            raise AssertionError("actor should not be called when cached means are supplied")
+
+        loss = sym.compute_loss(
+            fail_actor, batch, NUM_ENVS, mean_actions=cached_means  # type: ignore[arg-type]
+        )
+        loss.backward()
+
+        assert cached_means.grad is not None
+
+    def test_rejects_mismatched_cached_action_means(self) -> None:
+        sym = Symmetry(
+            env=None,
+            data_augmentation_func=_negate_augmentation,
+            use_data_augmentation=True,
+        )
+        batch = _make_batch()
+        sym.augment_batch(batch, NUM_ENVS)
+
+        with pytest.raises(ValueError, match="Cached action means"):
+            sym.compute_loss(
+                _make_actor(),
+                batch,
+                NUM_ENVS,
+                mean_actions=torch.randn(NUM_ENVS, NUM_ACTIONS),
+            )
 
     def test_detached_when_mirror_loss_disabled(self) -> None:
         """When the mirror loss is off the loss is still returned for logging, but detached from the graph."""

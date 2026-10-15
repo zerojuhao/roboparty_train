@@ -35,4 +35,3 @@ import os
 ISAAC_ASSET_DIR = os.path.abspath(os.path.dirname(__file__))
 ROBO_NEWTON_DIR = os.path.abspath(os.path.join(ISAAC_ASSET_DIR, "../.."))
 ISAAC_DATA_DIR = os.path.join(ROBO_NEWTON_DIR, "data")
-UFO_DATA_DIR = os.path.abspath(os.path.join(ROBO_NEWTON_DIR, "..", "ufo_data"))

@@ -37,11 +37,21 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg
+
+
+def override_resumed_learning_rate(algorithm, learning_rate: float) -> None:
+    """Override a loaded PPO optimizer's rate without discarding its moments."""
+    if not math.isfinite(learning_rate) or learning_rate <= 0:
+        raise ValueError("Resume learning rate must be finite and positive")
+    algorithm.learning_rate = learning_rate
+    for group in algorithm.optimizer.param_groups:
+        group["lr"] = learning_rate
 
 
 def add_rsl_rl_args(parser: argparse.ArgumentParser):
@@ -61,6 +71,10 @@ def add_rsl_rl_args(parser: argparse.ArgumentParser):
     arg_group.add_argument("--resume", action="store_true", default=False, help="Whether to resume from a checkpoint.")
     arg_group.add_argument("--load_run", type=str, default=None, help="Name of the run folder to resume from.")
     arg_group.add_argument("--checkpoint", type=str, default=None, help="Checkpoint file to resume from.")
+    arg_group.add_argument(
+        "--checkpoint-replay", action=argparse.BooleanOptionalAction, default=None,
+        help="Save rank-local UFO/PUFO replay with checkpoints (default: enabled).",
+    )
     # -- logger arguments
     arg_group.add_argument(
         "--logger", type=str, default=None, choices={"wandb", "tensorboard", "neptune"}, help="Logger module to use."
@@ -110,6 +124,10 @@ def update_rsl_rl_cfg(agent_cfg: RslRlBaseRunnerCfg, args_cli: argparse.Namespac
         agent_cfg.load_run = args_cli.load_run
     if args_cli.checkpoint is not None:
         agent_cfg.load_checkpoint = args_cli.checkpoint
+    if getattr(args_cli, "checkpoint_replay", None) is not None:
+        if not hasattr(agent_cfg, "checkpoint_replay"):
+            raise ValueError("--checkpoint-replay is only supported by UFO/PUFO runners")
+        agent_cfg.checkpoint_replay = args_cli.checkpoint_replay
     if args_cli.run_name is not None:
         agent_cfg.run_name = args_cli.run_name
     if args_cli.logger is not None:

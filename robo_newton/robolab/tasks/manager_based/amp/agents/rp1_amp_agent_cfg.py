@@ -17,6 +17,7 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 5000
     save_interval = 500
     experiment_name = "rp1_amp"
+    logger = "wandb"
     wandb_project = "rp1_amp"
     obs_groups = {
         "actor": ["policy"],
@@ -30,7 +31,9 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
         hidden_dims=[512, 256, 128],
         obs_normalization=True,
         activation="elu",
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+        distribution_cfg=AMPModelCfg.GaussianDistributionCfg(
+            init_std=1.0,
+        ),
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
@@ -60,32 +63,42 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             data_augmentation_func=compute_symmetric_states,
         ),
         amp_cfg=RslRlAmpCfg(
+            turn_style_command_group="critic",
             disc_obs_buffer_size=100,
             grad_penalty_scale=10.0,
-            disc_trunk_weight_decay=1.0e-3,
-            disc_linear_weight_decay=1.0e-1,
-            disc_learning_rate=1.0e-4,
+            disc_trunk_weight_decay=1.0e-4,
+            disc_linear_weight_decay=1.0e-2,
+            disc_learning_rate=1.0e-5,
             disc_max_grad_norm=1.0,
+            disc_num_updates=4,
             amp_discriminator=RslRlAmpCfg.AMPDiscriminatorCfg(
-                hidden_dims=[512, 256],
+                hidden_dims=[256, 128],
                 activation="elu",
-                style_reward_scale=2.0,
-                task_style_lerp=0.3,
+                style_reward_scale=4.0,
+                task_style_lerp=0.7,
             ),
             discriminators={
                 "general": {
                     "all_envs": True,
                     "policy_obs_set": "discriminator",
                     "demonstration_obs_set": "discriminator_demonstration",
-                    "amp_discriminator": {"hidden_dims": [512, 256]},
+                    "amp_discriminator": {"hidden_dims": [256, 128]},
                 },
                 "upper": {
                     "all_envs": True,
                     "policy_obs_set": "upper_discriminator",
                     "demonstration_obs_set": "upper_discriminator_demonstration",
+                    "style_reward_weight": 3.0,
                     "amp_discriminator": {"hidden_dims": [256, 128]},
                 },
             },
             loss_type="LSGAN",
         ),
     )
+
+
+@configclass
+class RP1AmpPathRunnerCfg(RP1AmpRunnerCfg):
+    """Runner for path rewards and privileged critic path feedback."""
+
+    experiment_name = "rp1_amp_path"

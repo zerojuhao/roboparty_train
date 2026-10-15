@@ -55,6 +55,11 @@ parser.add_argument("--push_robot", action='store_true', help="Push robot during
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument(
+    "--export-only",
+    action="store_true",
+    help="Export the policy ONNX files (including PUFO backward context) and skip simulation.",
+)
+parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
@@ -91,7 +96,8 @@ import time
 import torch
 import copy
 
-from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+from rsl_rl.runners import DistillationRunner, FbCprRunner, OnPolicyRunner
+from rsl_rl.runners.fbcpr_runner import default_rsl_rl_log_root
 
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -296,8 +302,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.interrupt.interrupt_ratio = 1.0
 
     # specify directory for logging experiments
-    log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
-    log_root_path = os.path.abspath(log_root_path)
+    log_root_path = os.path.join(default_rsl_rl_log_root(), agent_cfg.experiment_name)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.checkpoint:
         resume_path = retrieve_file_path(args_cli.checkpoint)
@@ -344,43 +349,53 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     elif agent_cfg.class_name == "DistillationRunner":
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    elif agent_cfg.class_name == "FbCprRunner":
+        runner = FbCprRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
-    runner.load(resume_path, map_location=agent_cfg.device)
+    if isinstance(runner, FbCprRunner):
+        runner.load(resume_path, load_optimizer=False)
+    else:
+        runner.load(resume_path, map_location=agent_cfg.device)
 
     # obtain the trained policy for inference
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-    # extract the neural network module
-    # we do this in a try-except to maintain backwards compatibility.
-    try:
-        # version 2.3 onwards
-        policy_nn = runner.alg.policy
-    except AttributeError:
-        # version 2.2 and below
-        policy_nn = runner.alg.actor_critic
-
-    # extract the normalizer
-    if hasattr(policy_nn, "actor_obs_normalizer"):
-        normalizer = policy_nn.actor_obs_normalizer
-    elif hasattr(policy_nn, "student_obs_normalizer"):
-        normalizer = policy_nn.student_obs_normalizer
-    else:
-        normalizer = None
-
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
     if not os.path.exists(export_model_dir):
         os.makedirs(export_model_dir, exist_ok=True)
-    if hasattr(env_cfg, "attn_enc"):
+    if isinstance(runner, FbCprRunner):
+        exported = runner.export_policy_to_onnx(export_model_dir)
+        print(f"[INFO]: PUFO ONNX exported: {exported}")
+    else:
+        # Extract the neural network module.  The try-except keeps support for
+        # both the current and legacy Isaac Lab runner layouts.
+        try:
+            policy_nn = runner.alg.policy
+        except AttributeError:
+            policy_nn = runner.alg.actor_critic
+        if hasattr(policy_nn, "actor_obs_normalizer"):
+            normalizer = policy_nn.actor_obs_normalizer
+        elif hasattr(policy_nn, "student_obs_normalizer"):
+            normalizer = policy_nn.student_obs_normalizer
+        else:
+            normalizer = None
+
+    if not isinstance(runner, FbCprRunner) and hasattr(env_cfg, "attn_enc"):
         torch_policy_exporter = TorchAttnEncPolicyExporter(policy_nn, normalizer)
         torch_policy_exporter.export(path=export_model_dir, filename="policy.pt")
         onnx_policy_exporter = OnnxAttnEncPolicyExporter(policy_nn, normalizer, verbose=False)
         onnx_policy_exporter.export(path=export_model_dir, filename="policy.onnx")
-    else:
+    elif not isinstance(runner, FbCprRunner):
         export_policy_as_jit(policy_nn, normalizer, path=export_model_dir, filename="policy.pt")
         export_policy_as_onnx(
             policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx"
         )
+
+    if args_cli.export_only:
+        print(f"[INFO]: Export-only complete: {export_model_dir}")
+        env.close()
+        return
 
     if not args_cli.headless:
         from robolab.utils.keyboard import Keyboard

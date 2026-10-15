@@ -33,7 +33,7 @@
 from isaaclab.utils import configclass
 
 from isaaclab_rl.rsl_rl import (
-    RslRlOnPolicyRunnerCfg, 
+    RslRlOnPolicyRunnerCfg,
     RslRlMLPModelCfg,
     RslRlPpoAlgorithmCfg,
 )
@@ -50,7 +50,9 @@ class RPOBeyondMimicPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         hidden_dims=[512, 256, 128],
         activation="elu",
         obs_normalization=False,
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(
+            init_std=1.0,
+        ),
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
@@ -71,5 +73,5 @@ class RPOBeyondMimicPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
         normalize_advantage_per_mini_batch=False,
-        symmetry_cfg=None
+        symmetry_cfg=None,
     )

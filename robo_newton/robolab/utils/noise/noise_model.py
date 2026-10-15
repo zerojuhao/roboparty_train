@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         DepthArtifactNoiseCfg,
         DepthContourNoiseCfg,
         DepthNormalizationCfg,
+        DepthSanitizationCfg,
         DepthSkyArtifactNoiseCfg,
         DepthSteroNoiseCfg,
         GaussianBlurNoiseCfg,
@@ -258,6 +259,18 @@ def depth_sky_artifact_noise(
         data[to_sky_mask] += ((1 - artifacts_buffer) * pixel_value)[to_sky_mask]
         pass
 
+    return data
+
+
+def sanitize_depth(
+    data: torch.Tensor, cfg: DepthSanitizationCfg, env_ids: torch.Tensor | Sequence[int]
+) -> torch.Tensor:
+    """Replace invalid depth before filtering, preserving the configured fill convention."""
+    invalid = getattr(cfg, "invalid_depth", 0.0)
+    data = torch.nan_to_num(data, nan=invalid, posinf=invalid, neginf=invalid)
+    data = torch.where(data < 0, invalid, data).clamp_min(getattr(cfg, "min_depth", 0.0))
+    if cfg.max_depth is not None:
+        data = data.clamp_max(cfg.max_depth)
     return data
 
 

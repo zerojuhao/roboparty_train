@@ -35,3 +35,4 @@ from isaaclab_tasks.core.velocity.mdp import *
 from .observations import *
 from .rewards import *
 from .commands import *
+from .contact_slip import feet_contact_slip

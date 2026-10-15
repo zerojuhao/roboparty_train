@@ -13,7 +13,7 @@ setup(
     license="BSD-3-Clause",
     packages=find_packages(),
     install_requires=[
-        "mujoco==3.3.3",
+        "mujoco==3.12.0",
         "mujoco-python-viewer",
         "psutil",
         "joblib>=1.2.0",

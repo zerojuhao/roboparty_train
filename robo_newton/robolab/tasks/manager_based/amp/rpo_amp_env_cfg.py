@@ -145,7 +145,9 @@ class RPOAmpRewards():
         weight=-1,
         params={
             "threshold": 1,
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces", body_names="^(?!.*ankle_roll_link$).*$"
+            ),
         },
     )
 
@@ -244,7 +246,7 @@ class RPOAmpEnvCfg(AmpEnvCfg):
         self.rewards.undesired_contacts.weight = -10.0
         self.rewards.undesired_contacts.params["sensor_cfg"] = SceneEntityCfg(
             "contact_forces",
-            body_names=["(?!.*ankle.*).*"],  # exclude ankle links
+            body_names="^(?!.*ankle_roll_link$).*$",
         )
         
         # ------------------------------------------------------
@@ -259,13 +261,9 @@ class RPOAmpEnvCfg(AmpEnvCfg):
         # Curriculum
         # ------------------------------------------------------
         
-        
-        
         self.terminations.base_contact.params["sensor_cfg"].body_names = [
             ".*_thigh_.*_link", "base_link", ".*_arm_.*_link", ".*_elbow_.*_link",
         ]
-        if self.__class__.__name__ == "RPOAmpEnvCfg":
-            self.disable_zero_weight_rewards()
             
             
 @configclass

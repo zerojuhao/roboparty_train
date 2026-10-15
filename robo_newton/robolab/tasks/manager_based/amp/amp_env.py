@@ -40,6 +40,8 @@ from isaaclab.managers import ActionManager, ObservationManager, RecorderManager
 from robolab.tasks.manager_based.amp.managers import MotionDataManager, AnimationManager
 from .animation_env import AnimationEnv
 from .amp_env_cfg import AmpEnvCfg
+from .mdp.motor_load import MotorLoadTracker
+from .mdp.rewards import braking_load_metrics
 
 class AmpEnv(AnimationEnv):
     
@@ -58,6 +60,13 @@ class AmpEnv(AnimationEnv):
     
     def __init__(self, cfg: AmpEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
+        robot = self.scene["robot"]
+        self.motor_load = MotorLoadTracker(self.num_envs, robot.num_joints, self.device)
+
+    def _reset_idx(self, env_ids):
+        super()._reset_idx(env_ids)
+        if hasattr(self, "motor_load"):
+            self.motor_load.reset(env_ids)
 
     # def _get_amp_observations(self) -> torch.Tensor:
     #     """Get the AMP observations.
@@ -93,8 +102,9 @@ class AmpEnv(AnimationEnv):
 
         # check if we need to do rendering within the physics loop
         # note: checked here once to avoid multiple checks within the loop
-        is_rendering = self.sim.has_gui or self.has_rtx_sensors
+        is_rendering = self.sim.is_rendering
 
+        self.motor_load.begin_step()
         # perform physics stepping
         for _ in range(self.cfg.decimation):
             self._sim_step_counter += 1
@@ -102,6 +112,9 @@ class AmpEnv(AnimationEnv):
             self.action_manager.apply_action()
             # set actions into simulator
             self.scene.write_data_to_sim()
+            # Explicit actuator effort and its input velocity now describe the
+            # same physics interval; a control-rate sample can miss its peak.
+            self.motor_load.sample(self.scene["robot"].data)
             # simulate
             self.sim.step(render=False)
             self.recorder_manager.record_post_physics_decimation_step()
@@ -109,7 +122,7 @@ class AmpEnv(AnimationEnv):
             # note: we assume the render interval to be the shortest accepted rendering interval.
             #    If a camera needs rendering at a faster frequency, this will lead to unexpected behavior.
             if self._sim_step_counter % self.cfg.sim.render_interval == 0 and is_rendering:
-                self.sim.render()
+                self.sim.render(skip_app_pumping=not self.render_enabled)
             # update buffers at sim dt
             self.scene.update(dt=self.physics_dt)
 
@@ -125,6 +138,11 @@ class AmpEnv(AnimationEnv):
         self.reset_time_outs = self.termination_manager.time_outs
         # -- reward computation
         self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
+        power_term = self.cfg.rewards.braking_power_peak_l2
+        braking_metrics = (
+            braking_load_metrics(self, **power_term.params, power_weight=power_term.weight)
+            if power_term is not None else {}
+        )
         # # -- update AMP observations
         # amp_obs = self._get_amp_observations()
 
@@ -151,11 +169,21 @@ class AmpEnv(AnimationEnv):
             # trigger recorder terms for post-reset calls
             self.recorder_manager.record_post_reset(reset_env_ids)
 
+        # Use a fresh log dictionary: the runner retains each step until logging.
+        self.extras["log"] = {
+            **{key: value for key, value in self.extras.get("log", {}).items()
+               if not key.startswith("Braking/")},
+            **braking_metrics,
+        }
+
         # -- update command
         self.command_manager.compute(dt=self.step_dt)
         # -- step interval events
         if "interval" in self.event_manager.available_modes:
             self.event_manager.apply(mode="interval", dt=self.step_dt)
+        # VideoRecorderCfg is step-driven in Isaac Lab 3.0.
+        for recorder in self.video_recorders:
+            recorder.step()
         # -- compute observations
         # note: done after reset to get the correct observations for reset envs
         self.obs_buf = self.observation_manager.compute(update_history=True)

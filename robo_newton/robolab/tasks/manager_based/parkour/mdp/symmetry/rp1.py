@@ -61,10 +61,11 @@ def compute_symmetric_states(
     """Augment nested policy/critic observations and actions with RP1 symmetry."""
     if obs is not None:
         batch_size = obs.batch_size[0]
+        obs_aug = obs.repeat(2)
         obs_aug["policy"][:batch_size] = obs["policy"]
         obs_aug["critic"][:batch_size] = obs["critic"]
         obs_aug["policy"][batch_size:] = _transform_policy_obs_left_right(obs["policy"])
-        obs_aug["critic"][batch_size:] = _transform_critic_obs_left_right(obs["critic"])
+        obs_aug["critic"][batch_size:] = _transform_critic_obs_left_right(env, obs["critic"])
     else:
         obs_aug = None
 

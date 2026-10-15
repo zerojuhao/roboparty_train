@@ -20,6 +20,10 @@ class WallTerrainCfgMixin:
     wall_prob: List[float] = [0.0, 0.0, 0.0, 0.0]  # Probability of generating walls on [left, right, front, back] sides
     wall_height: float = 5.0  # Height of the walls
     wall_thickness: float = 0.05  # Thickness of the walls
+    interior_height_offset: float = 0.0
+    """Vertical offset for the generated interior; the configured flat border remains at zero."""
+    exact_flat_border: bool = False
+    """Resample the height field so ``border_width`` lands exactly on mesh vertices."""
 
 
 @configclass

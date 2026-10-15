@@ -108,6 +108,15 @@ def visualizable_image(
     return images
 
 
+def quantize_normalized_depth(images: torch.Tensor) -> torch.Tensor:
+    """Quantize normalized depth exactly once at the policy observation boundary."""
+    if images.dtype == torch.uint8:
+        return images
+    if not images.is_floating_point():
+        raise TypeError(f"Depth observations must be floating point or uint8, got {images.dtype}")
+    return images.mul(255.0).round().to(torch.uint8)
+
+
 class delayed_visualizable_image(ManagerTermBase):
     """A callable class that could sample delayed images from camera sensor that has history data. This is initially
     designed to use NoisyGroupedRayCasterCamera. The output shape will always be (N, num_output_frames, H, W) for now.
@@ -128,6 +137,7 @@ class delayed_visualizable_image(ManagerTermBase):
         self.history_skip_frames = max(cfg.params.get("history_skip_frames", 1), 1)
         # if greater than 0, the output data from this observation term will have history dimension, else no history dimension.
         self.num_output_frames = max(cfg.params.get("num_output_frames", 0), 1)
+        self.quantize_uint8 = cfg.params.get("quantize_uint8", False)
         assert len(self.sensor.data.output[self.data_type].shape) >= 5, (
             f"sensor data of type {self.data_type} should have (N, history, H, W, C) shape, but got"
             f" {self.sensor.data.output[self.data_type].shape}"
@@ -148,6 +158,16 @@ class delayed_visualizable_image(ManagerTermBase):
         )  # (num_output_frames,)
 
         self.check_delay_bounds()
+        self._batch_indices = torch.arange(env.num_envs, device=env.device).unsqueeze(1)
+        self._frame_indices = self._compute_frame_indices(self._num_delayed_frames)
+
+    def _compute_frame_indices(self, delays: torch.Tensor) -> torch.Tensor:
+        return (
+            self.sensor_history_length
+            - self.frame_offset.unsqueeze(0)
+            - delays.unsqueeze(1)
+            - 1
+        ).to(torch.long)
 
     def check_delay_bounds(self) -> None:
         """
@@ -169,16 +189,16 @@ class delayed_visualizable_image(ManagerTermBase):
         """
         if env_ids is None:
             env_ids = slice(None)
-        self._num_delayed_frames[env_ids] = _randomize_prop_by_op(
+        delays = _randomize_prop_by_op(
             self._num_delayed_frames[env_ids].unsqueeze(-1),
             self.delayed_frame_ranges,
             None,
             slice(None),
             operation="abs",
             distribution=self.delayed_frame_distribution,
-        ).squeeze(
-            -1
-        )  # (N,)
+        ).squeeze(-1)
+        self._num_delayed_frames[env_ids] = delays
+        self._frame_indices[env_ids] = self._compute_frame_indices(delays)
 
     def __call__(
         self,
@@ -189,6 +209,7 @@ class delayed_visualizable_image(ManagerTermBase):
         num_output_frames: int = 0,
         delayed_frame_ranges: tuple[int, int] = (0, 0),
         delayed_frame_distribution: Literal["uniform", "log_uniform"] = "uniform",
+        quantize_uint8: bool = False,
         debug_vis: bool = False,
         scale_up_vis: int = 5,
     ) -> torch.Tensor:
@@ -196,33 +217,20 @@ class delayed_visualizable_image(ManagerTermBase):
         Get the delayed frames from the sensor data.
         """
         # obtain the input image
-        images = self.sensor.data.output[self.data_type].clone()  # (N, history, H, W, C)
+        images = self.sensor.data.output[self.data_type]  # (N, history, H, W, C)
         # NOTE: Only depth-related data types with history are supported for now. where C = 1.
         images = images.squeeze(
             -1
         )  # (N, history, H, W, C) -> (N, history, H, W), images[:, -1] shall be the latest frame.
         # get the delayed frames
-        frame_indices = (
-            self.sensor_history_length - self.frame_offset.unsqueeze(0) - self._num_delayed_frames.unsqueeze(1) - 1
-        )  # (N, num_output_frames)
-        frame_indices = frame_indices.to(torch.long)
-        # final safety check to avoid frame_indices being out of bounds
-        assert (frame_indices >= 0).all(), f"frame_indices should be non-negative, but got {frame_indices}"
-        assert (
-            frame_indices < self.sensor_history_length
-        ).all(), f"frame_indices should be less than the sensor history length {self.sensor_history_length}"
-        # Use advanced indexing: create batch indices and use them together with frame_indices
-        batch_indices = (
-            torch.arange(images.shape[0], device=images.device)
-            .unsqueeze(1)
-            .expand(-1, frame_indices.shape[1])
-            .to(torch.long)
-        )
-        delayed_frames = images[batch_indices, frame_indices]  # (N, num_output_frames, H, W)
+        batch_indices = self._batch_indices.expand(-1, self._frame_indices.shape[1])
+        delayed_frames = images[batch_indices, self._frame_indices]  # (N, num_output_frames, H, W)
         if debug_vis:
             # (N, num_output_frames, H, W) -> (num_output_frames, H, N, W) -> (num_output_frames * H, N * W)
             _debug_visualize_image(
                 delayed_frames.permute(1, 2, 0, 3).flatten(start_dim=0, end_dim=1).flatten(start_dim=1, end_dim=2),
                 scale_up_vis,
             )
+        if self.quantize_uint8:
+            delayed_frames = quantize_normalized_depth(delayed_frames)
         return delayed_frames  # still delayed_frames[:, -1] shall be the latest frame.

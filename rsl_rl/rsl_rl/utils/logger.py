@@ -52,6 +52,8 @@ class Logger:
         self.ep_extras = []
         self.rewbuffer = deque(maxlen=100)
         self.lenbuffer = deque(maxlen=100)
+        self._pending_episode_stats = []
+        self._pending_rnd_episode_stats = []
         self.cur_reward_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self.cur_episode_length = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
@@ -141,17 +143,76 @@ class Logger:
                 self.cur_reward_sum += rewards
             self.cur_episode_length += 1
 
-            # Clear data for completed episodes
-            new_ids = (dones > 0).nonzero(as_tuple=False)
-            self.rewbuffer.extend(self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-            self.lenbuffer.extend(self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-            self.cur_reward_sum[new_ids] = 0
-            self.cur_episode_length[new_ids] = 0
+            # Fixed-size snapshots avoid per-step nonzero and device-to-host synchronization.
+            ended = dones.reshape(-1) > 0
+            self._pending_episode_stats.append(
+                torch.stack((ended, self.cur_reward_sum, self.cur_episode_length), dim=-1).detach()
+            )
+            self.cur_reward_sum.masked_fill_(ended, 0)
+            self.cur_episode_length.masked_fill_(ended, 0)
             if intrinsic_rewards is not None:
-                self.erewbuffer.extend(self.cur_ereward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                self.irewbuffer.extend(self.cur_ireward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                self.cur_ereward_sum[new_ids] = 0
-                self.cur_ireward_sum[new_ids] = 0
+                self._pending_rnd_episode_stats.append(
+                    torch.stack((ended, self.cur_ereward_sum, self.cur_ireward_sum), dim=-1).detach()
+                )
+                self.cur_ereward_sum.masked_fill_(ended, 0)
+                self.cur_ireward_sum.masked_fill_(ended, 0)
+            if len(self._pending_episode_stats) >= self.cfg["num_steps_per_env"]:
+                self._flush_episode_stats()
+
+    def _flush_episode_stats(self) -> None:
+        groups = [(self._pending_episode_stats, self.rewbuffer, self.lenbuffer)]
+        if self._pending_rnd_episode_stats:
+            groups.append((self._pending_rnd_episode_stats, self.erewbuffer, self.irewbuffer))
+        for pending, first, second in groups:
+            if pending:
+                stats = torch.cat(pending, dim=0)
+                # Time-major order matches the old per-step, environment-major append order.
+                completed = stats[stats[:, 0] > 0, 1:][-first.maxlen:]
+                for left, right in completed.cpu().tolist():
+                    first.append(left)
+                    second.append(right)
+                pending.clear()
+
+    @staticmethod
+    def _format_amp_console_metrics(loss_dict: dict, pad: int) -> str:
+        """Return a compact AMP summary while full metrics remain in the log writer."""
+        amp_metrics = {key: value for key, value in loss_dict.items() if key.startswith("AMP/")}
+        if not amp_metrics:
+            return ""
+
+        lines = []
+
+        rollout_fields = []
+        for label, key in (("style_reward", "AMP/rollout/style_reward_mean"),):
+            if key in amp_metrics:
+                rollout_fields.append(f"{label}={amp_metrics[key]:.4f}")
+        if rollout_fields:
+            lines.append(f"{f'AMP/rollout:':>{pad}} {' '.join(rollout_fields)}\n")
+
+        routes = []
+        for key in amp_metrics:
+            parts = key.split("/")
+            if len(parts) >= 3 and parts[1] != "rollout" and parts[1] not in routes:
+                routes.append(parts[1])
+
+        for route in routes:
+            fields = []
+            for label, suffix in (
+                ("style_reward", "rollout_style_reward_mean"),
+                ("accuracy", "accuracy"),
+            ):
+                key = f"AMP/{route}/{suffix}"
+                if key in amp_metrics:
+                    fields.append(f"{label}={amp_metrics[key]:.4f}")
+
+            logit_gap = amp_metrics.get(f"AMP/{route}/logit_gap")
+            if logit_gap is not None:
+                fields.append(f"logit_gap={logit_gap:.4f}")
+
+            if fields:
+                lines.append(f"{f'AMP/{route}:':>{pad}} {' '.join(fields)}\n")
+
+        return "".join(lines)
 
     def log(
         self,
@@ -174,6 +235,7 @@ class Logger:
         """
         if self.writer is not None:
             collection_size = self.cfg["num_steps_per_env"] * self.num_envs * self.gpu_world_size
+            self._flush_episode_stats()
             iteration_time = collect_time + learn_time
             self.tot_timesteps += collection_size
             self.tot_time += iteration_time
@@ -204,7 +266,8 @@ class Logger:
 
             # Log losses
             for key, value in loss_dict.items():
-                self.writer.add_scalar(f"Loss/{key}", value, it)
+                tag = key if "/" in key else f"Loss/{key}"
+                self.writer.add_scalar(tag, value, it)
             self.writer.add_scalar("Loss/learning_rate", learning_rate, it)
 
             # Log std
@@ -224,13 +287,6 @@ class Logger:
                     self.writer.add_scalar("Rnd/weight", rnd_weight, it)  # type: ignore
                 self.writer.add_scalar("Train/mean_reward", statistics.mean(self.rewbuffer), it)
                 self.writer.add_scalar("Train/mean_episode_length", statistics.mean(self.lenbuffer), it)
-                if not isinstance(self.writer, WandbLogWriter):
-                    self.writer.add_scalar(
-                        "Train/mean_reward/time", statistics.mean(self.rewbuffer), int(self.tot_time)
-                    )
-                    self.writer.add_scalar(
-                        "Train/mean_episode_length/time", statistics.mean(self.lenbuffer), int(self.tot_time)
-                    )
 
             # Print to console
             log_string = f"""{"#" * width}\n"""
@@ -250,7 +306,11 @@ class Logger:
 
             # Print losses
             for key, value in loss_dict.items():
-                log_string += f"""{f"Mean {key} loss:":>{pad}} {value:.4f}\n"""
+                if key.startswith("AMP/"):
+                    continue
+                label = key if "/" in key else f"Mean {key} loss"
+                log_string += f"""{f"{label}:":>{pad}} {value:.4f}\n"""
+            log_string += self._format_amp_console_metrics(loss_dict, pad)
 
             # Print rewards and episode length
             if len(self.rewbuffer) > 0:

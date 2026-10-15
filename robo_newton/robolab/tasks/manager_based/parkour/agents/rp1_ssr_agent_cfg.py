@@ -1,9 +1,16 @@
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlSymmetryCfg
 
-from robolab.tasks.manager_based.amp.agents.rpo_amp_agent_cfg import RslRlAmpCfg, RslRlPpoAmpAlgorithmCfg
-from robolab.tasks.manager_based.parkour.mdp.foothold_prediction import FootholdGridCfg, FootholdPredictorCfg
+from robolab.tasks.manager_based.amp.agents.rpo_amp_agent_cfg import (
+    RslRlAmpCfg,
+    RslRlPpoAmpAlgorithmCfg,
+)
+from robolab.tasks.manager_based.parkour.mdp.foothold_prediction import (
+    FootholdGridCfg,
+    FootholdPredictorCfg,
+)
 from robolab.tasks.manager_based.parkour.mdp.symmetry import rp1
+
 from .parkour_model_cfg import ParkourModelCfg
 
 
@@ -21,6 +28,10 @@ class RslRlMultiRewardPpoAmpAlgorithmCfg(RslRlPpoAmpAlgorithmCfg):
 class RP1SSRAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
     class_name = "OnPolicyRunner"
     num_steps_per_env = 24
+    compact_depth_history = True
+    depth_history_offsets = (35, 30, 25, 20, 15, 10, 5, 0)
+    check_for_nan_interval = 100
+    torch_compile_mode: str | None = "default"
     max_iterations = 30000
     save_interval = 500
     experiment_name = "rp1_ssr"
@@ -35,17 +46,31 @@ class RP1SSRAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
     actor = ParkourModelCfg(
         hidden_dims=[256, 128, 64],
         obs_normalization=True,
-        distribution_cfg=ParkourModelCfg.GaussianDistributionCfg(init_std=1.0),
+        distribution_cfg=ParkourModelCfg.GaussianDistributionCfg(
+            init_std=1.0,
+        ),
         encoder_cfg={
-            "channels": [16, 32, 64], "kernel_sizes": [3, 3, 3],
-            "strides": [2, 2, 1], "hidden_sizes": [256, 256],
-            "output_size": 256, "paddings": [1, 1, 1], "nonlinearity": "ReLU",
-            "use_maxpool": True, "last_activation": "ReLU",
+            "channels": [16, 32, 64],
+            "kernel_sizes": [3, 3, 3],
+            "strides": [2, 2, 1],
+            "hidden_sizes": [256, 256],
+            "output_size": 256,
+            "paddings": [1, 1, 1],
+            "nonlinearity": "ReLU",
+            "use_maxpool": True,
+            "last_activation": "ReLU",
+            "input_dtype": "uint8",
+            "input_range": (0.0, 255.0),
         },
+        actor_onnx_filename="policy_ssr.onnx",
         num_moe_experts=3,
         enable_ssr_estimation=True,
     )
-    critic = ParkourModelCfg(hidden_dims=[256, 128, 64], obs_normalization=True, num_moe_experts=3)
+    critic = ParkourModelCfg(
+        hidden_dims=[256, 128, 64],
+        obs_normalization=True,
+        num_moe_experts=3,
+    )
     foothold_imagination: FootholdPredictorCfg = FootholdPredictorCfg(
         enabled=True,
         hidden_dims=[512, 256, 128],
@@ -59,7 +84,7 @@ class RP1SSRAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             yaw_sigma_max=0.5,
             expectation_grid_size=5,
             expectation_std_range=2.0,
-            expectation_eval_chunk_size=64,
+            expectation_eval_chunk_size=256,
             expectation_weighting="max",
             reward_sigma_min=0.03,
         ),
@@ -75,10 +100,10 @@ class RP1SSRAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
         pending_sample_stride=1,
         train_pending_tail_steps=0,
         train_buffer_capacity=250_000,
-        batch_size=4096,
-        updates_per_iteration=8,
+        batch_size=2048,
+        updates_per_iteration=4,
         balanced_sampling=True,
-        balanced_candidate_multiplier=8,
+        balanced_candidate_multiplier=4,
         min_train_samples=25_000,
         curriculum_level_threshold=1.0,
         enable_xy_rmse_threshold=0.05,
@@ -98,6 +123,7 @@ class RP1SSRAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
+        use_mixed_precision=True,
         symmetry_cfg=RslRlSymmetryCfg(
             use_data_augmentation=True,
             use_mirror_loss=True,
@@ -111,8 +137,11 @@ class RP1SSRAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             disc_linear_weight_decay=1.0e-3,
             disc_learning_rate=1.0e-5,
             disc_max_grad_norm=1.0,
+            disc_num_updates=4,
             amp_discriminator=RslRlAmpCfg.AMPDiscriminatorCfg(
-                hidden_dims=[512, 256], activation="ReLU", style_reward_scale=2.0,
+                hidden_dims=[512, 256],
+                activation="ReLU",
+                style_reward_scale=2.0,
                 task_style_lerp=0.3,
             ),
             loss_type="LSGAN",

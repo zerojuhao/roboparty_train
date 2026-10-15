@@ -84,6 +84,8 @@ class FootholdPredictorCfg:
     """Balance replay batches over terrain family, foot, and contact horizon."""
     balanced_candidate_multiplier: int = 8
     """Uniform candidate-pool multiplier used by approximate balanced sampling."""
+    grad_reduce_bucket_mb: float = 25.0
+    """Maximum packed gradient bucket size used by distributed predictor training."""
     min_train_samples: int = MISSING
     curriculum_level_threshold: float = MISSING
     """Enable terrain-ready after mean inverted-stairs (``stairs``+``inv``) curriculum exceeds this."""

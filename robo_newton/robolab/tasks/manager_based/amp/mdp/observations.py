@@ -39,6 +39,7 @@ import torch
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
+from robolab.utils.command_path import command_path_features
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -49,6 +50,13 @@ if TYPE_CHECKING:
 def _as_torch(value) -> torch.Tensor:
     """Return a torch view for Newton proxy arrays and ordinary tensors."""
     return value.torch if hasattr(value, "torch") else value
+
+
+def command_path_state(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    """Expose the command-relative state used by accumulated drift rewards."""
+    term = env.command_manager.get_term(command_name)
+    heading_delta = _as_torch(term.robot.data.heading_w) - term.segment_start_heading_w
+    return command_path_features(term.planar_offset_error, heading_delta, term.command)
 
 
 def root_local_rot_tan_norm(
@@ -259,6 +267,65 @@ def ref_root_lin_vel_b(
         return ref_root_lin_vel.reshape(num_envs, -1)
     else:
         return ref_root_lin_vel
+
+
+def ref_velocity_commands(
+    env: AnimationEnv,
+    animation: str,
+    flatten_steps_dim: bool = True,
+) -> torch.Tensor:
+    """Return the command-like velocity represented by each reference frame.
+
+    The policy discriminator receives the sampled command ``[vx, vy, wz]``.
+    Reference clips do not contain that command explicitly, so derive the same
+    three channels from the reference body-frame linear and angular velocity.
+    These are measured velocities, not independently recorded target commands.
+    Pairing them with policy target commands can expose a source-label shortcut
+    when actual velocities are also observed. RP1 excludes this term from AMP.
+    """
+    animation_term: AnimationTerm = env.animation_manager.get_term(animation)
+    root_quat = animation_term.get_root_quat()
+    root_vel_b = math_utils.quat_apply_inverse(root_quat, animation_term.get_root_vel_w())
+    root_ang_vel_b = math_utils.quat_apply_inverse(root_quat, animation_term.get_root_ang_vel_w())
+    command = torch.cat((root_vel_b[..., :2], root_ang_vel_b[..., 2:3]), dim=-1)
+
+    if flatten_steps_dim:
+        return command.reshape(env.num_envs, -1)
+    return command
+
+
+def high_speed_upper_reference(
+    env: AnimationEnv,
+    reference_function: str,
+    animation: str,
+    fast_animation: str,
+    command_name: str,
+    min_linear_command: float = 1.5,
+    flatten_steps_dim: bool = True,
+    joint_indices: list[int] | None = None,
+    body_indices: list[int] | None = None,
+) -> torch.Tensor:
+    """Use coherent running frames for high-speed upper AMP demonstrations only."""
+    functions = {
+        "ref_root_local_rot_tan_norm": ref_root_local_rot_tan_norm,
+        "ref_root_lin_vel_b": ref_root_lin_vel_b,
+        "ref_root_ang_vel_b": ref_root_ang_vel_b,
+        "ref_joint_pos": ref_joint_pos,
+        "ref_joint_vel": ref_joint_vel,
+        "ref_key_body_pos_b": ref_key_body_pos_b,
+    }
+    func = functions[reference_function]
+    params = {"flatten_steps_dim": flatten_steps_dim}
+    if reference_function in ("ref_joint_pos", "ref_joint_vel"):
+        params["joint_indices"] = joint_indices
+    elif reference_function == "ref_key_body_pos_b":
+        params["body_indices"] = body_indices
+    ordinary = func(env, animation=animation, **params)
+    running = func(env, animation=fast_animation, **params)
+    command = env.command_manager.get_command(command_name)
+    # Forward running only; backward locomotion and pure turns retain their references.
+    fast = (command[:, 0] > min_linear_command) & (command[:, 2].abs() < 0.1)
+    return torch.where(fast.reshape(-1, *([1] * (ordinary.ndim - 1))), running, ordinary)
 
 
 def ref_joint_pos(

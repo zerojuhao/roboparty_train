@@ -11,10 +11,11 @@ import numpy as np
 import torch
 
 from .mdp.motion_observations import compute_humanoid_observations_max
+from .mdp.pufo_observations import heading_xy
 from robolab.tasks.manager_based.ufo.motion.torch_utils import quat_rotate_inverse
 
 
-def load_expert_trajectories_from_motion_lib(motion_lib, dt: float, default_dof_pos: torch.Tensor, device="cpu"):
+def load_expert_trajectories_from_motion_lib(motion_lib, dt: float, default_dof_pos: torch.Tensor, device="cpu", base_ang_vel_scale: float = 1.0):
     motion_lib.load_motions_for_training()
     episodes = []
     file_names = []
@@ -40,6 +41,7 @@ def load_expert_trajectories_from_motion_lib(motion_lib, dt: float, default_dof_
         max_local_self_obs = torch.cat([v for v in obs_dict.values()], dim=-1)
 
         base_quat = ref_body_rots[:, 0]
+        reference_heading = heading_xy(base_quat)
         ref_dof_pos = motion_res["dof_pos"] - default_dof_pos.to(motion_res["dof_pos"].device)[0]
         ref_dof_vel = motion_res["dof_vel"]
         ref_ang_vel = quat_rotate_inverse(base_quat, ref_body_angular_vels[:, 0], w_last=True)
@@ -47,7 +49,7 @@ def load_expert_trajectories_from_motion_lib(motion_lib, dt: float, default_dof_
         projected_gravity = quat_rotate_inverse(base_quat, gravity_vec, w_last=True)
         bogus_actions = ref_dof_pos * 0
 
-        state = torch.cat([ref_dof_pos, ref_dof_vel, projected_gravity, ref_ang_vel], dim=-1)
+        state = torch.cat([ref_dof_pos, ref_dof_vel, projected_gravity, ref_ang_vel * base_ang_vel_scale], dim=-1)
 
         curr_motion_len = state.shape[0]
         truncated = torch.zeros(curr_motion_len, dtype=bool, device=device)
@@ -62,6 +64,11 @@ def load_expert_trajectories_from_motion_lib(motion_lib, dt: float, default_dof_
             "terminated": torch.zeros(curr_motion_len, dtype=bool, device=device),
             "truncated": truncated,
             "motion_id": torch.ones(curr_motion_len, dtype=torch.long, device=device) * i,
+            "heading_forward_xy": reference_heading,
+            "reference_velocity_world_xy": ref_body_vels[:, 0, :2],
+            "reference_velocity_valid": torch.ones(
+                curr_motion_len, 1, dtype=torch.bool, device=device
+            ),
         }
         episodes.append(ep)
     return episodes, file_names

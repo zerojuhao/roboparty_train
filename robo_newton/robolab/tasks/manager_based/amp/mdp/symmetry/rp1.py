@@ -5,24 +5,16 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
 import torch
 from tensordict import TensorDict
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 __all__ = ["compute_symmetric_states"]
-
-NUM_JOINTS = 24
-HISTORY_LENGTH = 3
-
-# RP1 IsaacLab BFS joint order. Each left/right pair is adjacent except waist joints.
-LEFT_JOINT_INDICES = [0, 3, 6, 8, 10, 12, 14, 16, 18, 20, 22]
-RIGHT_JOINT_INDICES = [1, 4, 7, 9, 11, 13, 15, 17, 19, 21, 23]
-
-# Ankle pitch keeps its sign; all other coordinates negate after reflection.
-NEGATE_JOINT_INDICES = [index for index in range(NUM_JOINTS) if index not in (14, 15)]
 
 
 @torch.no_grad()
@@ -31,106 +23,91 @@ def compute_symmetric_states(
     obs: TensorDict | None = None,
     actions: torch.Tensor | None = None,
 ):
-    """Augment nested policy/critic observations and actions with RP1 symmetry."""
+    """Append mirrored samples to the flat RSL-RL observations and actions."""
+    env = env.unwrapped
+    joint_names = tuple(env.scene["robot"].joint_names)
+    action_names = tuple(env.action_manager.get_term("joint_pos")._joint_names)
+    if action_names != joint_names:
+        raise ValueError("RP1 AMP symmetry expects actions and joint observations in articulation order")
+
+    obs_aug = None
     if obs is not None:
         batch_size = obs.batch_size[0]
         obs_aug = obs.repeat(2)
-        obs_aug["policy"][:batch_size] = obs["policy"]
-        obs_aug["critic"][:batch_size] = obs["critic"]
-        obs_aug["policy"][batch_size:] = _transform_policy_obs_left_right(obs["policy"])
-        obs_aug["critic"][batch_size:] = _transform_critic_obs_left_right(obs["critic"])
-    else:
-        obs_aug = None
+        obs_aug["policy"][batch_size:] = _mirror_observation_group(
+            obs["policy"], env.observation_manager, "policy", joint_names
+        )
+        obs_aug["critic"][batch_size:] = _mirror_observation_group(
+            obs["critic"], env.observation_manager, "critic", joint_names
+        )
 
+    actions_aug = None
     if actions is not None:
-        batch_size = actions.shape[0]
-        actions_aug = torch.zeros(batch_size * 2, actions.shape[1], device=actions.device)
-        actions_aug[:batch_size] = actions
-        actions_aug[batch_size:] = _transform_actions_left_right(actions)
-    else:
-        actions_aug = None
+        mirrored_actions = _switch_joints_left_right(actions, joint_names)
+        actions_aug = torch.cat((actions, mirrored_actions), dim=0)
 
     return obs_aug, actions_aug
 
 
-def _transform_policy_obs_left_right(obs: TensorDict) -> TensorDict:
-    """Mirror policy terms by name."""
-    if isinstance(obs, torch.Tensor):
-        return _named_policy_to_flat(_transform_policy_obs_left_right(_flat_to_named_policy(obs)))
+def _mirror_observation_group(
+    obs: torch.Tensor,
+    observation_manager,
+    group_name: str,
+    joint_names: tuple[str, ...],
+) -> torch.Tensor:
+    """Mirror each configured term, applying the same rule to every history frame."""
+    term_names = observation_manager.active_terms[group_name]
+    term_shapes = observation_manager.group_obs_term_dim[group_name]
+    widths = [shape[-1] for shape in term_shapes]
     mirrored = obs.clone()
-    mirrored["base_ang_vel"] = _apply_xyz_sign(mirrored["base_ang_vel"], [-1, 1, -1])
-    mirrored["projected_gravity"] = _apply_xyz_sign(mirrored["projected_gravity"], [1, -1, 1])
-    mirrored["velocity_commands"] = _apply_xyz_sign(mirrored["velocity_commands"], [1, -1, -1])
-    mirrored["joint_pos"] = _switch_joints_left_right_flat(mirrored["joint_pos"])
-    mirrored["joint_vel"] = _switch_joints_left_right_flat(mirrored["joint_vel"])
-    mirrored["actions"] = _switch_joints_left_right_flat(mirrored["actions"])
+    terms = dict(zip(term_names, mirrored.split(widths, dim=-1), strict=True))
+
+    # Terms are views into mirrored. Stride 3 selects one xyz component in every frame.
+    if group_name == "critic":
+        terms["base_lin_vel"][..., 1::3] *= -1
+
+    terms["base_ang_vel"][..., 0::3] *= -1
+    terms["base_ang_vel"][..., 2::3] *= -1
+    terms["projected_gravity"][..., 1::3] *= -1
+    terms["velocity_commands"][..., 1::3] *= -1
+    terms["velocity_commands"][..., 2::3] *= -1
+
+    # Only the opt-in path task has these four-component observation frames.
+    if "command_path_state" in terms:
+        terms["command_path_state"][..., 1::4] *= -1
+        terms["command_path_state"][..., 2::4] *= -1
+
+    for name in ("joint_pos", "joint_vel", "actions"):
+        terms[name].copy_(_switch_joints_left_right(terms[name], joint_names))
     return mirrored
 
 
-def _transform_critic_obs_left_right(obs: TensorDict) -> TensorDict:
-    """Mirror privileged critic terms by name."""
-    if isinstance(obs, torch.Tensor):
-        return _named_critic_to_flat(_transform_critic_obs_left_right(_flat_to_named_critic(obs)))
-    mirrored = obs.clone()
-    mirrored["base_lin_vel"] = _apply_xyz_sign(mirrored["base_lin_vel"], [1, -1, 1])
-    mirrored["base_ang_vel"] = _apply_xyz_sign(mirrored["base_ang_vel"], [-1, 1, -1])
-    mirrored["projected_gravity"] = _apply_xyz_sign(mirrored["projected_gravity"], [1, -1, 1])
-    mirrored["velocity_commands"] = _apply_xyz_sign(mirrored["velocity_commands"], [1, -1, -1])
-    mirrored["joint_pos"] = _switch_joints_left_right_flat(mirrored["joint_pos"])
-    mirrored["joint_vel"] = _switch_joints_left_right_flat(mirrored["joint_vel"])
-    mirrored["actions"] = _switch_joints_left_right_flat(mirrored["actions"])
-    return mirrored
+def _switch_joints_left_right(joint_data: torch.Tensor, joint_names: tuple[str, ...]) -> torch.Tensor:
+    """Mirror every joint frame, including flattened observation histories."""
+    left_indices, right_indices, negate_indices = _joint_mirror_indices(joint_names)
+    num_joints = len(joint_names)
+    frames = joint_data.reshape(*joint_data.shape[:-1], -1, num_joints)
+    mirrored = frames.clone()
+    mirrored[..., left_indices] = frames[..., right_indices]
+    mirrored[..., right_indices] = frames[..., left_indices]
+    mirrored[..., negate_indices] *= -1
+    return mirrored.reshape_as(joint_data)
 
 
-def _flat_to_named_policy(obs: torch.Tensor) -> TensorDict:
-    """Adapt RSL-RL's flat rollout tensor to named AMP policy terms."""
-    terms = torch.split(obs, [9, 9, 9, 72, 72, 72], dim=-1)
-    return TensorDict(
-        dict(zip(("base_ang_vel", "projected_gravity", "velocity_commands", "joint_pos", "joint_vel", "actions"), terms)),
-        batch_size=obs.shape[:-1],
-    )
+@lru_cache(maxsize=8)
+def _joint_mirror_indices(joint_names: tuple[str, ...]) -> tuple[list[int], list[int], list[int]]:
+    """Build left/right pairs from runtime names, independent of joint order."""
+    left_indices = []
+    right_indices = []
+    negate_indices = []
+    for index, name in enumerate(joint_names):
+        if name.startswith("left_"):
+            right_name = "right_" + name.removeprefix("left_")
+            left_indices.append(index)
+            right_indices.append(joint_names.index(right_name))
 
+        # Only ankle pitch keeps its sign; waist joints negate without swapping.
+        if name not in {"left_ankle_pitch_joint", "right_ankle_pitch_joint"}:
+            negate_indices.append(index)
 
-def _flat_to_named_critic(obs: torch.Tensor) -> TensorDict:
-    """Adapt RSL-RL's flat rollout tensor to named AMP critic terms."""
-    terms = torch.split(obs, [9, 9, 9, 9, 72, 72, 72], dim=-1)
-    return TensorDict(
-        dict(zip(("base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands", "joint_pos", "joint_vel", "actions"), terms)),
-        batch_size=obs.shape[:-1],
-    )
-
-
-def _named_policy_to_flat(obs: TensorDict) -> torch.Tensor:
-    return torch.cat([obs[name] for name in ("base_ang_vel", "projected_gravity", "velocity_commands", "joint_pos", "joint_vel", "actions")], dim=-1)
-
-
-def _named_critic_to_flat(obs: TensorDict) -> torch.Tensor:
-    return torch.cat([obs[name] for name in ("base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands", "joint_pos", "joint_vel", "actions")], dim=-1)
-
-
-def _apply_xyz_sign(obs: torch.Tensor, signs: list[int]) -> torch.Tensor:
-    """Apply an xyz sign pattern to each history frame."""
-    obs_shape = obs.shape
-    obs = obs.reshape(*obs_shape[:-1], -1, 3)
-    return (obs * obs.new_tensor(signs)).reshape(obs_shape)
-
-
-def _switch_joints_left_right_flat(joint_data: torch.Tensor) -> torch.Tensor:
-    """Apply the RP1 joint transform to each history frame."""
-    obs_shape = joint_data.shape
-    joint_data = joint_data.reshape(*obs_shape[:-1], -1, NUM_JOINTS)
-    return _switch_joints_left_right(joint_data).reshape(obs_shape)
-
-
-def _transform_actions_left_right(actions: torch.Tensor) -> torch.Tensor:
-    """Apply the RP1 joint transform to actions."""
-    return _switch_joints_left_right(actions)
-
-
-def _switch_joints_left_right(joint_data: torch.Tensor) -> torch.Tensor:
-    """Swap left/right joints and negate RP1 reflection axes."""
-    mirrored = joint_data.clone()
-    mirrored[..., LEFT_JOINT_INDICES] = joint_data[..., RIGHT_JOINT_INDICES]
-    mirrored[..., RIGHT_JOINT_INDICES] = joint_data[..., LEFT_JOINT_INDICES]
-    mirrored[..., NEGATE_JOINT_INDICES] = -mirrored[..., NEGATE_JOINT_INDICES]
-    return mirrored
+    return left_indices, right_indices, negate_indices

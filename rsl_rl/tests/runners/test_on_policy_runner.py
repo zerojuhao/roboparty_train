@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import tempfile
+from unittest.mock import patch
 import torch
 from tensordict import TensorDict
 
@@ -170,6 +171,16 @@ class TestLearnLoop:
         runner = _build_runner()
         runner.learn(num_learning_iterations=3)
         assert runner.current_learning_iteration == 2
+
+    def test_nan_checks_can_run_periodically(self) -> None:
+        cfg = _make_train_cfg()
+        cfg["check_for_nan_interval"] = 2
+        runner = OnPolicyRunner(DummyEnv(), cfg, log_dir=None, device="cpu")
+
+        with patch("rsl_rl.runners.on_policy_runner.check_nan") as check:
+            runner.learn(num_learning_iterations=3)
+
+        assert check.call_count == 2 * cfg["num_steps_per_env"]
 
 
 class TestSaveLoad:

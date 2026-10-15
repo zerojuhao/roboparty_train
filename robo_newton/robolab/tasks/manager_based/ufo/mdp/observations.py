@@ -12,18 +12,15 @@ import torch
 from isaaclab.envs import ManagerBasedEnv
 
 from .motion_observations import compute_humanoid_observations_max
-
-
-def _as_tensor(x):
-    return x if isinstance(x, torch.Tensor) else x.torch
+from robolab.utils.tensors import as_torch_tensor
 
 
 def local_self_obs(env: ManagerBasedEnv) -> torch.Tensor:
     robot = env.scene["robot"]
-    body_pos_w = _as_tensor(robot.data.body_pos_w)
-    body_quat_w = _as_tensor(robot.data.body_quat_w)
-    body_lin_vel_w = _as_tensor(robot.data.body_link_lin_vel_w)
-    body_ang_vel_w = _as_tensor(robot.data.body_link_ang_vel_w)
+    body_pos_w = as_torch_tensor(robot.data.body_pos_w)
+    body_quat_w = as_torch_tensor(robot.data.body_quat_w)
+    body_lin_vel_w = as_torch_tensor(robot.data.body_link_lin_vel_w)
+    body_ang_vel_w = as_torch_tensor(robot.data.body_link_ang_vel_w)
     obs_dict = compute_humanoid_observations_max(
         body_pos_w,
         body_quat_w,

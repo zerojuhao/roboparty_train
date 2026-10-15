@@ -4,9 +4,8 @@ Data management follows the WBC ``MotionStore`` conventions: the clip manifest
 is the single source of truth, clip boundaries are explicit, all clips share
 one fps, quaternions are XYZW, and every read stays inside one clip.
 
-Sampling follows the original UFO motion library and nothing else: uniform
-clip sampling and a uniform phase start time on episode reset. No adaptive /
-failure-history weighting is implemented.
+Sampling uses uniform clip weights initially and a uniform phase start time.
+Evaluation can update clip weights through the original UFO priority API.
 
 Continuous-time queries blend the two neighbouring frames exactly like the
 vendored UFO ``_calc_frame_blend`` path: linear for positions and velocities,
@@ -52,6 +51,13 @@ class MotionLibNPZ:
         records = manifest.get("clips")
         if not isinstance(records, list) or not records:
             raise ValueError(f"Manifest must contain a non-empty 'clips' list: {manifest_path}")
+        selected = motion_lib_cfg.get("motion_names")
+        if selected is not None:
+            selected = set(selected)
+            missing = selected - {str(record.get("name")) for record in records}
+            if not selected or missing:
+                raise ValueError(f"Invalid motion selection; missing names: {sorted(missing)}")
+            records = [record for record in records if str(record.get("name")) in selected]
 
         npz_meta = manifest.get("npz", {})
         if str(npz_meta.get("body_quaternion_order", "xyzw")).lower() != "xyzw":

@@ -1,6 +1,6 @@
 import math
 import os
-from dataclasses import MISSING
+from dataclasses import MISSING, fields
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -37,6 +37,10 @@ from robolab.utils.noise import (
     StereoFusionNoiseCfg,
 )
 from robolab.tasks.manager_based.parkour.terrain_generator_cfg import ROUGH_TERRAINS_CFG
+from robolab.utils.guarded_mjwarp import GuardedMJWarpSolverCfg
+from robolab.sensors.terrain_contact import TerrainContactSensorCfg
+from robolab.terrains.native_importer import validate_terrain_colliders
+from .terrain_importer import ParkourTerrainImporter
 from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
 
 __file_dir__ = os.path.dirname(os.path.realpath(__file__))
@@ -56,6 +60,7 @@ KEY_BODY_NAMES = [
 class SceneCfg(InteractiveSceneCfg):
     # ground terrain
     terrain = TerrainImporterCfg(
+        class_type=ParkourTerrainImporter,
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=ROUGH_TERRAINS_CFG,
@@ -123,8 +128,8 @@ class SceneCfg(InteractiveSceneCfg):
             },
         ),
     )
-    contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True
+    contact_forces = TerrainContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=4, track_air_time=True
     )
     feet_volume_points = VolumePointsCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*_ankle_roll_link",
@@ -164,7 +169,7 @@ class SceneCfg(InteractiveSceneCfg):
             # --- crop first, then augmentations on cropped metric depth ---
             "crop_and_resize": CropAndResizeCfg(crop_region=(18, 0, 16, 16)),
             "scale_randomization": ScaleRandomizationNoiseCfg(
-                apply_probability=0.7,
+                apply_probability=0.5,
                 scale_min=0.95,
                 scale_max=1.05,
             ),
@@ -177,7 +182,7 @@ class SceneCfg(InteractiveSceneCfg):
             #     hole_value=2.5,  # treat holes as max-range (2.5 m) before normalization
             # ),
             "random_conv": RandomConvNoiseCfg(
-                apply_probability=0.4,
+                apply_probability=0.5,
                 kernel_std=0.01,  # was 0.08 → 0.02 → 0.015 → 0.01
                 center_weight=1.0,
             ),
@@ -191,7 +196,7 @@ class SceneCfg(InteractiveSceneCfg):
             #     noise_std=0.025,  # ~2.5 cm; was 0.015
             # ),
             "pixel_failures": PixelFailureNoiseCfg(
-                apply_probability=0.7,
+                apply_probability=0.5,
                 dead_pixel_prob=2e-3,  # was 5e-3
                 saturated_pixel_prob=2e-3,  # was 5e-3
                 dead_value=0.0,
@@ -236,7 +241,7 @@ class ObservationsCfg:
         # observation terms (order preserved)
         base_ang_vel = ObsTerm(
             func=mdp.base_ang_vel,
-            noise=Unoise(n_min=-0.35, n_max=0.35),
+            noise=Unoise(n_min=-0.2, n_max=0.2),
             history_length=8,
             flatten_history_dim=True,
             scale=0.25,
@@ -256,13 +261,13 @@ class ObservationsCfg:
         )
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
-            noise=Unoise(n_min=-0.03, n_max=0.03),
+            noise=Unoise(n_min=-0.01, n_max=0.01),
             history_length=8,
             flatten_history_dim=True,
         )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-1.75, n_max=1.75),
+            noise=Unoise(n_min=-0.5, n_max=0.5),
             scale=0.05,
             history_length=8,
             flatten_history_dim=True,
@@ -281,6 +286,7 @@ class ObservationsCfg:
                 "history_skip_frames": 5,
                 "num_output_frames": 8,
                 "delayed_frame_ranges": (0, 1),
+                "quantize_uint8": True,
                 "debug_vis": False,
             },
             noise=None,
@@ -820,6 +826,8 @@ class TerminationsCfg:
 class EventCfg:
     """Configuration for events."""
 
+    validate_terrain_collision = EventTerm(func=validate_terrain_colliders, mode="startup")
+
     physics_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
@@ -943,7 +951,7 @@ class EventCfg:
 
     randomize_camera_offset = EventTerm(
         func=mdp.randomize_camera_offsets,
-        mode="reset",
+        mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("camera"),
             "offset_pose_ranges": {
@@ -955,15 +963,6 @@ class EventCfg:
                 "yaw": (-math.radians(3), math.radians(3)),
             },
             "distribution": "uniform",
-        },
-    )
-
-    randomize_camera_pitch_angle = EventTerm(
-        func=mdp.randomize_camera_pitch_choices,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("camera"),
-            "downward_pitch_choices_deg": (60.0,),
         },
     )
 
@@ -1041,6 +1040,24 @@ class ParkourEnvCfg(AmpEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         super().__post_init__()
+        # This optional terrain may be disabled in the shared terrain preset.
+        if "stairs_gap_platforms" not in self.scene.terrain.terrain_generator.sub_terrains:
+            self.commands.base_velocity.velocity_ranges.pop("stairs_gap_platforms", None)
+            orientation_reward = getattr(self.rewards.locomotion, "pelvis_orientation_l2", None)
+            if orientation_reward is not None:
+                orientation_reward.params.get("terrain_forward_tolerances", {}).pop("stairs_gap_platforms", None)
+        # Preserve the task's solver parameters; only replace backend dispatch.
+        physics = self.sim.physics.newton_mjwarp
+        solver = physics.solver_cfg
+        physics.solver_cfg = GuardedMJWarpSolverCfg(**{
+            field.name: getattr(solver, field.name)
+            for field in fields(solver) if field.name != "class_type"
+        })
+        # Fine rough tread caps can exceed MuJoCo's 50-candidate hfield limit.
+        # Retain all candidates before the unchanged four-contact reduction.
+        physics.solver_cfg.heightfield_contact_capacity = 512
+        physics.class_type = physics.solver_cfg.class_type
+        self.sim.physics.default = physics
         # general settings
         self.decimation = 4
         self.episode_length_s = 20.0
@@ -1056,3 +1073,4 @@ class ParkourEnvCfg(AmpEnvCfg):
         # update sensor update periods
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
+            self.scene.contact_forces.history_length = self.decimation

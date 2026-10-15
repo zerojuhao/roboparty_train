@@ -7,6 +7,7 @@ import os
 
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -22,31 +23,49 @@ from isaaclab.utils.configclass import configclass
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
 import isaaclab.sim as sim_utils
-from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_newton.physics import NewtonCfg
+from isaaclab_newton.sensors.ray_caster.legacy_ray_caster import LegacyRayCaster
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from robolab.assets import UFO_DATA_DIR
-from robolab.assets.robots.roboparty import RP1_UFO_CFG
-from robolab.sensors import NoisyGroupedRayCasterCameraCfg
+from robolab.assets import ISAAC_DATA_DIR
+from robolab.assets.robots.roboparty import PR1_LINKS, RP1_UFO_CFG
+from robolab.sensors import NoisyGroupedRayCasterCameraCfg, get_link_prim_targets
+from robolab.utils.noise import (
+    CropAndResizeCfg,
+    DepthNormalizationCfg,
+    DepthSanitizationCfg,
+    GaussianBlurNoiseCfg,
+    PixelFailureNoiseCfg,
+    RandomConvNoiseCfg,
+    RangeBasedGaussianNoiseCfg,
+    ScaleRandomizationNoiseCfg,
+)
 
 from . import mdp
-from .pufo_terrain_cfg import PUFO_TERRAIN_CFG
+from .pufo_terrain_cfg import PUFO_TERRAIN_CFG, PUFO_TILE_SIZE
+from .pufo_terrain_importer import PUFOTerrainImporter
+from robolab.sensors.terrain_contact import TerrainContactSensorCfg
+from .pufo_physics import PUFOMJWarpSolverCfg
+from .lafan_selected import H200_MOTION_NAMES
+from .mdp.pufo_reset import reset_pufo_from_motion
+from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg as FiledTerrainImporterCfg
 
 
 MOTION_MANIFEST = os.environ.get(
     "UFO_MOTION_MANIFEST",
-    os.path.join(UFO_DATA_DIR, "motions", "rp1_lafan", "manifest.json"),
+    os.path.join(ISAAC_DATA_DIR, "motions", "rp1_lafan", "manifest.json"),
 )
 
 
 @configclass
 class PUFOSceneCfg(InteractiveSceneCfg):
-    terrain = TerrainImporterCfg(
+    terrain = FiledTerrainImporterCfg(
+        class_type=PUFOTerrainImporter,
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=PUFO_TERRAIN_CFG,
-        max_init_terrain_level=0,
+        max_init_terrain_level=2,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -60,14 +79,17 @@ class PUFOSceneCfg(InteractiveSceneCfg):
         prim_path="/World/light",
         spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
-    contact_forces = ContactSensorCfg(
+    contact_forces = TerrainContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*",
-        history_length=mdp.rewards.UNDESIRED_CONTACT_HISTORY_WINDOW,
+        history_length=4,
+        track_friction_forces=True,
         track_air_time=False,
     )
     terrain_priv = RayCasterCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/Geometry/base_link/waist_roll_link/waist_yaw_link",
-        mesh_prim_paths=["/World/ground"],
+        # Native Newton BVH rays also hit the robot and ignore mesh_prim_paths.
+        class_type=LegacyRayCaster,
+        prim_path="{ENV_REGEX_NS}/Robot/Geometry/base_link",
+        mesh_prim_paths=["/World/ground/terrain"],
         ray_alignment="yaw",
         pattern_cfg=patterns.GridPatternCfg(
             resolution=0.1,
@@ -76,19 +98,20 @@ class PUFOSceneCfg(InteractiveSceneCfg):
             ordering="xy",
         ),
         offset=RayCasterCfg.OffsetCfg(pos=(0.6, 0.0, 2.0)),
-        max_distance=3.0,
+        # Keep rays above raised terrain without losing downward reach during jumps.
+        max_distance=20.0,
         update_period=0.02,
     )
     camera = NoisyGroupedRayCasterCameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/Geometry/base_link/waist_roll_link/waist_yaw_link",
-        mesh_prim_paths=["/World/ground"],
-        ray_alignment="yaw",
+        mesh_prim_paths=["/World/ground/terrain"],
+        ray_alignment="base",
         pattern_cfg=PinholeCameraPatternCfg(
             focal_length=1.0,
             horizontal_aperture=2 * math.tan(math.radians(89.51) / 2),
             vertical_aperture=2 * math.tan(math.radians(58.29) / 2),
-            width=32,
-            height=18,
+            width=64,
+            height=36,
         ),
         data_types=["distance_to_image_plane"],
         update_period=0.02,
@@ -98,18 +121,41 @@ class PUFOSceneCfg(InteractiveSceneCfg):
             rot=(0.0, 0.5, 0.0, 0.866),
             convention="world",
         ),
-        data_histories={"distance_to_image_plane_noised": 8},
+        noise_pipeline={
+            # H200 max-crop profile: cap optical depth before blur, then normalize.
+            "sanitize_depth": DepthSanitizationCfg(invalid_depth=2.5, max_depth=2.5),
+            "crop_and_resize": CropAndResizeCfg(crop_region=(18, 0, 14, 14)),
+            "gaussian_noise": RangeBasedGaussianNoiseCfg(min_value=0.1, max_value=2.5, noise_std=0.01),
+            "scale_randomization": ScaleRandomizationNoiseCfg(
+                apply_probability=0.5, scale_min=0.95, scale_max=1.05,
+            ),
+            "random_conv": RandomConvNoiseCfg(
+                apply_probability=0.5, kernel_std=0.01, center_weight=1.0,
+            ),
+            "pixel_failures": PixelFailureNoiseCfg(
+                apply_probability=0.5, dead_pixel_prob=2e-3, saturated_pixel_prob=2e-3,
+                dead_value=0.0, saturated_value=2.5,
+            ),
+            "gaussian_blur": GaussianBlurNoiseCfg(kernel_size=3, sigma=1),
+            "depth_normalization": DepthNormalizationCfg(
+                depth_range=(0.1, 2.5), normalize=True, output_range=(0.0, 1.0),
+            ),
+        },
+        data_histories={"distance_to_image_plane_noised": 37},
     )
 
 
 @configclass
 class PUFOCommandsCfg:
-    motion = mdp.UFOMotionCommandCfg(asset_name="robot", manifest_path=MOTION_MANIFEST)
+    motion = mdp.UFOMotionCommandCfg(
+        asset_name="robot", manifest_path=MOTION_MANIFEST, motion_names=H200_MOTION_NAMES
+    )
 
 
 @configclass
 class PUFOActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
+        class_type=mdp.rewards.JointLimitedBodyImpactPositionAction,
         asset_name="robot", joint_names=[".*"], scale=0.4, use_default_offset=True
     )
 
@@ -118,7 +164,7 @@ class PUFOActionsCfg:
 class PUFOObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2), scale=0.25)
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5))
@@ -137,7 +183,17 @@ class PUFOObservationsCfg:
 
     @configclass
     class VisualCfg(ObsGroup):
-        depth_image = ObsTerm(func=mdp.pufo_depth_image)
+        depth_image = ObsTerm(
+            func=mdp.pufo_depth_image,
+            params={
+                "sensor_cfg": SceneEntityCfg("camera"),
+                "data_type": "distance_to_image_plane_noised_history",
+                "history_skip_frames": 5,
+                "num_output_frames": 8,
+                "delayed_frame_ranges": (0, 1),
+                "integer_delay": True,
+            },
+        )
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -175,6 +231,14 @@ class PUFOObservationsCfg:
             self.enable_corruption = False
             self.concatenate_terms = True
 
+    @configclass
+    class TransitionKinematicsCfg(ObsGroup):
+        kinematics = ObsTerm(func=mdp.pufo_transition_kinematics)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
     visual: VisualCfg = VisualCfg()
@@ -182,19 +246,36 @@ class PUFOObservationsCfg:
     velocity_command: VelocityCommandCfg = VelocityCommandCfg()
     velocity_target_yaw: VelocityTargetCfg = VelocityTargetCfg()
     terrain_priv: TerrainPrivCfg = TerrainPrivCfg()
+    transition_kinematics: TransitionKinematicsCfg = TransitionKinematicsCfg()
 
 
 @configclass
 class PUFOEventCfg:
-    reset_root_state = EventTerm(
-        func=mdp.events.reset_root_state_from_motion,
+    resample_motion = EventTerm(
+        func=mdp.events.resample_motion_for_reset,
         mode="reset",
         params={"command_name": "motion"},
     )
-    reset_joint_state = EventTerm(
-        func=mdp.events.reset_joint_state_from_motion,
+    reset_root_state = EventTerm(
+        func=reset_pufo_from_motion,
         mode="reset",
-        params={"command_name": "motion"},
+        params={
+            "command_name": "motion", "lie_down_probability": 0.3,
+            "contact_clearance": 0.05, "penetration_scale": 1.25,
+        },
+    )
+    randomize_camera_installation = EventTerm(
+        func=mdp.events.randomize_camera_installation,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("camera"),
+            "position_error": 0.02,
+            "angle_error_rpy": (
+                math.radians(3.0),
+                math.radians(10.0),
+                math.radians(3.0),
+            ),
+        },
     )
     randomize_rigid_body_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
@@ -215,17 +296,12 @@ class PUFOEventCfg:
             "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.03, 0.03)},
         },
     )
-    randomize_default_joint_pos = EventTerm(
-        func=mdp.events.randomize_default_joint_pos,
-        mode="reset",
-        params={"offset_range": (-0.15, 0.15)},
-    )
     scale_link_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "mass_distribution_params": (0.9, 1.1),
+            "mass_distribution_params": (0.8, 1.2),
             "operation": "scale",
         },
     )
@@ -258,30 +334,134 @@ class PUFOEventCfg:
 
 @configclass
 class PUFORewardsCfg:
-    zero = RewTerm(func=mdp.pufo_rewards.zero_reward, weight=0.0)
+    penalty_action_rate = RewTerm(
+        func=mdp.rewards.penalty_action_rate,
+        weight=-0.2,
+    )
+    # Keep the Parkour foot penalty; strengthen action changes and acceleration
+    # while retaining the previous 10x joint-speed penalty.
+    sound_suppression_acc_per_foot = RewTerm(
+        func=mdp.rewards.sound_suppression_acc_per_foot,
+        weight=-5e-3,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
+    )
+    joint_acc_l2 = RewTerm(
+        func=mdp.rewards.joint_acc_l2,
+        weight=-1e-6,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
+    )
+    joint_vel_l2 = RewTerm(
+        func=mdp.rewards.joint_vel_l2,
+        weight=-1e-3,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
+    )
+    limits_dof_pos = RewTerm(
+        func=mdp.rewards.limits_dof_pos,
+        weight=-10.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
+    )
+    penalty_body_impact = RewTerm(
+        func=mdp.rewards.pufo_penalty_body_impact,
+        weight=-1.0,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                body_names=["waist_yaw_link", ".*_shoulder_.*_link", ".*_hip_.*_link"],
+                preserve_order=True,
+            ),
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=["waist_yaw_link", ".*_shoulder_.*_link", ".*_hip_.*_link"],
+                preserve_order=True,
+            ),
+            "force_threshold_ratio": 0.05,
+            "smooth_l1_beta": 0.25,
+            "impact_velocity_scale": 1.0,
+            "impact_velocity_cap": 2.0,
+            "severity_cap": 4.0,
+        },
+    )
+    penalty_slippage = RewTerm(
+        func=mdp.rewards.pufo_penalty_slippage,
+        weight=-4.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
+        },
+    )
+    penalty_ankle_roll = RewTerm(
+        func=mdp.rewards.penalty_ankle_roll,
+        weight=-1.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*ankle_roll.*")},
+    )
+    feet_stumble = RewTerm(
+        func=mdp.rewards.pufo_feet_stumble,
+        weight=-2.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
+    )
 
 
 @configclass
 class PUFOTerminationsCfg:
     time_out = DoneTerm(func=mdp.terminations.time_out, time_out=True)
+    terrain_boundary = DoneTerm(
+        func=mdp.terminations.terrain_out_of_bounds, time_out=True,
+        params={"safety_margin": 0.5},
+    )
+
+
+@configclass
+class PUFOCurriculumCfg:
+    terrain_levels = CurrTerm(
+        func=mdp.curriculums.terrain_levels_by_global_step,
+        params={
+            "start_step": 0,
+            "interval": 19_200_000,
+            "initial_max_level": 2,
+            "level_increment": 2,
+            "easy_fraction": 0.25,
+        },
+    )
 
 
 @configclass
 class PUFOPhysicsPresetCfg(PresetCfg):
     isaacsim_physx: PhysxCfg = PhysxCfg()
     newton_mjwarp: NewtonCfg = NewtonCfg(
-        solver_cfg=MJWarpSolverCfg(
+        solver_cfg=PUFOMJWarpSolverCfg(
             cone="pyramidal",
             impratio=1.0,
             integrator="implicitfast",
+            iterations=600,
+            tolerance=1.0e-2,
+            ls_iterations=80,
             update_data_interval=1,
+            # Allocation limits, not solver accuracy. The PUFO manager rejects overflows.
             njmax=4096,
             nconmax=512,
         ),
-        num_substeps=1,
+        # Refine contact integration without changing the 5 ms actuator tick.
+        num_substeps=2,
         debug_mode=False,
     )
     default: NewtonCfg = newton_mjwarp
+
+
+@configclass
+class PUFOPlaneSceneCfg(PUFOSceneCfg):
+    """Flat scene used exclusively for motion tracking evaluation."""
+
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+        ),
+    )
 
 
 @configclass
@@ -293,15 +473,18 @@ class PUFOEnvCfg(ManagerBasedRLEnvCfg):
     events: PUFOEventCfg = PUFOEventCfg()
     rewards: PUFORewardsCfg = PUFORewardsCfg()
     terminations: PUFOTerminationsCfg = PUFOTerminationsCfg()
+    curriculum: PUFOCurriculumCfg = PUFOCurriculumCfg()
 
     def __post_init__(self):
-        self.scene.env_spacing = 5.0
+        self.compute_final_obs = True
+        self.scene.env_spacing = PUFO_TILE_SIZE[0]
         self.sim.physics_material = self.scene.terrain.physics_material
         self.decimation = 4
+        self.scene.contact_forces.history_length = self.decimation
         self.episode_length_s = 10.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
-        self.sim.physics = PUFOPhysicsPresetCfg()
+        self.sim.physics = PUFOPhysicsPresetCfg().default
         self.sim.use_newton_actuators = False
 
 
@@ -310,3 +493,17 @@ class RP1PUFOEnvCfg(PUFOEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.robot = RP1_UFO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.camera.mesh_prim_paths.extend(get_link_prim_targets(PR1_LINKS))
+
+
+@configclass
+class RP1PUFOEvalEnvCfg(PUFOEnvCfg):
+    """PUFO tracking evaluation with the same robot and sensors on a plane."""
+
+    scene: PUFOPlaneSceneCfg = PUFOPlaneSceneCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.robot = RP1_UFO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.camera.mesh_prim_paths.extend(get_link_prim_targets(PR1_LINKS))
+        self.events.reset_root_state.params["lie_down_probability"] = 0.0

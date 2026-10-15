@@ -116,6 +116,183 @@ class TestMiniBatchGenerator:
             )
 
 
+class TestCompactDepthHistory:
+    """Tests for reconstructing depth stacks from one stored frame per rollout step."""
+
+    NUM_ENVS = 2
+    NUM_STEPS = 4
+    OFFSETS = (2, 1, 0)
+
+    @staticmethod
+    def _observation(states: list[int], depth_stacks: list[list[int]]) -> TensorDict:
+        num_envs = len(states)
+        return TensorDict(
+            {
+                "policy": TensorDict(
+                    {
+                        "state": torch.tensor(states, dtype=torch.float32).reshape(num_envs, 1),
+                        "depth_image": torch.tensor(depth_stacks, dtype=torch.uint8).reshape(
+                            num_envs, len(TestCompactDepthHistory.OFFSETS), 1, 1
+                        ),
+                    },
+                    batch_size=[num_envs],
+                ),
+                "critic": torch.tensor(states, dtype=torch.float32).reshape(num_envs, 1),
+            },
+            batch_size=[num_envs],
+        )
+
+    @classmethod
+    def _storage(cls) -> RolloutStorage:
+        obs = cls._observation([0, 1], [[0, 0, 0], [0, 0, 0]])
+        return RolloutStorage(
+            "rl",
+            cls.NUM_ENVS,
+            cls.NUM_STEPS,
+            obs,
+            [NUM_ACTIONS],
+            compact_depth_history=True,
+            depth_history_offsets=cls.OFFSETS,
+        )
+
+    @staticmethod
+    def _add(storage: RolloutStorage, obs: TensorDict, dones: list[bool]) -> None:
+        transition = RolloutStorage.Transition()
+        transition.observations = obs
+        transition.hidden_states = (None, None)
+        transition.actions = torch.zeros(TestCompactDepthHistory.NUM_ENVS, NUM_ACTIONS)
+        transition.values = torch.zeros(TestCompactDepthHistory.NUM_ENVS, 1)
+        transition.actions_log_prob = torch.zeros(TestCompactDepthHistory.NUM_ENVS)
+        transition.distribution_params = (
+            torch.zeros(TestCompactDepthHistory.NUM_ENVS, NUM_ACTIONS),
+            torch.ones(TestCompactDepthHistory.NUM_ENVS, NUM_ACTIONS),
+        )
+        transition.rewards = torch.zeros(TestCompactDepthHistory.NUM_ENVS)
+        transition.dones = torch.tensor(dones)
+        storage.add_transition(transition)
+
+    @staticmethod
+    def _assert_batches(storage: RolloutStorage, expected: dict[int, list[int]]) -> None:
+        storage.returns.zero_()
+        storage.advantages.zero_()
+        visited = set()
+        for batch in storage.mini_batch_generator(num_mini_batches=2, num_epochs=1):
+            states = batch.observations["policy", "state"].flatten().long()
+            depths = batch.observations["policy", "depth_image"][:, :, 0, 0]
+            for state, depth in zip(states.tolist(), depths):
+                torch.testing.assert_close(depth, torch.tensor(expected[state], dtype=torch.uint8))
+                visited.add(state)
+        assert visited == set(expected)
+
+    def test_minibatches_preserve_episode_delay_and_clamp_at_resets(self) -> None:
+        storage = self._storage()
+        # Env 1 uses delay=1 in its first episode, then delay=0 after its reset.
+        first_rollout = (
+            ([0, 1], [[10, 10, 10], [20, 20, 20]], [False, False]),
+            ([2, 3], [[10, 10, 11], [20, 20, 20]], [False, True]),
+            ([4, 5], [[10, 11, 12], [100, 100, 100]], [False, False]),
+            ([6, 7], [[11, 12, 13], [100, 100, 101]], [False, False]),
+        )
+        for states, depth, dones in first_rollout:
+            self._add(storage, self._observation(states, depth), dones)
+
+        compact = storage.observations["policy", "depth_image"]
+        assert compact.shape == (self.NUM_STEPS, self.NUM_ENVS, 1, 1)
+        self._assert_batches(
+            storage,
+            {
+                0: [10, 10, 10],
+                1: [20, 20, 20],
+                2: [10, 10, 11],
+                3: [20, 20, 20],
+                4: [10, 11, 12],
+                5: [100, 100, 100],
+                6: [11, 12, 13],
+                7: [100, 100, 101],
+            },
+        )
+
+        storage.clear()
+        second_rollout = (
+            ([8, 9], [[12, 13, 14], [100, 101, 102]]),
+            ([10, 11], [[13, 14, 15], [101, 102, 103]]),
+            ([12, 13], [[14, 15, 16], [102, 103, 104]]),
+            ([14, 15], [[15, 16, 17], [103, 104, 105]]),
+        )
+        for states, depth in second_rollout:
+            self._add(storage, self._observation(states, depth), [False, False])
+        expected = {
+            state: stack
+            for states, depth in second_rollout
+            for state, stack in zip(states, depth)
+        }
+        self._assert_batches(storage, expected)
+
+    def test_prefix_can_span_more_than_one_rollout(self) -> None:
+        offsets = (5, 2, 0)
+        obs = self._observation([0, 1], [[0, 0, 0], [0, 0, 0]])
+        storage = RolloutStorage(
+            "rl",
+            self.NUM_ENVS,
+            self.NUM_STEPS,
+            obs,
+            [NUM_ACTIONS],
+            compact_depth_history=True,
+            depth_history_offsets=offsets,
+        )
+        for rollout in range(3):
+            expected = {}
+            for local_step in range(self.NUM_STEPS):
+                step = rollout * self.NUM_STEPS + local_step
+                states = [step * self.NUM_ENVS + env for env in range(self.NUM_ENVS)]
+                depth = [
+                    [max(0, step - offset) + env * 100 for offset in offsets]
+                    for env in range(self.NUM_ENVS)
+                ]
+                self._add(storage, self._observation(states, depth), [False, False])
+                expected.update(zip(states, depth))
+            self._assert_batches(storage, expected)
+            if rollout < 2:
+                storage.clear()
+
+    def test_minibatches_reuse_episode_start_metadata(self) -> None:
+        storage = self._storage()
+        for step in range(self.NUM_STEPS):
+            states = [step * self.NUM_ENVS + env for env in range(self.NUM_ENVS)]
+            depth = [[max(0, step - offset) for offset in self.OFFSETS] for _ in range(self.NUM_ENVS)]
+            self._add(storage, self._observation(states, depth), [False, False])
+        storage.returns.zero_()
+        storage.advantages.zero_()
+
+        original_restore = storage._restore_depth
+        starts_seen = []
+
+        def record_starts(observations, time_idx, env_idx, *, starts=None):
+            starts_seen.append(starts)
+            return original_restore(observations, time_idx, env_idx, starts=starts)
+
+        storage._restore_depth = record_starts
+        list(storage.mini_batch_generator(num_mini_batches=2, num_epochs=3))
+
+        assert len(starts_seen) == 6
+        assert starts_seen[0] is not None
+        assert all(starts is starts_seen[0] for starts in starts_seen)
+
+    def test_invalid_depth_contract_is_rejected(self) -> None:
+        obs = self._observation([0, 1], [[0, 0, 0], [0, 0, 0]])
+        obs["policy", "depth_image"] = obs["policy", "depth_image"].float()
+        with pytest.raises(ValueError, match="uint8"):
+            RolloutStorage(
+                "rl",
+                self.NUM_ENVS,
+                self.NUM_STEPS,
+                obs,
+                [NUM_ACTIONS],
+                compact_depth_history=True,
+                depth_history_offsets=self.OFFSETS,
+            )
+
+
 class TestRecurrentMiniBatchGenerator:
     """Tests for ``recurrent_mini_batch_generator`` — trajectory counting, env/trajectory alignment."""
 

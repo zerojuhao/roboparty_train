@@ -4,17 +4,26 @@ __pycache__/
 *.egg-info/
 .venv/
 .vscode/
+.pytest_cache/
+.ruff_cache/
+*.log
+*.out
+*.bak*
 
 # Isaac Lab installations are external SDKs, not repository sources.
 IsaacLab/
 IsaacLab-3.0/
 
 # Training outputs and experiment logs
-/checkpoints/
-/logs/
-/wandb/
-/amp_data/
-/outputs/
+/checkpoints
+/logs
+/wandb
+/amp_data
+/outputs
+/videos
+/recordings
+/cache
+/tmp
 /*.npz
 /*.mp4
 /*.pt
@@ -22,9 +31,14 @@ IsaacLab-3.0/
 *.mp4
 *.pt
 
-# Datasets stay on the training host until the repository is ready for them.
-/robo_newton/data/
-/ufo_data/motions/
+# Match both real directories and host-specific symlinks to external data.
+/data
+/ufo_data
+/robo_newton/data
+
+# Generated progress files from historical experiment scripts.
+/project_ops/overnight_amp_20261011/*.txt
+/project_ops/overnight_amp_20261011/diag_*.json
 
 # Local package metadata.
 /robo_newton/*.egg-info/

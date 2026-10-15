@@ -9,12 +9,97 @@ import yaml
 from typing import TYPE_CHECKING
 
 from isaaclab.terrains.height_field.utils import convert_height_field_to_mesh
+from isaaclab.terrains.trimesh.utils import make_border
 
 from ..height_field.hf_terrains import generate_perlin_noise
+from ..native_collision import heightfield_mesh
 from .utils import crop_terrain_mesh_aabb, generate_wall
 
 if TYPE_CHECKING:
     from . import mesh_terrains_cfg
+
+
+def bordered_random_grid_terrain(
+    difficulty: float, cfg: mesh_terrains_cfg.BorderedMeshRandomGridTerrainCfg
+) -> tuple[list[trimesh.Trimesh], np.ndarray]:
+    """Generate Xue's random box grid with an exact flat outer border."""
+    if cfg.size[0] != cfg.size[1]:
+        raise ValueError(f"The terrain must be square. Received size: {cfg.size}.")
+    if cfg.holes:
+        raise ValueError("Bordered random-grid terrain does not support holes.")
+    if not 0.0 < cfg.border_width < 0.5 * min(cfg.size):
+        raise ValueError("border_width must leave a positive terrain interior.")
+    if cfg.grid_width <= 0.0 or cfg.height_merge_threshold <= 0.0 or cfg.max_merge_distance <= 0:
+        raise ValueError("Random-grid dimensions and merge parameters must be positive.")
+
+    grid_height = cfg.grid_height_range[0] + difficulty * (
+        cfg.grid_height_range[1] - cfg.grid_height_range[0]
+    )
+    terrain_height = 1.0
+    interior = cfg.size[0] - 2.0 * cfg.border_width
+    cell_widths = [cfg.grid_width] * int(interior // cfg.grid_width)
+    remainder = interior - sum(cell_widths)
+    if remainder > 1.0e-6:
+        cell_widths.append(remainder)
+
+    meshes = make_border(
+        cfg.size,
+        (interior, interior),
+        terrain_height,
+        (0.5 * cfg.size[0], 0.5 * cfg.size[1], -0.5 * terrain_height),
+    )
+    heights = np.random.uniform(-grid_height, grid_height, (len(cell_widths), len(cell_widths)))
+    if cfg.merge_similar_heights:
+        heights = np.round(heights / cfg.height_merge_threshold) * cfg.height_merge_threshold
+
+    edges = cfg.border_width + np.concatenate(([0.0], np.cumsum(cell_widths)))
+    visited = np.zeros_like(heights, dtype=bool)
+    for row in range(len(cell_widths)):
+        for col in range(len(cell_widths)):
+            if visited[row, col]:
+                continue
+            row_end, col_end = row + 1, col + 1
+            if cfg.merge_similar_heights:
+                limit = min(row + cfg.max_merge_distance, len(cell_widths))
+                while (
+                    row_end < limit
+                    and not visited[row_end, col]
+                    and heights[row_end, col] == heights[row, col]
+                ):
+                    row_end += 1
+                limit = min(col + cfg.max_merge_distance, len(cell_widths))
+                while col_end < limit:
+                    region = heights[row:row_end, col_end]
+                    if visited[row:row_end, col_end].any() or not np.all(region == heights[row, col]):
+                        break
+                    col_end += 1
+            visited[row:row_end, col:col_end] = True
+            width_x = edges[row_end] - edges[row]
+            width_y = edges[col_end] - edges[col]
+            height = float(heights[row, col])
+            meshes.append(
+                trimesh.creation.box(
+                    extents=(width_x, width_y, terrain_height + height),
+                    transform=trimesh.transformations.translation_matrix(
+                        (
+                            0.5 * (edges[row] + edges[row_end]),
+                            0.5 * (edges[col] + edges[col_end]),
+                            0.5 * (height - terrain_height),
+                        )
+                    ),
+                )
+            )
+
+    platform_height = terrain_height + grid_height
+    meshes.append(
+        trimesh.creation.box(
+            extents=(cfg.platform_width, cfg.platform_width, platform_height),
+            transform=trimesh.transformations.translation_matrix(
+                (0.5 * cfg.size[0], 0.5 * cfg.size[1], 0.5 * (grid_height - terrain_height))
+            ),
+        )
+    )
+    return meshes, np.array([0.5 * cfg.size[0], 0.5 * cfg.size[1], grid_height])
 
 
 def static_mesh_terrain(
@@ -183,6 +268,8 @@ def floating_box_terrain(
             ground_height_field, cfg.horizontal_scale, cfg.vertical_scale, cfg.slope_threshold
         )
         ground_mesh = trimesh.Trimesh(vertices=vertices, faces=triangles)
+        if getattr(cfg, "_native_collision", False):
+            ground_mesh = heightfield_mesh(ground_height_field * cfg.vertical_scale, cfg.horizontal_scale)
         meshes_list.append(ground_mesh)
 
     # specify the origin of the terrain
@@ -269,6 +356,8 @@ def random_multi_box_terrain(
             ground_height_field, cfg.horizontal_scale, cfg.vertical_scale, cfg.slope_threshold
         )
         ground_mesh = trimesh.Trimesh(vertices=vertices, faces=triangles)
+        if getattr(cfg, "_native_collision", False):
+            ground_mesh = heightfield_mesh(ground_height_field * cfg.vertical_scale, cfg.horizontal_scale)
         mesh_list.append(ground_mesh)
 
     if cfg.box_perlin_cfg is not None and cfg.no_perlin_at_obstacle is False:

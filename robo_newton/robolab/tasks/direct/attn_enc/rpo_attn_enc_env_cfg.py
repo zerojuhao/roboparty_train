@@ -228,8 +228,6 @@ class RPOAttnEncEnvCfg(BaseEnvCfg):
         self.robot.critic_obs_history_length = 5
         self.normalization.height_scan_offset = 0.75
         self.sim.physics.isaacsim_physx.gpu_collision_stack_size = 2**29
-        self.noise.noise_scales.joint_vel = 1.75
-        self.noise.noise_scales.joint_pos = 0.03
         self.noise.noise_scales.lin_vel = 0.2
         self.noise.noise_scales.height_scan = 0.025
         self.commands.ranges = CommandRangesCfg(

@@ -181,7 +181,7 @@ RP1_24DOF_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.78),
+        pos=(0.0, 0.0, 0.85),
         joint_pos={
             "left_hip_pitch_joint": -0.1,
             "left_knee_joint": -0.3,

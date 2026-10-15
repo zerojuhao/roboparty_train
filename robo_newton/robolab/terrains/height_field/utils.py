@@ -30,7 +30,8 @@ def generate_wall(func: Callable) -> Callable:
         wall_thickness = cfg.wall_thickness
 
         # Get mesh bounds
-        bounds = mesh.bounds
+        bounds = np.array([np.min([m.bounds[0] for m in meshes], axis=0),
+                           np.max([m.bounds[1] for m in meshes], axis=0)])
         min_bound, max_bound = bounds[0], bounds[1]
 
         # Left wall

@@ -198,8 +198,6 @@ class RPOFlatEnvCfg(BaseEnvCfg):
         self.events.scale_actuator_gains.params["asset_cfg"].joint_names = [".*_joint"]
         self.events.scale_joint_parameters.params["asset_cfg"].joint_names = [".*_joint"]
         self.robot.action_scale = 0.25
-        self.noise.noise_scales.joint_vel = 1.75
-        self.noise.noise_scales.joint_pos = 0.03
 
 
 @configclass

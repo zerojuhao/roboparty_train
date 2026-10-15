@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import functools
+import math
 
 import numpy as np
 import scipy.interpolate as interpolate
@@ -8,7 +10,10 @@ import trimesh
 import trimesh.transformations
 from typing import TYPE_CHECKING
 
-from isaaclab.terrains.height_field.utils import convert_height_field_to_mesh, height_field_to_mesh
+from isaaclab.terrains.height_field.utils import (
+    convert_height_field_to_mesh,
+    height_field_to_mesh as isaac_height_field_to_mesh,
+)
 
 from robolab.utils.perlin import generate_fractal_noise_2d
 
@@ -18,6 +23,108 @@ if TYPE_CHECKING:
 from . import hf_terrains_cfg
 from .grid_utils import centered_step_levels
 from .utils import generate_wall
+
+
+def height_field_to_mesh(func):
+    """Use IsaacLab conversion, with opt-in exact flat-border resampling."""
+    default_wrapper = isaac_height_field_to_mesh(func)
+
+    @functools.wraps(func)
+    def wrapper(difficulty, cfg):
+        native = getattr(cfg, "_native_collision", False)
+        if not getattr(cfg, "exact_flat_border", False) or cfg.border_width <= 0.0:
+            if native:
+                return _native_height_field(func, difficulty, cfg)
+            return default_wrapper(difficulty, cfg)
+
+        original_scale = cfg.horizontal_scale
+        original_intervals = [int(extent / original_scale) for extent in cfg.size]
+        original_shape = tuple(count + 1 for count in original_intervals)
+        border_pixels = int(cfg.border_width / original_scale) + 1
+        heights = np.zeros(original_shape, dtype=np.int16)
+        interior_shape = tuple(size - 2 * border_pixels for size in original_shape)
+        terrain_size = copy.deepcopy(cfg.size)
+        cfg.size = tuple(size * original_scale for size in interior_shape)
+        try:
+            generated = func(difficulty, cfg)
+        finally:
+            cfg.size = terrain_size
+        if generated.shape != interior_shape:
+            raise ValueError(
+                f"Exact-border height field shape mismatch: expected {interior_shape}, got {generated.shape}."
+            )
+        heights[border_pixels:-border_pixels, border_pixels:-border_pixels] = generated
+
+        axes = []
+        for extent, count in zip(cfg.size, original_intervals):
+            bands = round(extent / cfg.border_width)
+            if bands <= 2 or not math.isclose(bands * cfg.border_width, extent):
+                raise ValueError("Exact flat border must divide each terrain extent.")
+            aligned_intervals = math.ceil(count / bands) * bands
+            axes.append(np.linspace(0.0, extent, aligned_intervals + 1))
+        horizontal_scale = cfg.size[0] / (len(axes[0]) - 1)
+        if not math.isclose(horizontal_scale, cfg.size[1] / (len(axes[1]) - 1)):
+            raise ValueError("Exact flat-border terrain requires equal x/y resolution.")
+
+        old_x = np.linspace(0.0, cfg.size[0], heights.shape[0])
+        old_y = np.linspace(0.0, cfg.size[1], heights.shape[1])
+        along_y = np.stack([np.interp(axes[1], old_y, row) for row in heights])
+        heights = np.stack(
+            [np.interp(axes[0], old_x, column) for column in along_y.T], axis=1
+        )
+        border = (
+            ((axes[0] <= cfg.border_width) | (axes[0] >= cfg.size[0] - cfg.border_width))[:, None]
+            | ((axes[1] <= cfg.border_width) | (axes[1] >= cfg.size[1] - cfg.border_width))[None, :]
+        )
+        heights[border] = 0.0
+        heights = np.rint(heights).astype(np.int16)
+
+        vertices, triangles = convert_height_field_to_mesh(
+            heights, horizontal_scale, cfg.vertical_scale, cfg.slope_threshold
+        )
+        mesh = trimesh.Trimesh(vertices=vertices, faces=triangles)
+        if native:
+            from robolab.terrains.native_collision import heightfield_mesh
+            mesh = heightfield_mesh(heights * cfg.vertical_scale, horizontal_scale)
+        center_x = int((cfg.size[0] * 0.5) / horizontal_scale)
+        center_y = int((cfg.size[1] * 0.5) / horizontal_scale)
+        radius = max(1, round(1.0 / horizontal_scale))
+        origin_z = np.max(
+            heights[
+                center_x - radius : center_x + radius,
+                center_y - radius : center_y + radius,
+            ]
+        ) * cfg.vertical_scale
+        return [mesh], np.array([0.5 * cfg.size[0], 0.5 * cfg.size[1], origin_z])
+
+    return wrapper
+
+
+def _native_height_field(func, difficulty, cfg):
+    from robolab.terrains.native_collision import heightfield_mesh, terrace_meshes
+
+    if 0 < cfg.border_width < cfg.horizontal_scale:
+        raise ValueError("Terrain border must be at least one grid cell.")
+    shape = tuple(int(size / cfg.horizontal_scale) + 1 for size in cfg.size)
+    border = int(cfg.border_width / cfg.horizontal_scale) + 1
+    inner = cfg.copy()
+    inner.size = tuple((n - 2 * border) * cfg.horizontal_scale for n in shape)
+    heights = np.zeros(shape, dtype=np.int16)
+    heights[border:-border, border:-border] = func(difficulty, inner)
+    # Only pyramid stairs use the level decomposition. Slopes and obstacle
+    # fields retain their complete sampled surface and original distribution.
+    if func.__name__ == "perlin_pyramid_stairs_terrain":
+        clean = inner.copy()
+        clean.perlin_cfg = None
+        levels = np.zeros(shape, dtype=np.int16)
+        levels[border:-border, border:-border] = func(difficulty, clean)
+        meshes = terrace_meshes(heights * cfg.vertical_scale, levels, cfg.horizontal_scale)
+    else:
+        meshes = [heightfield_mesh(heights * cfg.vertical_scale, cfg.horizontal_scale)]
+    x1, y1 = (int((size * .5 - 1) / cfg.horizontal_scale) for size in cfg.size)
+    x2, y2 = (int((size * .5 + 1) / cfg.horizontal_scale) for size in cfg.size)
+    z = heights[x1:x2, y1:y2].max() * cfg.vertical_scale
+    return meshes, np.array([cfg.size[0] / 2, cfg.size[1] / 2, z])
 
 
 def generate_perlin_noise(difficulty: float, cfg: hf_terrains_cfg.PerlinPlaneTerrainCfg) -> np.ndarray:
@@ -46,10 +153,12 @@ def generate_perlin_noise(difficulty: float, cfg: hf_terrains_cfg.PerlinPlaneTer
 @generate_wall
 @height_field_to_mesh
 def perlin_plane_terrain(difficulty: float, cfg: hf_terrains_cfg.PerlinPlaneTerrainCfg) -> np.ndarray:
-    return generate_perlin_noise(
+    height_field = generate_perlin_noise(
         difficulty=difficulty,
         cfg=cfg,
-    )  # type: ignore[return-value, arg-type]
+    )
+    height_field += round(cfg.interior_height_offset / cfg.vertical_scale)
+    return height_field  # type: ignore[return-value, arg-type]
 
 
 @generate_wall
@@ -370,6 +479,16 @@ def perlin_trapezoid_stairs_terrain(
                 heights[-i - 1, j] = z_gen[-1, 0]
                 heights[-i - 1, -j - 1] = z_gen[-1, -1]
 
+    if getattr(cfg, "_native_collision", False):
+        from robolab.terrains.native_collision import terrace_meshes
+
+        levels = np.pad(z_base, border_pixels, mode="edge" if cfg.inverted else "constant")
+        meshes = terrace_meshes(heights * vs, levels, hs)
+        x1, y1 = (int((size * .5 - 1) / hs) for size in cfg.size)
+        x2, y2 = (int((size * .5 + 1) / hs) for size in cfg.size)
+        z = (np.min if cfg.inverted else np.max)(heights[x1:x2, y1:y2]) * vs
+        return meshes, np.array([cfg.size[0] / 2, cfg.size[1] / 2, z])
+
     vertices, triangles = convert_height_field_to_mesh(heights, hs, vs, cfg.slope_threshold)
     meshes: list[trimesh.Trimesh] = [trimesh.Trimesh(vertices=vertices, faces=triangles)]
 
@@ -601,6 +720,7 @@ def perlin_discrete_obstacles_terrain(
         # add perlin noise to the terrain
         hf_raw += perlin_noise
 
+    hf_raw += cfg.interior_height_offset / cfg.vertical_scale
     return np.rint(hf_raw).astype(np.int16)
 
 

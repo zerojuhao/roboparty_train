@@ -11,27 +11,35 @@ Observation contract (dict of flat tensors):
 from __future__ import annotations
 
 import copy
+import json
 import math
+import os
 from typing import Dict
 
 import torch
 import torch.nn.functional as F
 from torch import autograd
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+from .gradient_audit import eager_gradient_diagnostics, parameter_gradient_metrics
 
 from .fb_networks import (
     BackwardMap,
+    BackwardContextOnnxExporter,
     Discriminator,
+    DepthEncoderOnnxExporter,
     EMA,
     ObsNormalizer,
     ResidualActor,
     VisualResidualActor,
+    VisualActorOnnxExporter,
     ResidualForwardMap,
     SharedCriticMap,
+    model_kwargs,
     soft_update_params,
     weight_init,
 )
 from ..storage.replay_buffer import ZBuffer
+from ..utils.finite import check_finite_tree
 
 OBS_ORDER = ("state", "privileged_state", "last_action", "history_actor")
 ACTOR_KEYS = ("state", "last_action", "history_actor")
@@ -48,7 +56,8 @@ def tree_to_device(x, device):
 class FbCprAuxAgent:
     _COMPILE_MODES: tuple[str, ...] = ("default", "max-autotune-no-cudagraphs")
 
-    def __init__(self, obs_dims: Dict[str, int], action_dim: int, cfg, device="cuda"):
+    def __init__(self, obs_dims: Dict[str, int], action_dim: int, cfg, device="cuda", *, inference_only=False):
+        self.inference_only = inference_only
         self.cfg = cfg
         self.device = device
         self.fb_target_tau = float(cfg.fb_target_tau)
@@ -73,25 +82,21 @@ class FbCprAuxAgent:
         self.full_keys = tuple(getattr(cfg, "full_obs_keys", FULL_KEYS))
         self.privileged_keys = tuple(getattr(cfg, "privileged_obs_keys", PRIVILEGED_KEYS))
         self.visual_enabled = bool(getattr(cfg, "visual_enabled", False))
-        self.depth_shape = tuple(getattr(cfg, "depth_shape", (8, 18, 32)))
+        depth_encoder_cfg = model_kwargs(cfg.depth_encoder) if self.visual_enabled else None
+        self.depth_shape = (
+            tuple(depth_encoder_cfg.pop("input_shape"))
+            if self.visual_enabled and "input_shape" in depth_encoder_cfg
+            else None
+        )
+        if self.visual_enabled and self.depth_shape is None:
+            raise ValueError("visual_enabled requires depth_encoder.input_shape")
         self.actor_obs_dim = sum(self.obs_dims[k] for k in self.actor_keys)
         self.privileged_obs_dim = sum(self.obs_dims[k] for k in self.privileged_keys)
         self.full_obs_dim = sum(self.obs_dims[k] for k in self.full_keys)
         z_dim = cfg.z_dim
         self.z_dim = z_dim
-        self.actor_hidden_dim = int(getattr(cfg, "actor_hidden_dim", 1024))
-        self.actor_hidden_layers = int(getattr(cfg, "actor_hidden_layers", 6))
-        self.forward_hidden_dim = int(getattr(cfg, "forward_hidden_dim", 1024))
-        self.forward_hidden_layers = int(getattr(cfg, "forward_hidden_layers", 6))
-        self.critic_hidden_dim = int(getattr(cfg, "critic_hidden_dim", 1024))
-        self.critic_hidden_layers = int(getattr(cfg, "critic_hidden_layers", 6))
-        self.backward_hidden_dim = int(getattr(cfg, "backward_hidden_dim", 256))
-        self.backward_hidden_layers = int(getattr(cfg, "backward_hidden_layers", 1))
-        self.embedding_layers = int(getattr(cfg, "net_embedding_layers", 2))
-        self.shared_value_net = bool(getattr(cfg, "shared_value_net", False))
-        # Preserve the original pessimistic value estimate when a task config
-        # does not explicitly choose an ensemble size.
-        self.critic_members = int(getattr(cfg, "critic_ensemble_members", 2))
+        self.shared_value_net = cfg.shared_value_net
+        self.critic_members = cfg.critic_ensemble_members
 
         if self.visual_enabled:
             self._actor = VisualResidualActor(
@@ -99,59 +104,59 @@ class FbCprAuxAgent:
                 self.actor_keys,
                 z_dim,
                 action_dim,
-                hidden_dim=self.actor_hidden_dim,
-                hidden_layers=self.actor_hidden_layers,
-                embedding_layers=self.embedding_layers,
                 depth_shape=self.depth_shape,
-                estimate_velocity=bool(getattr(cfg, "estimated_velocity_enabled", True)),
+                encoder_cfg=depth_encoder_cfg,
+                estimator_cfg=model_kwargs(cfg.velocity_estimator),
+                estimate_velocity=cfg.estimated_velocity_enabled,
+                velocity_estimator_updates_encoder=getattr(cfg, "velocity_estimator_updates_encoder", True),
+                **model_kwargs(cfg.actor),
             )
         else:
             self._actor = ResidualActor(
                 self.actor_obs_dim, z_dim, action_dim,
-                hidden_dim=self.actor_hidden_dim,
-                hidden_layers=self.actor_hidden_layers,
-                embedding_layers=self.embedding_layers,
+                **model_kwargs(cfg.actor),
             )
         self._backward_map = BackwardMap(
             self.privileged_obs_dim,
             z_dim,
-            hidden_dim=self.backward_hidden_dim,
-            hidden_layers=self.backward_hidden_layers,
+            norm=cfg.norm_z,
+            **model_kwargs(cfg.backward_map),
         )
+        if inference_only:
+            context_keys = ("heading", "velocity_command", "velocity_target_yaw") if self.visual_enabled else ()
+            self._obs_normalizer = ObsNormalizer(self.obs_dims, momentum=0.01, identity_keys=context_keys)
+            for module in (self._actor, self._backward_map, self._obs_normalizer):
+                module.to(device)
+                module.requires_grad_(False)
+            return
         self._forward_map = ResidualForwardMap(
             self.full_obs_dim, z_dim, action_dim,
-            hidden_dim=self.forward_hidden_dim,
-            hidden_layers=self.forward_hidden_layers,
-            num_parallel=2,
+            num_parallel=cfg.forward_ensemble_members,
+            **model_kwargs(cfg.forward_map),
         )
         if self.shared_value_net:
             self._critic_shared = SharedCriticMap(
                 self.full_obs_dim, z_dim, action_dim,
-                hidden_dim=self.critic_hidden_dim,
-                hidden_layers=self.critic_hidden_layers,
                 num_parallel=self.critic_members,
+                **model_kwargs(cfg.critic),
             )
         else:
             self._critic = ResidualForwardMap(
                 self.full_obs_dim, z_dim, action_dim,
-                hidden_dim=self.critic_hidden_dim,
-                hidden_layers=self.critic_hidden_layers,
                 num_parallel=self.critic_members,
                 output_dim=1,
+                **model_kwargs(cfg.critic),
             )
             self._aux_critic = ResidualForwardMap(
                 self.full_obs_dim, z_dim, action_dim,
-                hidden_dim=self.critic_hidden_dim,
-                hidden_layers=self.critic_hidden_layers,
                 num_parallel=self.critic_members,
                 output_dim=1,
+                **model_kwargs(cfg.aux_critic),
             )
         # The runner receives serialized config dictionaries from the training entrypoint.
-        discriminator_cfg = cfg.discriminator
-        if not isinstance(discriminator_cfg, dict):
-            discriminator_cfg = vars(discriminator_cfg)
-        self.discriminator_loss = discriminator_cfg["loss_type"].lower()
-        self.discriminator_reward_type = discriminator_cfg["reward_type"].lower()
+        discriminator_cfg = model_kwargs(cfg.discriminator)
+        self.discriminator_loss = discriminator_cfg.pop("loss_type").lower()
+        self.discriminator_reward_type = discriminator_cfg.pop("reward_type").lower()
         if self.discriminator_loss not in {"bce", "gan", "lsgan", "wgan"}:
             raise ValueError(
                 "discriminator loss must be one of 'bce', 'gan', 'lsgan', or 'wgan', "
@@ -162,7 +167,7 @@ class FbCprAuxAgent:
         self._discriminator = Discriminator(
             self.privileged_obs_dim,
             z_dim,
-            hidden_dims=discriminator_cfg["hidden_dims"],
+            **discriminator_cfg,
         )
 
         self._target_forward_map = copy.deepcopy(self._forward_map)
@@ -173,7 +178,8 @@ class FbCprAuxAgent:
             self._target_critic = copy.deepcopy(self._critic)
             self._target_aux_critic = copy.deepcopy(self._aux_critic)
 
-        self._obs_normalizer = ObsNormalizer(self.obs_dims, momentum=0.01)
+        context_keys = ("heading", "velocity_command", "velocity_target_yaw") if self.visual_enabled else ()
+        self._obs_normalizer = ObsNormalizer(self.obs_dims, momentum=0.01, identity_keys=context_keys)
         self._aux_reward_normalizer = EMA(tau=0.99, translate=False, scale=True)
 
         value_modules = (
@@ -331,6 +337,154 @@ class FbCprAuxAgent:
         return dist.sample()
 
     @torch.no_grad()
+    def export_visual_onnx(self, path, *, encoder_filename="depth_encoder.onnx",
+                           actor_filename="actor.onnx",
+                           context_filename="backward_encoder.onnx",
+                           metadata_filename="pufo_onnx.json",
+                           opset_version=18):
+        """Export depth, context/backward, and actor graphs with explicit contracts."""
+        if not self.visual_enabled:
+            raise RuntimeError("PUFO ONNX export requires visual_enabled=True.")
+        expected_actor_keys = ("state", "last_action", "history_actor", "heading", "velocity_command")
+        if tuple(self.actor_keys) != expected_actor_keys:
+            raise ValueError(
+                "PUFO ONNX export currently expects actor_obs_keys="
+                f"{expected_actor_keys}, got {tuple(self.actor_keys)}."
+            )
+        os.makedirs(path, exist_ok=True)
+        self._actor.eval()
+        self._actor.depth_encoder.eval()
+        self._obs_normalizer.eval()
+        encoder = DepthEncoderOnnxExporter(self._actor.depth_encoder).eval()
+        actor = VisualActorOnnxExporter(self._actor, self._obs_normalizer).eval()
+        depth_dtype = torch.uint8 if self._actor.depth_encoder.input_dtype == "uint8" else torch.float32
+        depth_input_name = f"depth_{self._actor.depth_encoder.input_dtype}"
+        depth = torch.zeros((1, *self.depth_shape), dtype=depth_dtype, device=self.device)
+        latent = encoder(depth)
+        dummy = {
+            "state": torch.zeros((1, self.obs_dims["state"]), device=self.device),
+            "last_action": torch.zeros((1, self.obs_dims["last_action"]), device=self.device),
+            "history_actor": torch.zeros((1, self.obs_dims["history_actor"]), device=self.device),
+            "heading": torch.zeros((1, self.obs_dims["heading"]), device=self.device),
+            "velocity_command": torch.zeros((1, self.obs_dims["velocity_command"]), device=self.device),
+            "z": torch.zeros((1, self.z_dim), device=self.device),
+            "depth_latent": latent,
+        }
+        encoder_path = os.path.join(path, encoder_filename)
+        actor_path = os.path.join(path, actor_filename)
+        context_path = os.path.join(path, context_filename)
+        dynamic_axes = {"batch": {0: "batch"}}
+        torch.onnx.export(
+            encoder,
+            (depth,),
+            encoder_path,
+            opset_version=opset_version,
+            input_names=[depth_input_name],
+            output_names=["depth_latent"],
+            dynamic_axes={depth_input_name: {0: "batch"}, "depth_latent": {0: "batch"}},
+            external_data=False,
+            do_constant_folding=True,
+            dynamo=False,
+        )
+        torch.onnx.export(
+            actor,
+            tuple(dummy.values()),
+            actor_path,
+            opset_version=opset_version,
+            input_names=list(dummy),
+            output_names=["actions"],
+            dynamic_axes={name: dynamic_axes["batch"] for name in (*dummy, "actions")},
+            external_data=False,
+            do_constant_folding=True,
+            dynamo=False,
+        )
+        # Keep context generation independent from the actor graph.  The
+        # backward map consumes the same normalized privileged observations as
+        # training and emits the z fed to the actor.
+        context = BackwardContextOnnxExporter(
+            copy.deepcopy(self._backward_map).to("cpu").eval(),
+            copy.deepcopy(self._obs_normalizer).to("cpu").eval(),
+            self.privileged_keys,
+            # BackwardMap already contains Norm when cfg.norm_z is enabled;
+            # preserve that exact graph instead of normalizing twice.
+            norm_z=False,
+        ).eval()
+        context_inputs = tuple(
+            torch.zeros((1, self.obs_dims[key]), dtype=torch.float32)
+            for key in self.privileged_keys
+        )
+        torch.onnx.export(
+            context,
+            context_inputs,
+            context_path,
+            opset_version=opset_version,
+            input_names=list(self.privileged_keys),
+            output_names=["z"],
+            dynamic_axes={key: {0: "batch"} for key in (*self.privileged_keys, "z")},
+            external_data=False,
+            do_constant_folding=True,
+            dynamo=False,
+        )
+        metadata = {
+            "format": "pufo_visual_onnx_v1",
+            "depth_encoder": {
+                "file": encoder_filename,
+                "input_name": depth_input_name,
+                "input_dtype": self._actor.depth_encoder.input_dtype,
+                "input_range": list(self._actor.depth_encoder.input_range),
+                "input_shape": [self.depth_shape[0], self.depth_shape[1], self.depth_shape[2]],
+                "output_name": "depth_latent",
+                "output_dim": self._actor.depth_encoder.output_size,
+            },
+            "actor": {
+                "file": actor_filename,
+                "inputs": {
+                    key: int(self.obs_dims[key]) for key in expected_actor_keys
+                } | {"z": int(self.z_dim), "depth_latent": int(self._actor.depth_encoder.output_size)},
+                "output_name": "actions",
+                "action_dim": int(self.action_dim),
+                "action_rescale": float(getattr(self.cfg, "action_rescale", 1.0)),
+                "action_range": [-1.0, 1.0],
+                "velocity_estimator_inside_actor": bool(self._actor.estimate_velocity),
+            },
+            "context": {
+                "exported": True,
+                "file": context_filename,
+                "inputs": {
+                    key: int(self.obs_dims[key]) for key in self.privileged_keys
+                },
+                "input_order": list(self.privileged_keys),
+                "output_name": "z",
+                "z_dim": int(self.z_dim),
+                "z_projected": bool(getattr(self.cfg, "norm_z", False)),
+                "normalization_in_graph": True,
+                "z_source": "privileged_obs_keys",
+                "heading_source": "external",
+                "velocity_command_source": "external",
+                "training_generator": "PufoAgent.advance_rollout_context",
+                "note": "Run this graph first and feed its z output to the actor graph. Context inputs must be available at deployment.",
+            },
+        }
+        with open(os.path.join(path, metadata_filename), "w", encoding="utf-8") as file:
+            json.dump(metadata, file, indent=2, sort_keys=True)
+        try:
+            import onnx
+
+            onnx.checker.check_model(onnx.load(encoder_path))
+            onnx.checker.check_model(onnx.load(actor_path))
+            onnx.checker.check_model(onnx.load(context_path))
+        except ImportError:
+            # ONNX is optional for training; the files are still usable by a
+            # deployment environment that provides the runtime dependencies.
+            pass
+        return {
+            "depth_encoder": encoder_path,
+            "context": context_path,
+            "actor": actor_path,
+            "metadata": os.path.join(path, metadata_filename),
+        }
+
+    @torch.no_grad()
     def sample_z(self, n):
         z = torch.randn((n, self.z_dim), dtype=torch.float32, device=self.device)
         return self.project_z(z)
@@ -395,7 +549,7 @@ class FbCprAuxAgent:
         return torch.repeat_interleave(z_expert, seq_length, dim=0)
 
     @torch.no_grad()
-    def sample_mixed_z(self, train_goal_input, expert_encodings):
+    def sample_mixed_context_components(self, train_goal_input, expert_encodings):
         bs = self.cfg.batch_size
         z = self.sample_z(bs)
         p_goal = self.cfg.train_goal_ratio
@@ -407,9 +561,38 @@ class FbCprAuxAgent:
             goals = self._backward_map(train_goal_input[perm])
         goals = self.project_z(goals.float())
         z = torch.where(mix == 0, goals, z)
-        perm = torch.randperm(expert_encodings.shape[0], device=self.device)[:bs]
-        z = torch.where(mix == 1, expert_encodings[perm], z)
-        return z
+        expert_indices = torch.randperm(expert_encodings.shape[0], device=self.device)[:bs]
+        z = torch.where(mix == 1, expert_encodings[expert_indices], z)
+        return z, mix, expert_indices
+
+    @torch.no_grad()
+    def sample_mixed_z(self, train_goal_input, expert_encodings):
+        return self.sample_mixed_context_components(train_goal_input, expert_encodings)[0]
+
+    def _prepare_train_observations(self, train_batch, obs, next_obs):
+        return obs, next_obs
+
+    def _relabel_train_observations(
+        self, train_batch, expert_batch, obs, next_obs, sampled_z, mix_source, expert_indices, relabel_mask
+    ):
+        return obs, next_obs
+
+    def _norm_relabelled_parts(self, obs, normalized):
+        """Subclasses that relabel observations must normalize their changed fields here."""
+        return normalized
+
+    def _context_batch(self, train_batch, obs, next_obs, z, discount):
+        return {
+            "actor_obs": None,
+            "next_actor_obs": next_obs,
+            "obs": self._full_in_from_parts(obs),
+            "next_obs": self._full_in_from_parts(next_obs),
+            "z": z,
+            "next_z": z,
+            "discount": discount,
+            "heading_valid": None,
+            "velocity_valid": None,
+        }
 
     def _avg_grad(self, params):
         if not torch.distributed.is_initialized() or torch.distributed.get_world_size() <= 1:
@@ -451,31 +634,44 @@ class FbCprAuxAgent:
             flat.mul_(scale)
             torch._foreach_copy_(tensors, _unflatten_dense_tensors(flat, tensors))
 
-    def update(self, replay_buffers) -> Dict[str, torch.Tensor]:
+    def update(
+        self, replay_buffers, *, depth_gradient_diagnostics: bool = False,
+        reward_term_scales: dict[str, float] | None = None,
+    ) -> Dict[str, torch.Tensor]:
         cfg = self.cfg
         bs = cfg.batch_size
         expert_batch = replay_buffers["expert_slicer"].sample(bs)
         train_batch = replay_buffers["train"].sample(bs)
+        check_finite_tree({"expert_batch": expert_batch, "train_batch": train_batch}, "batches")
 
         train_obs = tree_to_device(train_batch["observation"], self.device)
         train_next_obs = tree_to_device(train_batch["next"]["observation"], self.device)
         train_action = train_batch["action"].to(self.device)
         train_z = train_batch["z"].to(self.device)
-        discount = cfg.discount * ~train_batch["next"]["terminated"].to(self.device).squeeze(-1)
+        rollout_z = train_z
+        transition_terminated = train_batch["next"].get(
+            "transition_terminated", train_batch["next"]["terminated"]
+        )
+        discount = cfg.discount * ~transition_terminated.to(self.device).squeeze(-1)
         expert_obs = tree_to_device(expert_batch["observation"], self.device)
         expert_next_obs = tree_to_device(expert_batch["next"]["observation"], self.device)
 
+        train_obs, train_next_obs = self._prepare_train_observations(
+            train_batch, train_obs, train_next_obs
+        )
         with torch.no_grad():
             self._obs_normalizer.update_dict(self._parts(train_obs))
             self._obs_normalizer.update_dict(self._parts(train_next_obs))
             t_obs, t_next = self._norm_parts(train_obs), self._norm_parts(train_next_obs)
             e_obs, e_next = self._norm_parts(expert_obs), self._norm_parts(expert_next_obs)
+        collection_obs, collection_next_obs = t_obs, t_next
 
         expert_b_obs = self._b_in_from_parts(e_obs)
         expert_b_next = self._b_in_from_parts(e_next)
         train_b_obs = self._b_in_from_parts(t_obs)
         goal = self._b_in_from_parts(t_next)
         expert_z = self.encode_expert(next_obs=expert_b_next)
+        check_finite_tree(expert_z, "expert_z")
 
         metrics = self.update_discriminator(
             expert_obs=expert_b_obs,
@@ -485,11 +681,30 @@ class FbCprAuxAgent:
             grad_penalty=cfg.grad_penalty_discriminator,
         )
 
-        z = self.sample_mixed_z(train_goal_input=goal, expert_encodings=expert_z).clone()
+        z, mix_source, expert_indices = self.sample_mixed_context_components(
+            train_goal_input=goal, expert_encodings=expert_z
+        )
+        z = z.clone()
+        check_finite_tree(z, "sampled_z")
         self.z_buffer.add(z)
-        if cfg.relabel_ratio is not None:
-            mask = torch.rand((bs, 1), device=self.device) <= cfg.relabel_ratio
-            train_z = torch.where(mask, z, train_z)
+        mask = (
+            torch.zeros((bs, 1), dtype=torch.bool, device=self.device)
+            if cfg.relabel_ratio is None
+            else torch.rand((bs, 1), device=self.device) <= cfg.relabel_ratio
+        )
+        train_z = torch.where(mask, z, train_z)
+        train_obs, train_next_obs = self._relabel_train_observations(
+            train_batch,
+            expert_batch,
+            train_obs,
+            train_next_obs,
+            z,
+            mix_source,
+            expert_indices,
+            mask,
+        )
+        t_obs = self._norm_relabelled_parts(train_obs, t_obs)
+        t_next = self._norm_relabelled_parts(train_next_obs, t_next)
 
         f_obs, f_next = self._full_in_from_parts(t_obs), self._full_in_from_parts(t_next)
         next_actions = self._sample_target_actions(t_next, train_z, count=3)
@@ -504,14 +719,15 @@ class FbCprAuxAgent:
                 next_action=next_actions[0],
             )
         )
-        aux_reward = torch.zeros((bs, 1), device=self.device)
-        for name in cfg.aux_rewards:
-            r = train_batch["aux_rewards"][name].to(self.device)
-            if r.dim() == 2:
-                r = r.squeeze(-1)
-            scale = float(cfg.aux_rewards_scaling[name])
-            aux_reward = aux_reward + (scale * r).unsqueeze(-1)
+        if reward_term_scales:
+            metrics.update(self._replay_reward_metrics(train_batch["aux_rewards"], reward_term_scales))
+        aux_reward = train_batch["aux_rewards"]["aux_reward"].to(self.device)
+        if aux_reward.dim() == 1:
+            aux_reward = aux_reward.unsqueeze(-1)
+        elif aux_reward.dim() != 2 or aux_reward.shape[-1] != 1:
+            raise ValueError(f"Expected aux_reward with shape [batch] or [batch, 1], got {tuple(aux_reward.shape)}")
         aux_reward = self._aux_reward_normalizer(aux_reward)
+        check_finite_tree(aux_reward, "normalized_aux_reward")
 
         if self.shared_value_net:
             metrics.update(
@@ -551,7 +767,23 @@ class FbCprAuxAgent:
                     next_action=next_actions[2],
                 )
             )
-        metrics.update(self.update_actor(actor_obs=self._actor_in_from_parts(t_obs), full_obs=f_obs, z=train_z))
+        context = self._context_batch(
+            train_batch, collection_obs, collection_next_obs, rollout_z, discount
+        )
+        metrics.update(self._update_context_critics(train_batch=train_batch, action=train_action, **context))
+        metrics.update(
+            self.update_actor(
+                actor_obs=t_obs,
+                full_obs=f_obs,
+                z=train_z,
+                context_actor_obs=context["actor_obs"],
+                context_full_obs=context["obs"],
+                context_z=context["z"],
+                heading_valid=context["heading_valid"],
+                velocity_valid=context["velocity_valid"],
+                depth_gradient_diagnostics=depth_gradient_diagnostics,
+            )
+        )
 
         soft_update_params(self._forward_map, self._target_forward_map, self.fb_target_tau)
         soft_update_params(self._backward_map, self._target_backward_map, self.fb_target_tau)
@@ -561,7 +793,24 @@ class FbCprAuxAgent:
             soft_update_params(self._critic, self._target_critic, self.critic_target_tau)
             soft_update_params(self._aux_critic, self._target_aux_critic, self.critic_target_tau)
         self._sync_floating_buffers()
+        check_finite_tree(metrics, "update_metrics")
         return metrics
+
+    def _replay_reward_metrics(self, rewards, scales):
+        # Use the optimizer's actual replay batch, before reward normalization.
+        means = torch.stack([rewards[name].detach().float().mean() for name in scales]).to(self.device)
+        metrics = {}
+        weighted = []
+        for (name, scale), mean in zip(scales.items(), means.unbind()):
+            metrics[f"Reward/raw/{name}"] = mean
+            metrics[f"Reward/weighted/{name}"] = mean * scale
+            weighted.append(mean * scale)
+        metrics["Reward/weighted/total"] = torch.stack(weighted).sum()
+        return metrics
+
+    def _update_context_critics(self, **kwargs) -> Dict[str, torch.Tensor]:
+        """Update optional task-specific critics before updating the actor."""
+        return {}
 
     def _sync_floating_buffers(self):
         if not torch.distributed.is_initialized() or torch.distributed.get_world_size() <= 1:
@@ -569,20 +818,24 @@ class FbCprAuxAgent:
         world_size = torch.distributed.get_world_size()
         modules = (self._obs_normalizer, self._aux_reward_normalizer)
         with torch.no_grad():
+            groups = {}
             for module in modules:
                 for buffer in module.buffers():
                     if buffer.is_floating_point():
-                        torch.distributed.all_reduce(buffer)
-                        buffer.div_(world_size)
+                        groups.setdefault((buffer.device, buffer.dtype), []).append(buffer)
+            # These statistics are small; one collective avoids a rank rendezvous
+            # for every individual mean/variance. Keep integer counters local.
+            for buffers in groups.values():
+                flat = _flatten_dense_tensors(buffers)
+                torch.distributed.all_reduce(flat)
+                flat.div_(world_size)
+                torch._foreach_copy_(buffers, _unflatten_dense_tensors(flat, buffers))
 
     def _b_in_from_parts(self, p):
         return self._privileged_input(p)
 
     def _full_in_from_parts(self, p):
         return self._full_input(p)
-
-    def _actor_in_from_parts(self, p):
-        return self._actor_input(p)
 
     def _sample_target_actions(self, next_parts, z, count):
         with torch.no_grad():
@@ -831,19 +1084,64 @@ class FbCprAuxAgent:
             "mean_aux_reward": aux_reward.mean().detach(),
         }
 
-    def update_actor(self, actor_obs, full_obs, z):
+    @eager_gradient_diagnostics
+    def update_actor(
+        self,
+        actor_obs,
+        full_obs,
+        z,
+        context_actor_obs=None,
+        context_full_obs=None,
+        context_z=None,
+        heading_valid=None,
+        velocity_valid=None,
+        depth_gradient_diagnostics=False,
+    ):
         cfg = self.cfg
         self.actor_optimizer.zero_grad(set_to_none=True)
         with self._autocast_context():
-            action_dist = self._actor_forward(actor_obs, z)
+            if depth_gradient_diagnostics and self.visual_enabled:
+                action_dist = self._actor.forward_with_depth_gradient_diagnostics(
+                    self._actor_input(actor_obs), z, cfg.actor_std
+                )
+            else:
+                action_dist = self._actor_forward(actor_obs, z)
+            depth_ablation_metrics = {}
+            if depth_gradient_diagnostics and self.visual_enabled and isinstance(actor_obs, dict):
+                with torch.no_grad():
+                    reference_action = action_dist.mean.detach()
+                    depth = actor_obs["depth_image"]
+                    for name, ablated_depth in (
+                        ("zero", torch.zeros_like(depth)),
+                        ("temporal_reverse", torch.flip(depth, dims=(1,))),
+                    ):
+                        ablated_obs = dict(actor_obs)
+                        ablated_obs["depth_image"] = ablated_depth
+                        ablated = self._actor_forward(ablated_obs, z)
+                        depth_ablation_metrics[f"depth_ablation/action_mae_{name}"] = (
+                            ablated.mean.float() - reference_action.float()
+                        ).abs().mean()
+                        if hasattr(action_dist, "velocity_estimate"):
+                            depth_ablation_metrics[f"depth_ablation/velocity_mae_{name}"] = (
+                                ablated.velocity_estimate.float()
+                                - action_dist.velocity_estimate.detach().float()
+                            ).abs().mean()
             action = action_dist.sample(clip=cfg.stddev_clip)
+        track_depth_gradients = (
+            depth_gradient_diagnostics
+            and hasattr(action_dist, "actor_depth_latent")
+            and hasattr(action_dist, "velocity_depth_latent")
+        )
+        if track_depth_gradients:
+            action_dist.actor_depth_latent.retain_grad()
+            action_dist.velocity_depth_latent.retain_grad()
         action = action.float()
 
         if self.shared_value_net:
             frozen_modules = [self._critic_shared, self._forward_map]
         else:
             frozen_modules = [self._critic, self._aux_critic, self._forward_map]
-        for name in ("_heading_critic", "_velocity_critic"):
+        for name in ("_heading_critic", "_velocity_critic", "_context_critic_shared"):
             if hasattr(self, name):
                 frozen_modules.append(getattr(self, name))
         frozen_params = [p for module in frozen_modules for p in module.parameters()]
@@ -865,40 +1163,140 @@ class FbCprAuxAgent:
             _, _, q_aux = self._targets_uncertainty(qs_aux, cfg.actor_pessimism_penalty)
 
             q_heading = torch.zeros_like(q_aux)
-            if hasattr(self, "_heading_critic"):
-                qs_heading = self._heading_critic(full_obs, z, action).float()
-                _, _, q_heading = self._targets_uncertainty(qs_heading, cfg.actor_pessimism_penalty)
+            context_action = action
+            if context_actor_obs is not None:
+                with self._autocast_context():
+                    # Relabeling changes commands, not images. Share the encoder graph
+                    # only within this update; diagnostics retain their original branches.
+                    reuse_depth = (
+                        self.visual_enabled and not depth_gradient_diagnostics
+                        and context_actor_obs["depth_image"] is actor_obs["depth_image"]
+                    )
+                    if reuse_depth:
+                        context_dist = self._actor(
+                            self._actor_input(context_actor_obs), context_z, cfg.actor_std,
+                            depth_latent=action_dist.depth_latent,
+                        )
+                    else:
+                        context_dist = self._actor_forward(context_actor_obs, context_z)
+                    context_action = context_dist.sample(clip=cfg.stddev_clip)
+                context_action = context_action.float()
+            qs_heading = qs_velocity = None
+            if hasattr(self, "_context_critic_shared"):
+                qs_heading, qs_velocity = self._context_critic_shared(
+                    context_full_obs if context_full_obs is not None else full_obs,
+                    context_z if context_z is not None else z,
+                    context_action,
+                )
+            elif hasattr(self, "_heading_critic"):
+                qs_heading = self._heading_critic(
+                    context_full_obs if context_full_obs is not None else full_obs,
+                    context_z if context_z is not None else z,
+                    context_action,
+                )
+            if qs_heading is not None:
+                _, _, q_heading = self._targets_uncertainty(qs_heading.float(), cfg.actor_pessimism_penalty)
+                if heading_valid is not None:
+                    valid = heading_valid.to(device=q_heading.device, dtype=q_heading.dtype).reshape(-1)
+                    q_heading = (q_heading.reshape(-1) * valid).sum() / valid.sum().clamp_min(1.0)
 
-            q_velocity = torch.zeros_like(q_heading)
+            q_velocity = torch.zeros_like(q_aux)
             if hasattr(self, "_velocity_critic"):
-                qs_velocity = self._velocity_critic(full_obs, z, action).float()
-                _, _, q_velocity = self._targets_uncertainty(qs_velocity, cfg.actor_pessimism_penalty)
+                qs_velocity = self._velocity_critic(
+                    context_full_obs if context_full_obs is not None else full_obs,
+                    context_z if context_z is not None else z,
+                    context_action,
+                )
+            if qs_velocity is not None:
+                _, _, q_velocity = self._targets_uncertainty(qs_velocity.float(), cfg.actor_pessimism_penalty)
+                if velocity_valid is not None:
+                    valid = velocity_valid.to(device=q_velocity.device, dtype=q_velocity.dtype).reshape(-1)
+                    q_velocity = (q_velocity.reshape(-1) * valid).sum() / valid.sum().clamp_min(1.0)
 
             fs = fs.float()
             qs_fb = (fs * z).sum(-1)
             _, _, q_fb = self._targets_uncertainty(qs_fb, cfg.actor_pessimism_penalty)
 
             weight = q_fb.abs().mean().detach() if cfg.scale_reg else 1.0
-            actor_loss = (
-                -q_disc.mean() * cfg.reg_coeff * weight
-                - q_aux.mean() * cfg.reg_coeff_aux * weight
-                - q_fb.mean()
-            )
-            if hasattr(self, "_heading_critic"):
-                actor_loss = actor_loss - q_heading.mean() * float(getattr(cfg, "reg_coeff_heading", 0.0)) * weight
-            if hasattr(self, "_velocity_critic"):
-                actor_loss = actor_loss - q_velocity.mean() * float(getattr(cfg, "reg_coeff_velocity", 0.0)) * weight
+            loss_terms = {
+                "discriminator": -q_disc.mean() * cfg.reg_coeff * weight,
+                "aux": -q_aux.mean() * cfg.reg_coeff_aux * weight,
+                "fb": -q_fb.mean(),
+            }
+            actor_loss = sum(loss_terms.values())
+            if qs_heading is not None:
+                loss_terms['heading'] = -q_heading.mean() * float(getattr(cfg, "reg_coeff_heading", 0.0)) * weight
+                actor_loss = actor_loss + loss_terms['heading']
+            if qs_velocity is not None:
+                loss_terms['velocity'] = -q_velocity.mean() * float(getattr(cfg, "reg_coeff_velocity", 0.0)) * weight
+                actor_loss = actor_loss + loss_terms['velocity']
             estimator_loss = None
-            if hasattr(action_dist, "velocity_estimate") and isinstance(actor_obs, dict) and "velocity_target_yaw" in actor_obs:
-                estimator_loss = F.smooth_l1_loss(
-                    action_dist.velocity_estimate.float(),
-                    actor_obs["velocity_target_yaw"].detach().float(),
-                )
-                actor_loss = actor_loss + float(getattr(cfg, "velocity_estimator_loss_coef", 1.0)) * estimator_loss
+            estimator_metrics = {}
+            if (
+                hasattr(action_dist, "velocity_estimate")
+                and isinstance(actor_obs, dict)
+                and "velocity_target_yaw" in actor_obs
+            ):
+                prediction = action_dist.velocity_estimate.float()
+                target = actor_obs["velocity_target_yaw"].detach().float()
+                error = prediction - target
+                estimator_loss = error.square().mean()
+                loss_terms['estimator'] = float(getattr(cfg, "velocity_estimator_loss_coef", 1.0)) * estimator_loss
+                actor_loss = actor_loss + loss_terms['estimator']
+                with torch.no_grad():
+                    absolute = error.abs()
+                    estimator_metrics = {"velocity_estimator/loss": estimator_loss.detach()}
+                    for axis, value in zip("xyz", absolute.unbind(dim=-1)):
+                        estimator_metrics[f"velocity_estimator/mae_{axis}"] = value.mean()
+                    for index, axis in enumerate("xyz"):
+                        estimator_metrics[f"velocity_estimator/rmse_{axis}"] = error[:, index].square().mean().sqrt()
+                        estimator_metrics[f"velocity_estimator/bias_{axis}"] = error[:, index].mean()
+                    stopped = torch.linalg.vector_norm(target[:, :2], dim=-1) < 0.1
+                    moving_estimate = torch.linalg.vector_norm(prediction[:, :2], dim=-1) > 0.2
+                    estimator_metrics["velocity_estimator/false_motion_when_stopped"] = (
+                        (stopped & moving_estimate).float().sum() / stopped.sum().clamp_min(1)
+                    )
+                    estimator_metrics["velocity_estimator/stopped_fraction"] = stopped.float().mean()
+                    stopped_count = stopped.sum().clamp_min(1)
+                    for index, axis in enumerate("xyz"):
+                        estimator_metrics[f"velocity_estimator/stopped_mae_{axis}"] = (
+                            absolute[:, index] * stopped
+                        ).sum() / stopped_count
+            parameter_metrics = {}
+            if track_depth_gradients:
+                # Include the separate context forward and the actual weighted losses.
+                parameter_metrics = parameter_gradient_metrics(loss_terms, self._actor.depth_encoder.parameters())
+                # autograd.grad can trigger retained intermediate gradients; keep the
+                # legacy latent diagnostics limited to the real backward below.
+                action_dist.actor_depth_latent.grad = None
+                action_dist.velocity_depth_latent.grad = None
             actor_loss.backward()
         finally:
             for param, enabled in zip(frozen_params, requires_grad):
                 param.requires_grad_(enabled)
+        depth_gradient_metrics = {}
+        if track_depth_gradients:
+            actor_grad = action_dist.actor_depth_latent.grad.float().flatten()
+            velocity_grad = action_dist.velocity_depth_latent.grad
+            if velocity_grad is None:
+                velocity_grad = torch.zeros_like(action_dist.velocity_depth_latent)
+            velocity_grad = velocity_grad.float().flatten()
+            actor_norm = torch.linalg.vector_norm(actor_grad)
+            velocity_norm = torch.linalg.vector_norm(velocity_grad)
+            norm_product = actor_norm * velocity_norm
+            cosine = torch.where(
+                norm_product > 0.0,
+                torch.dot(actor_grad, velocity_grad) / norm_product,
+                torch.zeros_like(norm_product),
+            )
+            depth_gradient_metrics = {
+                "depth_latent_actor_grad_norm": actor_norm.detach(),
+                "depth_latent_velocity_grad_norm": velocity_norm.detach(),
+                "depth_latent_grad_cosine": cosine.detach(),
+                "depth_latent_velocity_actor_grad_ratio": (
+                    velocity_norm / actor_norm.clamp_min(torch.finfo(actor_norm.dtype).eps)
+                ).detach(),
+            }
         self._avg_grad(self._actor.parameters())
         self.actor_optimizer.step()
         metrics = {
@@ -907,12 +1305,16 @@ class FbCprAuxAgent:
             "Q_aux": q_aux.mean().detach(),
             "Q_fb": q_fb.mean().detach(),
         }
-        if hasattr(self, "_heading_critic"):
+        if qs_heading is not None:
             metrics["Q_heading"] = q_heading.mean().detach()
-        if hasattr(self, "_velocity_critic"):
+        if qs_velocity is not None:
             metrics["Q_velocity"] = q_velocity.mean().detach()
         if estimator_loss is not None:
             metrics["velocity_estimator_loss"] = estimator_loss.detach()
+            metrics.update(estimator_metrics)
+        metrics.update(depth_ablation_metrics)
+        metrics.update(depth_gradient_metrics)
+        metrics.update(parameter_metrics)
         return metrics
 
     @staticmethod
@@ -936,7 +1338,17 @@ class FbCprAuxAgent:
 
     # ------------------------------------------------------------------- io
 
+    def tracking_state_dict(self):
+        """Only modules consumed by tracking evaluation, with unchanged weights."""
+        return {
+            "actor": self._actor.state_dict(),
+            "backward_map": self._backward_map.state_dict(),
+            "obs_normalizer": self._obs_normalizer.state_dict(),
+        }
+
     def state_dict(self):
+        if self.inference_only:
+            return self.tracking_state_dict()
         out = {
             "actor": self._actor.state_dict(),
             "backward_map": self._backward_map.state_dict(),
@@ -960,6 +1372,9 @@ class FbCprAuxAgent:
     def load_state_dict(self, state):
         self._actor.load_state_dict(state["actor"])
         self._backward_map.load_state_dict(state["backward_map"])
+        if self.inference_only:
+            self._obs_normalizer.load_state_dict(state["obs_normalizer"])
+            return
         self._forward_map.load_state_dict(state["forward_map"])
         self._discriminator.load_state_dict(state["discriminator"])
         self._target_forward_map.load_state_dict(state.get("target_forward_map", state["forward_map"]))

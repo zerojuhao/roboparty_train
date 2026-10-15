@@ -223,55 +223,6 @@ def randomize_camera_offsets(
     )
 
 
-def randomize_camera_pitch_choices(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor | None,
-    asset_cfg: SceneEntityCfg,
-    downward_pitch_choices_deg: tuple[float, ...],
-):
-    """Choose an absolute downward camera pitch while preserving installation-error jitter."""
-    sensor: Camera | RayCasterCamera | MultiMeshRayCasterCamera = env.scene[asset_cfg.name]
-
-    if len(downward_pitch_choices_deg) == 0:
-        raise ValueError("downward_pitch_choices_deg must contain at least one angle.")
-    if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, device=sensor._device)
-
-    nominal_quat = math_utils.convert_camera_frame_orientation_convention(
-        torch.tensor([sensor.cfg.offset.rot], device=sensor._device),
-        origin=sensor.cfg.offset.convention,
-        target="world",
-    )
-    nominal_pitch = math_utils.euler_xyz_from_quat(nominal_quat)[1][0]
-
-    offset_quat = wp.to_torch(sensor._offset_quat_wp)[env_ids].clone()
-    offset_euler = math_utils.euler_xyz_from_quat(offset_quat)
-    pitch_jitter = offset_euler[1] - nominal_pitch
-
-    choices = torch.tensor(downward_pitch_choices_deg, device=sensor._device, dtype=offset_euler[1].dtype)
-    choices = torch.deg2rad(choices)
-    choice_ids = torch.randint(len(choices), (len(env_ids),), device=sensor._device)
-    offset_quat = math_utils.quat_from_euler_xyz(
-        offset_euler[0],
-        choices[choice_ids] + pitch_jitter,
-        offset_euler[2],
-    )
-
-    parent_pos_w, parent_quat_w = _view_world_poses(sensor, env_ids)
-    camera_pos_w, camera_quat_w = math_utils.combine_frame_transforms(
-        parent_pos_w,
-        parent_quat_w,
-        wp.to_torch(sensor._offset_pos_wp)[env_ids],
-        offset_quat,
-    )
-    sensor.set_world_poses(
-        camera_pos_w,
-        camera_quat_w,
-        env_ids=env_ids,
-        convention="world",
-    )
-
-
 def push_by_setting_velocity_per_terrain(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,

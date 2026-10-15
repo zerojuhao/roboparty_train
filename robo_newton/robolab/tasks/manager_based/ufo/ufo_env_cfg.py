@@ -29,7 +29,7 @@ from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from robolab.assets import UFO_DATA_DIR
+from robolab.assets import ISAAC_DATA_DIR
 from robolab.assets.robots.roboparty import RP1_UFO_CFG
 
 from . import mdp
@@ -37,7 +37,7 @@ from . import mdp
 # LAFAN motions shared with the RP1 WBC tracking task.
 MOTION_MANIFEST = os.environ.get(
     "UFO_MOTION_MANIFEST",
-    os.path.join(UFO_DATA_DIR, "motions", "rp1_lafan", "manifest.json"),
+    os.path.join(ISAAC_DATA_DIR, "motions", "rp1_lafan", "manifest.json"),
 )
 
 
@@ -103,6 +103,11 @@ class UFOObservationsCfg:
 
 @configclass
 class UFOEventCfg:
+    resample_motion = EventTerm(
+        func=mdp.events.resample_motion_for_reset,
+        mode="reset",
+        params={"command_name": "motion"},
+    )
     reset_root_state = EventTerm(
         func=mdp.events.reset_root_state_from_motion,
         mode="reset",
@@ -111,7 +116,7 @@ class UFOEventCfg:
     reset_joint_state = EventTerm(
         func=mdp.events.reset_joint_state_from_motion,
         mode="reset",
-        params={"command_name": "motion"},
+        params={"command_name": "motion", "joint_pos_range": (0.0, 0.0)},
     )
     randomize_rigid_body_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
@@ -131,11 +136,6 @@ class UFOEventCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
             "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.03, 0.03)},
         },
-    )
-    randomize_default_joint_pos = EventTerm(
-        func=mdp.events.randomize_default_joint_pos,
-        mode="reset",
-        params={"offset_range": (-0.15, 0.15)},
     )
     scale_link_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
@@ -175,12 +175,33 @@ class UFOEventCfg:
 
 @configclass
 class UFORewardsCfg:
-    # UFO trains on agent-side rewards only: `compute_aux_rewards` raw values
-    # weighted by `agent.aux_rewards_scaling` (see fbcpr_runner / fb_cpr_aux).
-    # The ManagerBasedRLEnv reward pipeline is unused, so a single zero-weight
-    # placeholder keeps the RewardManager valid without dead duplicate weights.
-    zero = RewTerm(func=mdp.rewards.zero_reward, weight=0.0)
-
+    penalty_action_rate = RewTerm(
+        func=mdp.rewards.penalty_action_rate,
+        weight=-0.1,
+    )
+    limits_dof_pos = RewTerm(
+        func=mdp.rewards.limits_dof_pos,
+        weight=-10.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
+    )
+    penalty_slippage = RewTerm(
+        func=mdp.rewards.penalty_slippage,
+        weight=-2.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
+        },
+    )
+    penalty_ankle_roll = RewTerm(
+        func=mdp.rewards.penalty_ankle_roll,
+        weight=-1.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*ankle_roll.*")},
+    )
+    feet_stumble = RewTerm(
+        func=mdp.rewards.feet_stumble,
+        weight=-2.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link")},
+    )
 
 @configclass
 class UFOTerminationsCfg:
@@ -216,13 +237,14 @@ class UFOEnvCfg(ManagerBasedRLEnvCfg):
     terminations: UFOTerminationsCfg = UFOTerminationsCfg()
 
     def __post_init__(self):
+        self.compute_final_obs = True
         self.scene.env_spacing = 5.0
         self.sim.physics_material = self.scene.terrain.physics_material
         self.decimation = 4
         self.episode_length_s = 10.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
-        self.sim.physics = PhysicsPresetCfg()
+        self.sim.physics = PhysicsPresetCfg().default
         # The custom RoboParty actuator config is not Newton-native; use the
         # host-executed actuator path while keeping Newton as the physics solver.
         self.sim.use_newton_actuators = False

@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from isaaclab.utils.math import wrap_to_pi
+from rsl_rl.utils import reduce_gradients_in_buckets
 
 from .config import FootholdPredictorCfg
 from .grid import FootholdGaussianGeometry
@@ -212,12 +213,11 @@ class FootholdPredictorTrainer:
             loss.backward()
             if torch.distributed.is_available() and torch.distributed.is_initialized():
                 world_size = torch.distributed.get_world_size()
-                for parameter in self.model.parameters():
-                    if parameter.grad is not None:
-                        torch.distributed.all_reduce(
-                            parameter.grad, op=torch.distributed.ReduceOp.SUM
-                        )
-                        parameter.grad.div_(world_size)
+                reduce_gradients_in_buckets(
+                    self.model.parameters(),
+                    world_size,
+                    self.cfg.grad_reduce_bucket_mb,
+                )
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
             self._update_ema_model()

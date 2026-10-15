@@ -15,6 +15,28 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
+from rsl_rl.utils import resolve_nn_activation
+
+
+def model_kwargs(cfg):
+    """Read a model config before or after runner serialization."""
+    return dict(cfg) if isinstance(cfg, dict) else cfg.to_dict()
+
+
+def mlp(input_dim, output_dim, hidden_dims, activation, first_activation, layer_norm):
+    """Build the FB MLP layout with optional normalization of its first hidden layer."""
+    if any(width <= 0 for width in hidden_dims):
+        raise ValueError(f"MLP hidden_dims must be positive, got {hidden_dims}")
+    layers = []
+    for index, width in enumerate(hidden_dims):
+        layers.append(nn.Linear(input_dim, width))
+        if index == 0 and layer_norm:
+            layers.append(nn.LayerNorm(width))
+        layers.append(resolve_nn_activation(first_activation if index == 0 else activation))
+        input_dim = width
+    layers.append(nn.Linear(input_dim, output_dim))
+    return nn.Sequential(*layers)
+
 
 def weight_init(m):
     if isinstance(m, nn.Linear):
@@ -156,30 +178,34 @@ class TruncatedNormal(Normal):
         return self._clamp(x)
 
 
-def residual_embedding(input_dim, hidden_dim, hidden_layers, num_parallel=1):
-    assert hidden_layers >= 2
-    seq = [Block(input_dim, hidden_dim, True, num_parallel)]
+def residual_embedding(input_dim, hidden_dim, hidden_layers, activation, layer_norm, num_parallel=1):
+    if hidden_dim < 2 or hidden_dim % 2 or hidden_layers < 2:
+        raise ValueError("Residual models need an even hidden_dim >= 2 and embedding_layers >= 2")
+    seq = [Block(input_dim, hidden_dim, activation, layer_norm, num_parallel)]
     for _ in range(hidden_layers - 2):
-        seq += [ResidualBlock(hidden_dim, num_parallel)]
-    seq += [Block(hidden_dim, hidden_dim // 2, True, num_parallel)]
+        seq += [ResidualBlock(hidden_dim, activation, layer_norm, num_parallel)]
+    seq += [Block(hidden_dim, hidden_dim // 2, activation, layer_norm, num_parallel)]
     return nn.Sequential(*seq)
 
 
 class ResidualBlock(nn.Module):
-    def __init__(self, dim, num_parallel=1):
+    def __init__(self, dim, activation, layer_norm, num_parallel=1):
         super().__init__()
-        self.mlp = nn.Sequential(layernorm(dim, num_parallel), linear_layer(dim, dim, num_parallel), nn.Mish())
+        layers = [layernorm(dim, num_parallel)] if layer_norm else []
+        layers += [linear_layer(dim, dim, num_parallel), resolve_nn_activation(activation)]
+        self.mlp = nn.Sequential(*layers)
 
     def forward(self, x):
         return x + self.mlp(x)
 
 
 class Block(nn.Module):
-    def __init__(self, input_dim, output_dim, activation, num_parallel=1):
+    def __init__(self, input_dim, output_dim, activation, layer_norm, num_parallel=1):
         super().__init__()
-        seq = [layernorm(input_dim, num_parallel), linear_layer(input_dim, output_dim, num_parallel)]
-        if activation:
-            seq += [nn.Mish()]
+        seq = [layernorm(input_dim, num_parallel)] if layer_norm else []
+        seq += [linear_layer(input_dim, output_dim, num_parallel)]
+        if activation is not None:
+            seq += [resolve_nn_activation(activation)]
         self.mlp = nn.Sequential(*seq)
 
     def forward(self, x):
@@ -187,15 +213,11 @@ class Block(nn.Module):
 
 
 class BackwardMap(nn.Module):
-    def __init__(self, obs_dim, z_dim, hidden_dim=256, hidden_layers=1, norm=True):
+    def __init__(self, obs_dim, z_dim, *, hidden_dims, activation, first_activation, layer_norm, norm):
         super().__init__()
-        seq = [nn.Linear(obs_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Tanh()]
-        for _ in range(hidden_layers - 1):
-            seq += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU()]
-        seq += [nn.Linear(hidden_dim, z_dim)]
+        self.net = mlp(obs_dim, z_dim, hidden_dims, activation, first_activation, layer_norm)
         if norm:
-            seq += [Norm()]
-        self.net = nn.Sequential(*seq)
+            self.net.append(Norm())
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.net(obs)
@@ -204,13 +226,22 @@ class BackwardMap(nn.Module):
 class ResidualForwardMap(nn.Module):
     """Forward map / critic head. Also used with output_dim=1 for critics."""
 
-    def __init__(self, obs_dim, z_dim, action_dim, hidden_dim=2048, hidden_layers=6, num_parallel=2, output_dim=None):
+    def __init__(
+        self, obs_dim, z_dim, action_dim, *, hidden_dim, hidden_layers, embedding_layers,
+        activation, layer_norm, num_parallel, output_dim=None,
+    ):
         super().__init__()
+        if hidden_layers < 0 or num_parallel < 1:
+            raise ValueError("hidden_layers must be non-negative and num_parallel must be positive")
         self.num_parallel = num_parallel
-        self.embed_z = residual_embedding(obs_dim + z_dim, hidden_dim, hidden_layers, num_parallel)
-        self.embed_sa = residual_embedding(obs_dim + action_dim, hidden_dim, hidden_layers, num_parallel)
-        seq = [ResidualBlock(hidden_dim, num_parallel) for _ in range(hidden_layers)]
-        seq += [Block(hidden_dim, output_dim if output_dim else z_dim, False, num_parallel)]
+        self.embed_z = residual_embedding(
+            obs_dim + z_dim, hidden_dim, embedding_layers, activation, layer_norm, num_parallel,
+        )
+        self.embed_sa = residual_embedding(
+            obs_dim + action_dim, hidden_dim, embedding_layers, activation, layer_norm, num_parallel,
+        )
+        seq = [ResidualBlock(hidden_dim, activation, layer_norm, num_parallel) for _ in range(hidden_layers)]
+        seq += [Block(hidden_dim, output_dim if output_dim else z_dim, None, layer_norm, num_parallel)]
         self.Fs = nn.Sequential(*seq)
 
     def forward(self, obs, z, action):
@@ -227,22 +258,36 @@ class ResidualForwardMap(nn.Module):
 
 
 class SharedCriticMap(nn.Module):
-    """Discriminator critic and auxiliary critic with a shared representation.
+    """Two named scalar critics with a shared representation.
 
     Both critics observe the same input keys and train against the same batch,
     so the embedding towers and residual trunk are shared while each critic
-    keeps its own output head. Forwards return ``(disc, aux)`` with shape
-    ``(num_parallel, batch, 1)`` each.
+    keeps its own output head. Forwards follow ``head_names`` order, defaulting
+    to ``(disc, aux)``, with shape ``(num_parallel, batch, 1)`` each.
     """
 
-    def __init__(self, obs_dim, z_dim, action_dim, hidden_dim=1024, hidden_layers=6, num_parallel=2):
+    def __init__(
+        self, obs_dim, z_dim, action_dim, *, hidden_dim, hidden_layers, embedding_layers,
+        activation, layer_norm, num_parallel, head_names=("disc", "aux"),
+    ):
         super().__init__()
+        if hidden_layers < 0 or num_parallel < 1:
+            raise ValueError("hidden_layers must be non-negative and num_parallel must be positive")
         self.num_parallel = num_parallel
-        self.embed_z = residual_embedding(obs_dim + z_dim, hidden_dim, hidden_layers, num_parallel)
-        self.embed_sa = residual_embedding(obs_dim + action_dim, hidden_dim, hidden_layers, num_parallel)
-        self.trunk = nn.Sequential(*[ResidualBlock(hidden_dim, num_parallel) for _ in range(hidden_layers)])
-        self.head_disc = Block(hidden_dim, 1, False, num_parallel)
-        self.head_aux = Block(hidden_dim, 1, False, num_parallel)
+        if len(head_names) != 2 or len(set(head_names)) != 2:
+            raise ValueError("Shared critics require two distinct head names")
+        self.head_names = tuple(head_names)
+        self.embed_z = residual_embedding(
+            obs_dim + z_dim, hidden_dim, embedding_layers, activation, layer_norm, num_parallel,
+        )
+        self.embed_sa = residual_embedding(
+            obs_dim + action_dim, hidden_dim, embedding_layers, activation, layer_norm, num_parallel,
+        )
+        self.trunk = nn.Sequential(
+            *[ResidualBlock(hidden_dim, activation, layer_norm, num_parallel) for _ in range(hidden_layers)]
+        )
+        for name in self.head_names:
+            self.add_module(f"head_{name}", Block(hidden_dim, 1, None, layer_norm, num_parallel))
 
     def forward(self, obs, z, action):
         if self.num_parallel > 1:
@@ -252,19 +297,23 @@ class SharedCriticMap(nn.Module):
         z_embedding = self.embed_z(torch.cat([obs, z], dim=-1))
         sa_embedding = self.embed_sa(torch.cat([obs, action], dim=-1))
         features = self.trunk(torch.cat([sa_embedding, z_embedding], dim=-1))
-        disc = self.head_disc(features)
-        aux = self.head_aux(features)
+        outputs = tuple(getattr(self, f"head_{name}")(features) for name in self.head_names)
         if self.num_parallel == 1:
-            return disc.unsqueeze(0), aux.unsqueeze(0)
-        return disc, aux
+            return tuple(value.unsqueeze(0) for value in outputs)
+        return outputs
 
 
 class ResidualActor(nn.Module):
-    def __init__(self, obs_dim, z_dim, action_dim, hidden_dim=2048, hidden_layers=6, embedding_layers=2):
+    def __init__(
+        self, obs_dim, z_dim, action_dim, *, hidden_dim, hidden_layers, embedding_layers, activation, layer_norm,
+    ):
         super().__init__()
-        self.embed_z = residual_embedding(obs_dim + z_dim, hidden_dim, embedding_layers)
-        self.embed_s = residual_embedding(obs_dim, hidden_dim, embedding_layers)
-        seq = [ResidualBlock(hidden_dim) for _ in range(hidden_layers)] + [Block(hidden_dim, action_dim, False)]
+        if hidden_layers < 0:
+            raise ValueError("hidden_layers must be non-negative")
+        self.embed_z = residual_embedding(obs_dim + z_dim, hidden_dim, embedding_layers, activation, layer_norm)
+        self.embed_s = residual_embedding(obs_dim, hidden_dim, embedding_layers, activation, layer_norm)
+        seq = [ResidualBlock(hidden_dim, activation, layer_norm) for _ in range(hidden_layers)]
+        seq += [Block(hidden_dim, action_dim, None, layer_norm)]
         self.policy = nn.Sequential(*seq)
 
     def forward(self, obs, z, std):
@@ -276,55 +325,91 @@ class ResidualActor(nn.Module):
         return TruncatedNormal(mu, std)
 
 
-class _FixedAdaptiveAvgPool2x4(nn.Module):
+class _FixedAdaptiveAvgPool2d(nn.Module):
     """Static pooling used by the fixed-shape PUFO depth encoder."""
 
-    def __init__(self, height: int, width: int):
+    def __init__(self, height: int, width: int, output_size: tuple[int, int]):
         super().__init__()
         self.height = height
         self.width = width
+        rows, columns = output_size
+        if min(height, width, rows, columns) < 1:
+            raise ValueError("Pooling input and output sizes must be positive")
+        self.row_ranges = [(i * height // rows, ((i + 1) * height + rows - 1) // rows) for i in range(rows)]
+        self.column_ranges = [
+            (i * width // columns, ((i + 1) * width + columns - 1) // columns) for i in range(columns)
+        ]
 
     def forward(self, x):
         if tuple(x.shape[-2:]) != (self.height, self.width):
             raise ValueError(f"Expected feature map {(self.height, self.width)}, got {tuple(x.shape[-2:])}")
         rows = torch.stack(
             tuple(
-                x[..., i * self.height // 2 : ((i + 1) * self.height + 1) // 2, :].mean(dim=-2)
-                for i in range(2)
+                x[..., start:end, :].mean(dim=-2)
+                for start, end in self.row_ranges
             ),
             dim=-2,
         )
         return torch.stack(
             tuple(
-                rows[..., i * self.width // 4 : ((i + 1) * self.width + 3) // 4].mean(dim=-1)
-                for i in range(4)
+                rows[..., start:end].mean(dim=-1)
+                for start, end in self.column_ranges
             ),
             dim=-1,
         )
 
 
 class DepthEncoder(nn.Module):
-    """Encode eight temporal depth frames into one deployable latent."""
+    """Encode temporal depth frames under an explicit dtype/range contract."""
 
-    def __init__(self, channels=8, height=18, width=32, latent_dim=256):
+    def __init__(
+        self, input_shape, *, channels, kernel_sizes, strides, paddings, pool_shape,
+        hidden_dims, activation, output_size, gru_layers,
+        input_dtype="uint8", input_range=(0.0, 255.0),
+    ):
         super().__init__()
-        self.channels = int(channels)
-        self.height = int(height)
-        self.width = int(width)
-        feature_height = ((height + 1) // 2 + 1) // 2
-        feature_width = ((width + 1) // 2 + 1) // 2
-        self.frame_cnn = nn.Sequential(
-            nn.Conv2d(1, 16, 3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, 3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),
-            nn.ReLU(),
-            _FixedAdaptiveAvgPool2x4(feature_height, feature_width),
-            nn.Flatten(),
-        )
-        self.frame_projection = nn.Sequential(nn.Linear(64 * 2 * 4, 256), nn.ReLU())
-        self.gru = nn.GRU(256, latent_dim, batch_first=True)
+        self.channels, self.height, self.width = input_shape
+        self.output_size = output_size
+        self.input_dtype = str(input_dtype).lower()
+        if self.input_dtype not in {"uint8", "float32"}:
+            raise ValueError("Depth encoder input_dtype must be 'uint8' or 'float32'.")
+        if len(input_range) != 2 or not all(math.isfinite(float(x)) for x in input_range):
+            raise ValueError(f"Depth encoder input_range must contain two finite values, got {input_range!r}.")
+        self.input_range = (float(input_range[0]), float(input_range[1]))
+        if not self.input_range[0] < self.input_range[1]:
+            raise ValueError(f"Depth encoder input_range must be increasing, got {self.input_range!r}.")
+        if self.input_dtype == "uint8" and self.input_range != (0.0, 255.0):
+            raise ValueError("uint8 depth inputs must declare input_range=(0, 255).")
+        if self.input_dtype == "float32" and self.input_range[0] < 0.0:
+            raise ValueError("float32 depth input_range must have a non-negative lower bound.")
+        if not channels or not (len(channels) == len(kernel_sizes) == len(strides) == len(paddings)):
+            raise ValueError(
+                "Depth CNN channels, kernel_sizes, strides and paddings must have matching nonzero lengths"
+            )
+        if min(*input_shape, *channels, *kernel_sizes, *strides, output_size, gru_layers) < 1 or min(paddings) < 0:
+            raise ValueError("Depth encoder dimensions must be positive, with non-negative padding")
+        feature_height, feature_width = self.height, self.width
+        layers = []
+        input_channels = 1
+        for width, kernel, stride, padding in zip(channels, kernel_sizes, strides, paddings):
+            layers += [nn.Conv2d(input_channels, width, kernel, stride=stride, padding=padding)]
+            layers += [resolve_nn_activation(activation)]
+            feature_height = (feature_height + 2 * padding - kernel) // stride + 1
+            feature_width = (feature_width + 2 * padding - kernel) // stride + 1
+            if min(feature_height, feature_width) < 1:
+                raise ValueError("Depth CNN configuration collapses the spatial dimensions")
+            input_channels = width
+        layers += [_FixedAdaptiveAvgPool2d(feature_height, feature_width, pool_shape), nn.Flatten()]
+        self.frame_cnn = nn.Sequential(*layers)
+        projection = []
+        input_dim = channels[-1] * math.prod(pool_shape)
+        for width in hidden_dims:
+            if width < 1:
+                raise ValueError("Depth projection hidden_dims must be positive")
+            projection += [nn.Linear(input_dim, width), resolve_nn_activation(activation)]
+            input_dim = width
+        self.frame_projection = nn.Sequential(*projection)
+        self.gru = nn.GRU(input_dim, output_size, num_layers=gru_layers, batch_first=True)
 
     def forward(self, depth):
         expected = (self.channels, self.height, self.width)
@@ -332,9 +417,29 @@ class DepthEncoder(nn.Module):
             raise ValueError(
                 f"Expected depth [B, {expected[0]}, {expected[1]}, {expected[2]}], got {tuple(depth.shape)}"
             )
-        depth = depth.float()
-        if depth.max().detach() > 1.0:
-            depth = depth / 255.0
+        if self.input_dtype == "uint8":
+            if depth.dtype != torch.uint8:
+                raise TypeError(
+                    "Depth encoder expects torch.uint8 input in [0, 255]; "
+                    f"got {depth.dtype}. Quantize normalized depth before calling the actor."
+                )
+            depth = depth.float().div(255.0)
+        else:
+            if depth.dtype != torch.float32:
+                raise TypeError(
+                    "Depth encoder expects torch.float32 input; "
+                    f"got {depth.dtype}. Declare a separate input contract for other dtypes."
+                )
+            low, high = self.input_range
+            if not torch.jit.is_tracing():
+                if not torch.isfinite(depth).all():
+                    raise ValueError("Depth encoder received non-finite float32 depth values.")
+                if bool((depth < low).any() or (depth > high).any()):
+                    raise ValueError(
+                        f"Depth encoder expected float32 depth in [{low}, {high}], "
+                        f"got [{depth.min().item()}, {depth.max().item()}]."
+                    )
+            depth = (depth - low) / (high - low)
         batch = depth.shape[0]
         features = self.frame_projection(
             self.frame_cnn(depth.reshape(batch * self.channels, 1, self.height, self.width))
@@ -352,72 +457,157 @@ class VisualResidualActor(nn.Module):
         obs_keys,
         z_dim,
         action_dim,
-        hidden_dim=2048,
-        hidden_layers=6,
-        embedding_layers=2,
-        depth_shape=(8, 18, 32),
-        estimate_velocity=True,
+        *,
+        hidden_dim,
+        hidden_layers,
+        embedding_layers,
+        activation,
+        layer_norm,
+        depth_shape,
+        encoder_cfg,
+        estimator_cfg,
+        estimate_velocity,
+        velocity_estimator_updates_encoder=True,
     ):
         super().__init__()
         self.obs_keys = tuple(obs_keys)
         self.depth_key = "depth_image"
-        self.depth_encoder = DepthEncoder(*depth_shape, latent_dim=256)
+        if hidden_layers < 0:
+            raise ValueError("hidden_layers must be non-negative")
+        self.depth_encoder = DepthEncoder(depth_shape, **encoder_cfg)
+        depth_dim = self.depth_encoder.output_size
         state_dim = sum(obs_dims[key] for key in self.obs_keys)
         estimator_state_dim = sum(obs_dims[key] for key in ("state", "last_action", "history_actor"))
         self.estimate_velocity = bool(estimate_velocity)
+        self.velocity_estimator_updates_encoder = bool(velocity_estimator_updates_encoder)
         if self.estimate_velocity:
-            self.velocity_estimator = nn.Sequential(
-                nn.Linear(estimator_state_dim + 256, 512),
-                nn.ELU(),
-                nn.Linear(512, 256),
-                nn.ELU(),
-                nn.Linear(256, 3),
-            )
-            state_dim += 3
-        self.embed_z = residual_embedding(state_dim + z_dim, hidden_dim, embedding_layers)
-        self.embed_s = residual_embedding(state_dim, hidden_dim, embedding_layers)
-        self.fusion = Block(hidden_dim + 256, hidden_dim, True)
+            velocity_dim = obs_dims["velocity_target_yaw"]
+            self.velocity_estimator = mlp(estimator_state_dim + depth_dim, velocity_dim, **estimator_cfg)
+            state_dim += velocity_dim
+        self.embed_z = residual_embedding(state_dim + z_dim, hidden_dim, embedding_layers, activation, layer_norm)
+        self.embed_s = residual_embedding(state_dim, hidden_dim, embedding_layers, activation, layer_norm)
+        self.fusion = Block(hidden_dim + depth_dim, hidden_dim, activation, layer_norm)
         self.policy = nn.Sequential(
-            *[ResidualBlock(hidden_dim) for _ in range(hidden_layers)],
-            Block(hidden_dim, action_dim, False),
+            *[ResidualBlock(hidden_dim, activation, layer_norm) for _ in range(hidden_layers)],
+            Block(hidden_dim, action_dim, None, layer_norm),
         )
 
-    def forward(self, obs, z, std):
+    def _mean_from_depth_latent(self, obs, z, depth_latent, velocity_depth_latent=None):
         state = torch.cat([obs[key] for key in self.obs_keys], dim=-1)
-        depth_latent = self.depth_encoder(obs[self.depth_key])
         velocity_estimate = None
         if self.estimate_velocity:
             estimator_state = torch.cat(
                 [obs[key] for key in ("state", "last_action", "history_actor")], dim=-1
             )
-            velocity_estimate = self.velocity_estimator(torch.cat([estimator_state, depth_latent], dim=-1))
+            if velocity_depth_latent is None:
+                velocity_depth_latent = depth_latent
+            if not self.velocity_estimator_updates_encoder:
+                velocity_depth_latent = velocity_depth_latent.detach()
+            velocity_estimate = self.velocity_estimator(
+                torch.cat([estimator_state, velocity_depth_latent], dim=-1)
+            )
             state = torch.cat([state, velocity_estimate.detach()], dim=-1)
         z_embedding = self.embed_z(torch.cat([state, z], dim=-1))
         state_embedding = self.embed_s(state)
         fused = self.fusion(torch.cat([state_embedding, z_embedding, depth_latent], dim=-1))
-        mean = torch.tanh(self.policy(fused))
+        return torch.tanh(self.policy(fused)), velocity_estimate
+
+    def forward_from_depth_latent(self, obs, z, depth_latent, std):
+        mean, velocity_estimate = self._mean_from_depth_latent(obs, z, depth_latent)
         dist = TruncatedNormal(mean, torch.ones_like(mean) * std)
         if velocity_estimate is not None:
             dist.velocity_estimate = velocity_estimate
         return dist
 
+    def forward_with_depth_gradient_diagnostics(self, obs, z, std):
+        depth_latent = self.depth_encoder(obs[self.depth_key])
+        actor_depth_latent = depth_latent.view_as(depth_latent)
+        velocity_depth_latent = depth_latent.view_as(depth_latent)
+        mean, velocity_estimate = self._mean_from_depth_latent(
+            obs, z, actor_depth_latent, velocity_depth_latent
+        )
+        dist = TruncatedNormal(mean, torch.ones_like(mean) * std)
+        if velocity_estimate is not None:
+            dist.velocity_estimate = velocity_estimate
+            dist.actor_depth_latent = actor_depth_latent
+            dist.velocity_depth_latent = velocity_depth_latent
+        return dist
+
+    def forward(self, obs, z, std, depth_latent=None):
+        if depth_latent is None:
+            depth_latent = self.depth_encoder(obs[self.depth_key])
+        dist = self.forward_from_depth_latent(obs, z, depth_latent, std)
+        dist.depth_latent = depth_latent
+        return dist
+
+    def mean_from_depth_latent(self, obs, z, depth_latent):
+        return self._mean_from_depth_latent(obs, z, depth_latent)[0]
+
+
+class DepthEncoderOnnxExporter(nn.Module):
+    """Small wrapper that gives the deployable depth graph one tensor input."""
+
+    def __init__(self, encoder: DepthEncoder):
+        super().__init__()
+        self.encoder = encoder
+
+    def forward(self, depth):
+        return self.encoder(depth)
+
+
+class VisualActorOnnxExporter(nn.Module):
+    """Deployable PUFO actor graph consuming a precomputed depth latent.
+
+    The velocity estimator remains inside the actor graph.  Its prediction is
+    detached before the policy trunk, matching training, but it is still part
+    of the exported graph and therefore runs on the robot.
+    """
+
+    def __init__(self, actor: VisualResidualActor, normalizer: ObsNormalizer):
+        super().__init__()
+        self.actor = actor
+        self.normalizer = normalizer
+
+    def forward(self, state, last_action, history_actor, heading, velocity_command, z, depth_latent):
+        obs = {
+            "state": state,
+            "last_action": last_action,
+            "history_actor": history_actor,
+            "heading": heading,
+            "velocity_command": velocity_command,
+        }
+        obs = self.normalizer.normalize_dict(obs)
+        return self.actor.mean_from_depth_latent(obs, z, depth_latent)
+
+
+class BackwardContextOnnxExporter(nn.Module):
+    """Export the backward map that produces the actor context ``z``."""
+
+    def __init__(self, backward_map, normalizer, input_keys, *, norm_z=False):
+        super().__init__()
+        self.backward_map = backward_map
+        self.normalizer = normalizer
+        self.input_keys = tuple(input_keys)
+        self.norm_z = bool(norm_z)
+
+    def forward(self, *inputs):
+        if len(inputs) != len(self.input_keys):
+            raise ValueError(
+                f"Expected {len(self.input_keys)} context inputs, got {len(inputs)}."
+            )
+        obs = self.normalizer.normalize_dict(dict(zip(self.input_keys, inputs)))
+        context = self.backward_map(
+            torch.cat([obs[key] for key in self.input_keys], dim=-1)
+        )
+        if self.norm_z:
+            context = math.sqrt(context.shape[-1]) * F.normalize(context, dim=-1)
+        return context
 
 
 class Discriminator(nn.Module):
-    def __init__(self, obs_dim, z_dim, hidden_dims=(1024, 1024, 1024)):
+    def __init__(self, obs_dim, z_dim, *, hidden_dims, activation, first_activation, layer_norm):
         super().__init__()
-        hidden_dims = tuple(int(width) for width in hidden_dims)
-        if not hidden_dims or any(width <= 0 for width in hidden_dims):
-            raise ValueError(f"Discriminator hidden_dims must be positive, got {hidden_dims!r}.")
-        seq = [
-            nn.Linear(obs_dim + z_dim, hidden_dims[0]),
-            nn.LayerNorm(hidden_dims[0]),
-            nn.Tanh(),
-        ]
-        for input_dim, output_dim in zip(hidden_dims, hidden_dims[1:]):
-            seq += [nn.Linear(input_dim, output_dim), nn.ReLU()]
-        seq += [nn.Linear(hidden_dims[-1], 1)]
-        self.trunk = nn.Sequential(*seq)
+        self.trunk = mlp(obs_dim + z_dim, 1, hidden_dims, activation, first_activation, layer_norm)
 
     def compute_logits(self, obs, z):
         return self.trunk(torch.cat([z, obs], dim=1))
@@ -433,10 +623,18 @@ class Discriminator(nn.Module):
 class ObsNormalizer(nn.Module):
     """Per-key BatchNorm running statistics, matching UFO's normalizer."""
 
-    def __init__(self, obs_dims: dict[str, int], momentum=0.01):
+    def __init__(self, obs_dims: dict[str, int], momentum=0.01, identity_keys=()):
         super().__init__()
+        identity_keys = set(identity_keys)
         self.normalizers = nn.ModuleDict(
-            {k: nn.BatchNorm1d(d, affine=False, momentum=momentum) for k, d in obs_dims.items()}
+            {
+                key: (
+                    nn.Identity()
+                    if key in identity_keys
+                    else nn.BatchNorm1d(dim, affine=False, momentum=momentum)
+                )
+                for key, dim in obs_dims.items()
+            }
         )
 
     def update_dict(self, obs: dict) -> None:

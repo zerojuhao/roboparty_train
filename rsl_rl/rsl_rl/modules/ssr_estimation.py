@@ -90,7 +90,7 @@ class VelocityEstimationDims:
         return self.proprio_flat_dim + self.velocity_dim + self.depth_latent_dim
 
 
-class VelocityEstimationModule(nn.Module):
+class VelocityEstimationModule(MLP):
     """Estimate privileged base velocity from policy proprioception and depth."""
 
     def __init__(
@@ -99,11 +99,8 @@ class VelocityEstimationModule(nn.Module):
         estimator_hidden_dims: list[int] | tuple[int, ...] = (512, 256),
         activation: str = "elu",
     ) -> None:
-        super().__init__()
+        super().__init__(dims.fused_dim, dims.velocity_dim, estimator_hidden_dims, activation)
         self.dims = dims
-        self.velocity_estimator = MLP(
-            dims.fused_dim, dims.velocity_dim, estimator_hidden_dims, activation
-        )
         self._clear_aux_cache()
 
     def _clear_aux_cache(self) -> None:
@@ -122,7 +119,7 @@ class VelocityEstimationModule(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         proprio_history = flatten_proprio_history(proprio_terms, self.dims.history_length)
         fused = torch.cat((proprio_history, depth_latent), dim=-1)
-        velocity_pred = self.velocity_estimator(fused)
+        velocity_pred = super().forward(fused)
         self.last_velocity_pred = velocity_pred
         if store_aux_targets and critic_group is not None:
             self.last_velocity_target = last_history_frame(
@@ -140,14 +137,12 @@ class VelocityEstimationModule(nn.Module):
 
     def aux_loss_and_metrics(
         self, velocity_coef: float
-    ) -> tuple[torch.Tensor | None, dict[str, float]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         if self.last_velocity_pred is None or self.last_velocity_target is None:
             return None, {}
         error = self.last_velocity_pred - self.last_velocity_target
         metrics = {
-            "Estimation/velocity_rmse": float(
-                torch.sqrt(torch.mean(error.square())).item()
-            )
+            "Estimation/velocity_rmse": torch.sqrt(torch.mean(error.detach().square()))
         }
         if velocity_coef == 0.0:
             return None, metrics
@@ -323,9 +318,9 @@ class SSREstimationModule(nn.Module):
         velocity_coef: float,
         foot_height_coef: float,
         foothold_coef: float = 0.0,
-    ) -> tuple[torch.Tensor | None, dict[str, float]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
         weighted: list[torch.Tensor] = []
-        metrics: dict[str, float] = {}
+        metrics: dict[str, torch.Tensor] = {}
 
         def _add(
             name: str,
@@ -336,7 +331,7 @@ class SSREstimationModule(nn.Module):
             if pred is None or target is None:
                 return
             err = pred - target
-            metrics[f"Estimation/{name}_rmse"] = float(torch.sqrt(torch.mean(err.square())).item())
+            metrics[f"Estimation/{name}_rmse"] = torch.sqrt(torch.mean(err.detach().square()))
             if coef != 0.0:
                 weighted.append(coef * torch.mean(err.square()))
 
@@ -359,11 +354,11 @@ class SSREstimationModule(nn.Module):
             tgt_pose = target.view(-1, 2, 3)
             xy_err = pred_pose[..., :2] - tgt_pose[..., :2]
             yaw_err = wrap_angle(pred_pose[..., 2] - tgt_pose[..., 2])
-            metrics["Estimation/foothold_xy_rmse"] = float(
-                torch.sqrt(torch.mean(xy_err.square())).item()
+            metrics["Estimation/foothold_xy_rmse"] = torch.sqrt(
+                torch.mean(xy_err.detach().square())
             )
-            metrics["Estimation/foothold_yaw_rmse"] = float(
-                torch.sqrt(torch.mean(yaw_err.square())).item()
+            metrics["Estimation/foothold_yaw_rmse"] = torch.sqrt(
+                torch.mean(yaw_err.detach().square())
             )
             if coef != 0.0:
                 weighted.append(coef * (torch.mean(xy_err.square()) + torch.mean(yaw_err.square())))

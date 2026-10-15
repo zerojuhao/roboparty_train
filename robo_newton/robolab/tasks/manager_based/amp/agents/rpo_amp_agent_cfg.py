@@ -35,33 +35,35 @@ from typing import Literal
 
 from isaaclab.utils import configclass
 
-from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg, RslRlSymmetryCfg
+from isaaclab_rl.rsl_rl import (
+    RslRlMLPModelCfg,
+    RslRlOnPolicyRunnerCfg,
+    RslRlPpoAlgorithmCfg,
+    RslRlSymmetryCfg,
+)
 from robolab.tasks.manager_based.amp.mdp.symmetry import rpo
+
 from .amp_model_cfg import AMPModelCfg
 
 
 @configclass
 class RslRlAmpCfg:
-    """Configuration class for the AMP (Adversarial Motion Priors) in the training
-    """
-    
+    """Configuration class for AMP (Adversarial Motion Priors) training."""
+
     disc_obs_buffer_size: int = 1000
     """Size of the replay buffer for storing discriminator observations"""
-    
     grad_penalty_scale: float = 10.0
     """Scale for the gradient penalty in AMP training"""
-    
     disc_trunk_weight_decay: float = 1.0e-4
     """Weight decay for the discriminator trunk network"""
-    
     disc_linear_weight_decay: float = 1.0e-2
     """Weight decay for the discriminator linear network"""
-    
     disc_learning_rate: float = 1.0e-5
     """Learning rate for the discriminator networks"""
-    
     disc_max_grad_norm: float = 1.0
     """Maximum gradient norm for the discriminator networks"""
+    disc_num_updates: int | None = None
+    """Discriminator updates per policy iteration. None preserves the PPO epoch/minibatch product."""
 
     @configclass
     class AMPDiscriminatorCfg:
@@ -75,13 +77,10 @@ class RslRlAmpCfg:
 
         style_reward_scale: float = 1.0
         """Scale for the style reward in the training"""
-        
         task_style_lerp: float = 0.0
         """Linear interpolation factor for the task style reward in the AMP training."""
-
     amp_discriminator: AMPDiscriminatorCfg = AMPDiscriminatorCfg()
     """Configuration for the AMP discriminator network."""
-    
     loss_type: Literal["GAN", "LSGAN", "WGAN"] = "LSGAN"
     """Type of loss function used for the AMP discriminator (e.g., 'GAN', 'LSGAN', 'WGAN')"""
 
@@ -97,11 +96,17 @@ class RslRlAmpCfg:
     route_obs_group: str | None = None
     """Observation group selecting the discriminator route per environment."""
 
+    turn_style_reward_multiplier: float = 1.0
+    """Style reward multiplier for pure yaw commands; one disables shaping."""
+
+    turn_style_command_group: str | None = None
+    """Observation group containing velocity_commands, with flat or unflattened history."""
+
 
 @configclass
 class RslRlPpoAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
     """Configuration for the AMP algorithm."""
-    
+
     class_name: str = "PPOAMP"
     """The algorithm class name. Default is PPOAmp."""
 
@@ -110,6 +115,15 @@ class RslRlPpoAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
 
     aux_loss_coef: float = 0.0
     """Weight applied to auxiliary policy losses."""
+
+    use_mixed_precision: bool = False
+    """Whether to run policy and value forward/loss computation in BF16 autocast."""
+
+    grad_reduce_bucket_mb: float = 25.0
+    """Maximum packed gradient bucket size used by distributed PPO training."""
+
+    resume_learning_rate: float | None = None
+    """Explicit rate override after restoring Adam state; None keeps the checkpoint rate."""
 
     amp_cfg: RslRlAmpCfg = RslRlAmpCfg()
     """Configuration for the AMP (Adversarial Motion Priors) in the training."""
@@ -125,15 +139,17 @@ class RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
     wandb_project = "rpo_amp"
     obs_groups = {
         "actor": ["policy"],
-        "critic": ["critic"], 
+        "critic": ["critic"],
         "discriminator": ["disc"],
-        "discriminator_demonstration": ["disc_demo"]
+        "discriminator_demonstration": ["disc_demo"],
     }
     actor = AMPModelCfg(
         hidden_dims=[512, 256, 128],
         obs_normalization=True,
         activation="elu",
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(
+            init_std=1.0,
+        ),
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
@@ -160,7 +176,7 @@ class RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
             use_data_augmentation=True,
             use_mirror_loss=True,
             mirror_loss_coeff=0.2,
-            data_augmentation_func=rpo.compute_symmetric_states
+            data_augmentation_func=rpo.compute_symmetric_states,
         ),
         amp_cfg=RslRlAmpCfg(
             disc_obs_buffer_size=100,
@@ -173,8 +189,8 @@ class RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
                 hidden_dims=[1024, 512],
                 activation="elu",
                 style_reward_scale=1.5,
-                task_style_lerp=0.6
+                task_style_lerp=0.6,
             ),
-            loss_type="LSGAN"
+            loss_type="LSGAN",
         ),
     )

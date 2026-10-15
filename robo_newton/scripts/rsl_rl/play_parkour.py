@@ -80,11 +80,12 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 import isaaclab_tasks  # noqa: F401
 import robolab.tasks  # noqa: F401
 
-from rsl_rl.runners import AMPRunner, DistillationRunner, OnPolicyRunner
+from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    agent_cfg.torch_compile_mode = None  # Keep checkpoint loading and ONNX export on the raw policy module.
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
 
     # handle deprecated configurations
@@ -130,14 +131,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     if agent_cfg.class_name == "OnPolicyRunner":
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    elif agent_cfg.class_name == "AMPRunner":
-        runner = AMPRunner(
-            env,
-            agent_cfg.to_dict(),
-            log_dir=None,
-            device=agent_cfg.device,
-            allow_empty_discriminator_routes=True,
-        )
     elif agent_cfg.class_name == "DistillationRunner":
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
@@ -146,10 +139,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     torch_policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-    try:
-        policy_nn = runner.alg.policy
-    except AttributeError:
-        policy_nn = runner.alg.actor_critic
+    policy_nn = runner.alg.get_policy()
 
     export_model_dir = os.path.join(log_dir, "exported")
     # export policy to onnx (separate encoder + actor graphs when policy implements export_as_onnx)
@@ -157,8 +147,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         assert env.unwrapped.num_envs == 1, "Exporting to ONNX is only supported for single environment."
         if not hasattr(policy_nn, "export_as_onnx"):
             raise AttributeError(
-                "export_as_onnx is missing on the policy module; use EncoderMoEActorCritic / "
-                "EncoderMoEActorMultiCritic for parkour/SSR ONNX export."
+                "export_as_onnx is missing on the Parkour policy model."
             )
         os.makedirs(export_model_dir, exist_ok=True)
         obs = env.get_observations()
@@ -176,9 +165,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         start_time = time.time()
         with torch.inference_mode():
             actions = policy(obs)
-            if isinstance(runner, AMPRunner) and hasattr(
-                runner, "prepare_foothold_prediction_step"
-            ):
+            if hasattr(runner, "prepare_foothold_prediction_step"):
                 runner.prepare_foothold_prediction_step(
                     obs, actions, enable_inference_guidance=True
                 )

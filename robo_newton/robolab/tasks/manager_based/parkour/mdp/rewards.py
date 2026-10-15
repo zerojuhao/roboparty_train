@@ -508,21 +508,9 @@ def feet_stumble(
     force_scale: float = 100.0,
     max_penalty: float = 1.0,
 ) -> torch.Tensor:
-    """Continuously penalize horizontal-dominant foot impacts.
-
-    The history maximum preserves short impacts between policy steps. The
-    bounded output keeps the existing stumble reward curriculum meaningful.
-    """
-    if force_scale <= 0.0:
-        raise ValueError(f"force_scale must be positive, got {force_scale}.")
-    if max_penalty <= 0.0:
-        raise ValueError(f"max_penalty must be positive, got {max_penalty}.")
-
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
-    excess = horizontal_force_excess(forces, horizontal_ratio, force_threshold)
-    penalty = torch.clamp(excess / force_scale, max=max_penalty)
-    return penalty.amax(dim=(1, 2))
+    """Use the shared all-contact stumble metric on Newton terrain tasks."""
+    from robolab.utils.contact_rewards import feet_stumble as shared_feet_stumble
+    return shared_feet_stumble(env, sensor_cfg, horizontal_ratio, force_threshold, force_scale, max_penalty)
 
 def track_lin_vel_xy_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")

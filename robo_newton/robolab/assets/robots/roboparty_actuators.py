@@ -97,12 +97,16 @@ class RoboPartyActuator(DelayedPDActuator):
         joint_vel_abs = self._joint_vel.abs()
         slope = -self.effort_limit / (self.velocity_limit - self._keep_velocity)
         rolloff_effort = slope * (joint_vel_abs - self._keep_velocity) + self.effort_limit
-        max_effort = torch.where(
+        drive_limit = torch.where(
             joint_vel_abs < self._keep_velocity,
             self.effort_limit,
             rolloff_effort.clip(min=0.0),
         )
-        return torch.clip(effort, min=-max_effort, max=max_effort)
+        # The speed envelope limits motoring, not braking. Symmetric clipping
+        # would remove all damping above no-load speed, including reverse torque.
+        upper = torch.where(self._joint_vel >= 0.0, drive_limit, self.effort_limit)
+        lower = torch.where(self._joint_vel <= 0.0, -drive_limit, -self.effort_limit)
+        return torch.clip(effort, min=lower, max=upper)
 
 
 @configclass

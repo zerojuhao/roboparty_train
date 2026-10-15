@@ -6,6 +6,7 @@ from robolab.tasks.manager_based.amp.agents.rpo_amp_agent_cfg import (
     RslRlPpoAmpAlgorithmCfg,
 )
 from robolab.tasks.manager_based.parkour.mdp.symmetry import rp1
+
 from .parkour_model_cfg import ParkourModelCfg
 
 
@@ -13,6 +14,10 @@ from .parkour_model_cfg import ParkourModelCfg
 class RP1ParkourAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
     class_name = "OnPolicyRunner"
     num_steps_per_env = 24
+    compact_depth_history = True
+    depth_history_offsets = (35, 30, 25, 20, 15, 10, 5, 0)
+    check_for_nan_interval = 100
+    torch_compile_mode: str | None = "default"
     max_iterations = 30000
     save_interval = 500
     experiment_name = "rp1_parkour"
@@ -26,13 +31,23 @@ class RP1ParkourAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
     actor = ParkourModelCfg(
         hidden_dims=[256, 128, 64],
         obs_normalization=True,
-        distribution_cfg=ParkourModelCfg.GaussianDistributionCfg(init_std=1.0),
+        distribution_cfg=ParkourModelCfg.GaussianDistributionCfg(
+            init_std=1.0,
+        ),
         encoder_cfg={
-            "channels": [16, 32, 64], "kernel_sizes": [3, 3, 3],
-            "strides": [1, 2, 1], "hidden_sizes": [256],
-            "output_size": 256, "paddings": [1, 1, 1], "nonlinearity": "ReLU",
-            "use_maxpool": True, "last_activation": "ReLU",
+            "channels": [16, 32, 64],
+            "kernel_sizes": [3, 3, 3],
+            "strides": [1, 2, 1],
+            "hidden_sizes": [256],
+            "output_size": 256,
+            "paddings": [1, 1, 1],
+            "nonlinearity": "ReLU",
+            "use_maxpool": True,
+            "last_activation": "ReLU",
+            "input_dtype": "uint8",
+            "input_range": (0.0, 255.0),
         },
+        actor_onnx_filename="policy_parkour.onnx",
         enable_velocity_estimation=True,
     )
     critic = ParkourModelCfg(
@@ -53,6 +68,7 @@ class RP1ParkourAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
+        use_mixed_precision=True,
         enable_aux_loss=True,
         aux_loss_coef=1.0,
         symmetry_cfg=RslRlSymmetryCfg(
@@ -68,6 +84,7 @@ class RP1ParkourAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             disc_linear_weight_decay=1.0e-3,
             disc_learning_rate=1.0e-5,
             disc_max_grad_norm=1.0,
+            disc_num_updates=4,
             amp_discriminator=RslRlAmpCfg.AMPDiscriminatorCfg(
                 hidden_dims=[512, 256],
                 activation="ReLU",

@@ -28,6 +28,9 @@ class OnPolicyRunner:
         self.env = env
         self.cfg = train_cfg
         self.device = device
+        self.check_for_nan_interval = int(self.cfg.get("check_for_nan_interval", 1))
+        if self.check_for_nan_interval < 1:
+            raise ValueError("check_for_nan_interval must be at least one")
 
         # Setup multi-GPU training if enabled
         self._configure_multi_gpu()
@@ -86,7 +89,7 @@ class OnPolicyRunner:
                     # Step the environment
                     obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
                     # Check for NaN values from the environment
-                    if self.cfg.get("check_for_nan", True):
+                    if self.cfg.get("check_for_nan", True) and it % self.check_for_nan_interval == 0:
                         check_nan(obs, rewards, dones)
                     # Move to device
                     obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
@@ -101,6 +104,10 @@ class OnPolicyRunner:
                 stop = time.time()
                 collect_time = stop - start
                 start = stop
+
+                # Synchronize stateful curricula at a fixed point where every
+                # distributed rank participates in the same collectives.
+                self._synchronize_curricula()
 
                 # Compute returns
                 self.alg.compute_returns(obs)
@@ -139,6 +146,7 @@ class OnPolicyRunner:
         saved_dict = self.alg.save()
         saved_dict["iter"] = self.current_learning_iteration
         saved_dict["infos"] = infos
+        saved_dict["curriculum_state"] = self._get_curriculum_checkpoint_state()
         torch.save(saved_dict, path)
         # Upload model to external logging services
         self.logger.save_model(path, self.current_learning_iteration)
@@ -159,6 +167,7 @@ class OnPolicyRunner:
         load_iteration = self.alg.load(loaded_dict, load_cfg, strict)
         if load_iteration:
             self.current_learning_iteration = loaded_dict["iter"]
+        self._restore_curriculum_checkpoint_state(loaded_dict.get("curriculum_state"))
         return loaded_dict["infos"]
 
     def get_inference_policy(self, device: str | None = None) -> MLPModel:
@@ -205,6 +214,45 @@ class OnPolicyRunner:
         """Register a repository path whose git status should be logged."""
         self.logger.git_status_repos.append(repo_file_path)
 
+    def _synchronize_curricula(self) -> None:
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "curriculum_manager", None)
+        if manager is None:
+            return
+        for name, term_cfg in zip(manager._term_names, manager._term_cfgs):
+            synchronize = getattr(term_cfg.func, "synchronize", None)
+            if synchronize is not None:
+                manager._curriculum_state[name] = synchronize()
+
+    def _get_curriculum_checkpoint_state(self) -> dict | None:
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "curriculum_manager", None)
+        if manager is None:
+            return None
+        state = {}
+        for name, term_cfg in zip(manager._term_names, manager._term_cfgs):
+            checkpoint_state = getattr(term_cfg.func, "checkpoint_state", None)
+            if checkpoint_state is not None:
+                state[name] = checkpoint_state()
+        return state or None
+
+    def _restore_curriculum_checkpoint_state(self, state: dict | None) -> None:
+        if not state:
+            return
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "curriculum_manager", None)
+        if manager is None:
+            return
+        terms = dict(zip(manager._term_names, manager._term_cfgs))
+        for name, term_state in state.items():
+            term_cfg = terms.get(name)
+            if term_cfg is None:
+                continue
+            restore = getattr(term_cfg.func, "restore_checkpoint_state", None)
+            if restore is not None:
+                restore(term_state)
+                manager._curriculum_state[name] = term_cfg.func.state()
+
     def _configure_multi_gpu(self) -> None:
         """Configure multi-gpu training."""
         # Check if distributed training is enabled
@@ -244,7 +292,11 @@ class OnPolicyRunner:
                 f"Global rank '{self.gpu_global_rank}' is greater than or equal to world size '{self.gpu_world_size}'."
             )
 
-        # Initialize torch distributed
-        torch.distributed.init_process_group(backend="nccl", rank=self.gpu_global_rank, world_size=self.gpu_world_size)
+        # The training entrypoint may initialize the process group while
+        # synchronizing the run directory before constructing the runner.
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(
+                backend="nccl", rank=self.gpu_global_rank, world_size=self.gpu_world_size
+            )
         # Set device to the local rank
         torch.cuda.set_device(self.gpu_local_rank)

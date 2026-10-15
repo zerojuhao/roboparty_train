@@ -2,6 +2,7 @@ from dataclasses import MISSING
 from typing import List
 
 from isaaclab.terrains.terrain_generator_cfg import SubTerrainBaseCfg
+from isaaclab.terrains.trimesh import MeshRandomGridTerrainCfg
 from isaaclab.utils import configclass
 
 from ..height_field import PerlinPlaneTerrainCfg
@@ -70,6 +71,18 @@ class StaticMeshTerrainCfg(SubTerrainBaseCfg):
 
     mesh_file: str = MISSING
     """Mesh filename relative to ``path`` (``.obj`` / ``.stl``)."""
+
+
+@configclass
+class BorderedMeshRandomGridTerrainCfg(MeshRandomGridTerrainCfg):
+    """Random box grid with an explicit flat transition border."""
+
+    function = mesh_terrains.bordered_random_grid_terrain
+
+    border_width: float = 0.5
+    merge_similar_heights: bool = True
+    height_merge_threshold: float = 0.025
+    max_merge_distance: int = 3
 
 
 @configclass

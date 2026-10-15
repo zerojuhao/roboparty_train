@@ -195,14 +195,9 @@ class PPO:
 
     def update(self) -> dict[str, float]:
         """Run optimization epochs over stored batches and return mean losses."""
-        mean_value_loss = 0
-        mean_surrogate_loss = 0
-        mean_entropy = 0
-        mean_aux_loss = 0.0
-        # RND loss
-        mean_rnd_loss = 0 if self.rnd else None
-        # Symmetry loss
-        mean_symmetry_loss = 0 if self.symmetry else None
+        metric_totals = torch.zeros(6, device=self.device, dtype=torch.float32)
+        mean_aux_metrics: dict[str, torch.Tensor] = {}
+        aux_metric_counts: dict[str, int] = {}
 
         # Get mini-batch generator
         if self.actor.is_recurrent or self.critic.is_recurrent:
@@ -254,9 +249,10 @@ class PPO:
 
                         # Update the learning rate only on the main process
                         if self.gpu_global_rank == 0:
-                            if kl_mean > self.desired_kl * 2.0:
+                            kl_value = kl_mean.item()
+                            if kl_value > self.desired_kl * 2.0:
                                 self.learning_rate = max(1e-5, self.learning_rate / 1.5)
-                            elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                            elif 0.0 < kl_value < self.desired_kl / 2.0:
                                 self.learning_rate = min(1e-2, self.learning_rate * 1.5)
 
                         # Update the learning rate for all GPUs
@@ -291,14 +287,26 @@ class PPO:
                     aux_loss = self.actor.get_aux_loss()
                     if aux_loss is not None:
                         loss = loss + self.aux_loss_coef * aux_loss
-                        mean_aux_loss += aux_loss.item()
+                        metric_totals[3].add_(aux_loss.detach().float())
+                get_aux_metrics = getattr(self.actor, "get_aux_metrics", None)
+                if get_aux_metrics is not None:
+                    for key, value in get_aux_metrics().items():
+                        value = value.detach().float()
+                        mean_aux_metrics[key] = mean_aux_metrics.get(key, torch.zeros_like(value)) + value
+                        aux_metric_counts[key] = aux_metric_counts.get(key, 0) + 1
 
                 # RND loss
                 rnd_loss = self.rnd.compute_loss(batch.observations[:original_batch_size]) if self.rnd else None  # type: ignore
 
                 # Symmetry loss
                 if self.symmetry:
-                    symmetry_loss = self.symmetry.compute_loss(self.actor, batch, original_batch_size)
+                    cached_mean_actions = self.actor.output_mean if self.symmetry.use_data_augmentation else None
+                    symmetry_loss = self.symmetry.compute_loss(
+                        self.actor,
+                        batch,
+                        original_batch_size,
+                        mean_actions=cached_mean_actions,
+                    )
                     if self.symmetry.use_mirror_loss:
                         loss = loss + self.symmetry.mirror_loss_coeff * symmetry_loss
 
@@ -323,15 +331,15 @@ class PPO:
                 self.rnd.optimizer.step()
 
             # Store the losses
-            mean_value_loss += value_loss.item()
-            mean_surrogate_loss += surrogate_loss.item()
-            mean_entropy += entropy.mean().item()
+            metric_totals[0].add_(value_loss.detach().float())
+            metric_totals[1].add_(surrogate_loss.detach().float())
+            metric_totals[2].add_(entropy.detach().float().mean())
             # RND loss
-            if mean_rnd_loss is not None:
-                mean_rnd_loss += rnd_loss.item()
+            if self.rnd:
+                metric_totals[4].add_(rnd_loss.detach().float())
             # Symmetry loss
-            if mean_symmetry_loss is not None:
-                mean_symmetry_loss += symmetry_loss.item()
+            if self.symmetry:
+                metric_totals[5].add_(symmetry_loss.detach().float())
 
         # Update the normalizers
         obs = self.storage.observations.flatten(0, 1)
@@ -342,26 +350,31 @@ class PPO:
 
         # Divide the losses by the number of updates
         num_updates = self.num_learning_epochs * self.num_mini_batches
-        mean_value_loss /= num_updates
-        mean_surrogate_loss /= num_updates
-        mean_entropy /= num_updates
-        if mean_rnd_loss is not None:
-            mean_rnd_loss /= num_updates
-        if mean_symmetry_loss is not None:
-            mean_symmetry_loss /= num_updates
-
-        # Construct the loss dictionary
-        loss_dict = {
-            "value": mean_value_loss,
-            "surrogate": mean_surrogate_loss,
-            "entropy": mean_entropy,
-        }
+        metric_totals.div_(num_updates)
+        metric_names = ["value", "surrogate", "entropy"]
+        metric_values = [metric_totals[0], metric_totals[1], metric_totals[2]]
         if self.rnd:
-            loss_dict["rnd"] = mean_rnd_loss
+            metric_names.append("rnd")
+            metric_values.append(metric_totals[4])
         if self.symmetry:
-            loss_dict["symmetry"] = mean_symmetry_loss
+            metric_names.append("symmetry")
+            metric_values.append(metric_totals[5])
         if self.aux_loss_coef:
-            loss_dict["aux"] = mean_aux_loss / num_updates
+            metric_names.append("aux")
+            metric_values.append(metric_totals[3])
+        aux_keys = list(mean_aux_metrics)
+        if aux_keys:
+            aux_sums = torch.stack([mean_aux_metrics[key] for key in aux_keys])
+            aux_counts = aux_sums.new_tensor([aux_metric_counts[key] for key in aux_keys])
+            if self.is_multi_gpu:
+                packed_aux = torch.cat((aux_sums, aux_counts))
+                torch.distributed.all_reduce(packed_aux, op=torch.distributed.ReduceOp.SUM)
+                aux_sums, aux_counts = packed_aux.chunk(2)
+            metric_names.extend(aux_keys)
+            metric_values.extend((aux_sums / aux_counts.clamp_min(1.0)).unbind())
+
+        # Convert all logging scalars with one host synchronization per update.
+        loss_dict = dict(zip(metric_names, torch.stack(metric_values).tolist()))
 
         # Clear the storage
         self.storage.clear()
@@ -467,6 +480,8 @@ class PPO:
         storage = RolloutStorage(
             "rl", env.num_envs, cfg["num_steps_per_env"], obs, [env.num_actions], device,
             num_rewards=num_rewards,
+            compact_depth_history=cfg.get("compact_depth_history", False),
+            depth_history_offsets=cfg.get("depth_history_offsets", ()),
         )
 
         # Initialize the algorithm

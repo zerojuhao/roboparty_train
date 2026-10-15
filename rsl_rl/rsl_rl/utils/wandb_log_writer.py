@@ -59,6 +59,22 @@ class WandbLogWriter(SummaryWriter, LogWriter):
         super().add_scalar(tag, scalar_value, global_step=global_step, walltime=walltime, new_style=new_style)
         wandb.log({tag: scalar_value}, step=global_step)
 
+    def log_metrics(self, metrics: dict[str, float], global_step: int) -> None:
+        """Commit a complete batch, allowing train/eval at the same env step."""
+        if not getattr(self, "_env_step_metrics_defined", False):
+            wandb.define_metric("env_steps")
+            for namespace in (
+                "Reward/*", "train/*", "Train/*", "Perf/*", "diagnostics/*", "eval/*"
+            ):
+                wandb.define_metric(namespace, step_metric="env_steps")
+            self._env_step_metrics_defined = True
+        for tag, value in metrics.items():
+            super().add_scalar(tag, value, global_step=global_step)
+        # W&B's internal step advances on every commit. Use a separate axis so
+        # evaluation after a committed training batch cannot be dropped as old.
+        wandb.log({**metrics, "env_steps": global_step}, commit=True)
+        super().flush()
+
     def store_config(self, env_cfg: dict | object, train_cfg: dict) -> None:
         """Upload environment and training configuration to W&B."""
         wandb.config.update({"train_cfg": train_cfg})

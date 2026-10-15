@@ -9,6 +9,8 @@ class ParkourModelCfg(RslRlMLPModelCfg):
     class_name: str = "ParkourModel"
     activation: str = "elu"
     encoder_cfg: dict | None = None
+    encoder_onnx_filename: str = "depth_encoder.onnx"
+    actor_onnx_filename: str = "actor.onnx"
     num_moe_experts: int = 4
     moe_gate_hidden_dims: list[int] = []
     enable_velocity_estimation: bool = False

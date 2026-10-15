@@ -139,7 +139,7 @@ class NoiseScalesCfg:
     ang_vel: float = 0.2
     projected_gravity: float = 0.05
     joint_pos: float = 0.01
-    joint_vel: float = 1.5
+    joint_vel: float = 0.5
     height_scan: float = 0.1
 
 

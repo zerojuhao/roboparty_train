@@ -25,12 +25,16 @@ class UFOMotionCommand(CommandTerm):
                 "step_dt": cfg.step_dt,
                 "clip_seconds": cfg.clip_seconds,
                 "min_clip_seconds": cfg.min_clip_seconds,
+                "motion_names": getattr(cfg, "motion_names", None),
             }
         )
         self._motion_lib = MotionLibNPZ(motion_cfg, num_envs=self.num_envs, device=self.device)
         self._motion_lib.load_motions_for_training()
         self.motion_ids = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.motion_times = torch.zeros(self.num_envs, device=self.device)
+        self._reset_prepared = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.reset_motion_ids = self.motion_ids.clone()
+        self.reset_motion_times = self.motion_times.clone()
         self.truncate_time = cfg.truncate_time_s
 
     @property
@@ -38,6 +42,28 @@ class UFOMotionCommand(CommandTerm):
         return self._motion_lib
 
     def _resample_command(self, env_ids):
+        env_ids = self._resolve_env_ids(env_ids)
+        pending = self._reset_prepared[env_ids]
+        self._reset_prepared[env_ids] = False
+        self._sample_motion(env_ids[~pending])
+
+    def reset(self, env_ids=None):
+        return super().reset(self._resolve_env_ids(env_ids))
+
+    def _resolve_env_ids(self, env_ids):
+        if env_ids is None or isinstance(env_ids, slice):
+            return torch.arange(self.num_envs, device=self.device)[slice(None) if env_ids is None else env_ids]
+        return torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+
+    def prepare_reset(self, env_ids):
+        """Sample before pose events; the later command-manager reset must not sample twice."""
+        env_ids = self._resolve_env_ids(env_ids)
+        self._sample_motion(env_ids)
+        self._reset_prepared[env_ids] = True
+        self.reset_motion_ids[env_ids] = self.motion_ids[env_ids]
+        self.reset_motion_times[env_ids] = self.motion_times[env_ids]
+
+    def _sample_motion(self, env_ids):
         if len(env_ids) == 0:
             return
         self.motion_ids[env_ids] = self._motion_lib.sample_motions(len(env_ids))
@@ -68,6 +94,7 @@ class UFOMotionCommandCfg(CommandTermCfg):
     # Path to the BeyondMimic-format motion manifest (its ``npz`` clips are
     # loaded by MotionLibNPZ).
     manifest_path: str = MISSING
+    motion_names: tuple[str, ...] | None = None
     step_dt: float = 0.02
     truncate_time_s: float | None = None
     # Original-UFO clip windowing: motions are split into fixed-duration

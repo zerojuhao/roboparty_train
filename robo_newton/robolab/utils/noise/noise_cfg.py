@@ -13,6 +13,7 @@ from .noise_model import (
     depth_artifact_noise,
     depth_contour_noise,
     depth_normalization,
+    sanitize_depth,
     depth_sky_artifact_noise,
     depth_stero_noise,
     gaussian_blur_noise,
@@ -40,6 +41,18 @@ class ImageNoiseCfg(NoiseCfg):
 
 
 # -- below are configuration classes to different types of noise applied to depth image
+
+
+@configclass
+class DepthSanitizationCfg(ImageNoiseCfg):
+    """Fill invalid depth before filtering; legacy configurations use zero."""
+
+    max_depth: float | None = None
+    """Optional maximum finite depth in meters; ``None`` preserves valid values."""
+    invalid_depth: float = 0.0
+    min_depth: float = 0.0
+
+    func = sanitize_depth
 
 
 @configclass
