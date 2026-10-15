@@ -1,7 +1,0 @@
---- a/src/inference/robots/rp1_24dof/configs/pbfm.yaml
-+++ b/src/inference/robots/rp1_24dof/configs/pbfm.yaml
-@@ -10,1 +10,3 @@
--        window_size: 3
-+        # context_1.npz already contains the seq_length=8 tracking sliding
-+        # average recorded in export_meta.json. Do not average it again.
-+        window_size: 1

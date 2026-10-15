@@ -36,9 +36,8 @@ IsaacLab-3.0/
 /ufo_data
 /robo_newton/data
 
-# Generated progress files from historical experiment scripts.
-/project_ops/overnight_amp_20261011/*.txt
-/project_ops/overnight_amp_20261011/diag_*.json
+# Host-local experiment scripts and notes are not repository sources.
+/project_ops/
 
 # Local package metadata.
 /robo_newton/*.egg-info/
