@@ -33,11 +33,11 @@ export PYTHONPATH="$PWD/rsl_rl:$PWD/robo_newton${PYTHONPATH:+:$PYTHONPATH}"
 export ROBO_TRAIN_LOG_ROOT="$PWD/logs/rsl_rl"
 ```
 
-Private repositories require GitHub access. Provision the following robot assets and datasets before importing task configurations or starting training.
+The repository includes the robot assets and unified datasets below. A checkout therefore has the expected runtime paths before importing task configurations or starting training.
 
 ## Motion Data
 
-`robo_newton/robolab/data` is the checkout-local data root. It is intentionally ignored by Git; provision the unified NPZ bundle and robot resources there before training. Data lookup order is `--data_root`, `ROBO_TRAIN_DATA_ROOT`, then this local data root.
+`robo_newton/robolab/data` is the checkout-local data root. The unified NPZ bundle and robot resources are stored there. Data lookup order is `--data_root`, `ROBO_TRAIN_DATA_ROOT`, then this local data root.
 
 ```text
 robo_newton/robolab/data/
@@ -119,7 +119,7 @@ python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
 
 PUFO export also needs saved run configuration and motion data. MuJoCo checks live under `robo_newton/scripts/mujoco/`; select the entry point and deployment contract matching the policy.
 
-PUFO sim2sim assets live in `robo_newton/robolab/data/robots/rp1/mjcf/`: `rp1_simple_terrain/` contains the terrain, and `robot_24dof_newton_physics.json` contains nominal compiled collision/contact/solver data. The shared `robolab.utils.mujoco_physics` utility applies these assets without loading a checkpoint; motor limits are resolved from the URDF and supplied actuator configuration. Other tasks can use their own assets through the same utility, not inherit PUFO parameters implicitly. `sim2sim_rp1_pufo.py --physics-asset PATH` selects an alternative asset. Regenerate assets with `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` from a nonrandomized, single-robot Newton model with a ground plane. These files are local data and must be distributed alongside the robot assets.
+PUFO sim2sim assets live in `robo_newton/robolab/data/robots/rp1/mjcf/`: `rp1_simple_terrain/` contains the terrain, and `robot_24dof_newton_physics.json` contains nominal compiled collision/contact/solver data. The shared `robolab.utils.mujoco_physics` utility applies these assets without loading a checkpoint; motor limits are resolved from the URDF and supplied actuator configuration. Other tasks can use their own assets through the same utility, not inherit PUFO parameters implicitly. `sim2sim_rp1_pufo.py --physics-asset PATH` selects an alternative asset. Regenerate assets with `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` from a nonrandomized, single-robot Newton model with a ground plane.
 
 The terrain assets `rp1_simple_terrain/rp1_simple_terrain.xml` and `rp1_simple_terrain/meta.json` are pre-generated; the old machine-specific terrain exporter has been removed. The metadata supplies reset positions and terrain descriptions, while `robot_24dof_newton_physics.json` supplies Newton collision, contact, and solver parameters. Both JSON files are required by PUFO sim2sim and use indented formatting. The physics exporter above regenerates only the physics JSON, not the terrain. Install both terrain files from the robot asset bundle; an external UFO checkout is not needed to run sim2sim.
 

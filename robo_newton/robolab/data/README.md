@@ -1,8 +1,8 @@
 # Local Newton Data
 
-This directory is intentionally kept as a path skeleton. Install the private
-motion datasets and robot assets here; the files themselves are ignored and
-are not published with the source repository.
+This directory is the runtime data root for the Newton training tasks. The
+unified motion datasets and robot assets are included with the source
+repository and should remain at these paths.
 
 ```text
 data/
