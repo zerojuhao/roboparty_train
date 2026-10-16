@@ -1,7 +1,7 @@
 """Standalone UFO environment configuration (no inheritance from other tasks).
 
 Observation groups (consumed by the FbCpr runner, which assembles the UFO
-dict-obs `state / last_action / history_actor / privileged_state`):
+dict-obs state/history, context commands, and privileged state):
   - policy:  base_ang_vel(3) + projected_gravity(3) + joint_pos(24) + joint_vel(24) + last_action(24) = 78
   - critic:  local_self_obs (373), computed with the vendored UFO observation math
   - velocity_target_yaw: current root velocity in the yaw frame for the
