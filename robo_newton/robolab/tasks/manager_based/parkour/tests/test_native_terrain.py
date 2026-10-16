@@ -106,6 +106,23 @@ class TestNativeTerrain(unittest.TestCase):
         for origin in origins.reshape(-1, 3):
             self.assertLess(np.linalg.norm(points - origin[:2], axis=1).min(), 1e-3)
 
+    def test_native_cfg_copies_and_disables_legacy_cache(self):
+        from robolab.terrains.native_importer import NativeTerrainImporter
+        from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg
+
+        source_generator = ROUGH_TERRAINS_CFG.copy()
+        source_generator.use_cache = True
+        source_generator.native_collision = False
+        cfg = TerrainImporterCfg(terrain_type="generator", terrain_generator=source_generator)
+        prepared = NativeTerrainImporter._prepare_native_cfg(cfg, enabled=True)
+
+        self.assertIsNot(prepared, cfg)
+        self.assertIsNot(prepared.terrain_generator, source_generator)
+        self.assertFalse(source_generator.native_collision)
+        self.assertTrue(source_generator.use_cache)
+        self.assertTrue(prepared.terrain_generator.native_collision)
+        self.assertFalse(prepared.terrain_generator.use_cache)
+
     def test_rotated_box_pose_matches_actual_usd_xyzw_convention(self):
         import itertools
         import trimesh

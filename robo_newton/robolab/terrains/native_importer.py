@@ -109,16 +109,28 @@ def collision_kind(mesh, authored_heightfield=False):
 
 
 class NativeTerrainImporter(TerrainImporter):
+    @staticmethod
+    def _prepare_native_cfg(cfg, enabled: bool):
+        """Copy native terrain settings without mutating shared task configs."""
+        cfg = cfg.copy()
+        generator_cfg = cfg.terrain_generator
+        if enabled and generator_cfg is not None:
+            # Legacy OBJ caches contain only the welded observation mesh and lose
+            # the authored components required by the Newton collision builder.
+            generator_cfg = generator_cfg.copy()
+            generator_cfg.native_collision = True
+            generator_cfg.use_cache = False
+            cfg.terrain_generator = generator_cfg
+        return cfg
+
     def __init__(self, cfg):
         from isaaclab_newton.physics import NewtonCfg
 
-        cfg = cfg.copy()
         self._native_collision = (
             isinstance(sim_utils.SimulationContext.instance().cfg.physics, NewtonCfg)
             and cfg.terrain_type == "generator"
         )
-        if self._native_collision and cfg.terrain_generator is not None:
-            cfg.terrain_generator.native_collision = True
+        cfg = self._prepare_native_cfg(cfg, self._native_collision)
         super().__init__(cfg)
 
     def _import_observation_mesh(self, name, mesh):

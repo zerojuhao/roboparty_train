@@ -8,12 +8,6 @@ from robolab.terrains.native_importer import NativeTerrainImporter, box_bounds
 
 class PUFOTerrainImporter(NativeTerrainImporter):
     def __init__(self, cfg):
-        import isaaclab.sim as sim_utils
-        from isaaclab_newton.physics import NewtonCfg
-
-        cfg = cfg.copy()
-        if isinstance(sim_utils.SimulationContext.instance().cfg.physics, NewtonCfg) and cfg.terrain_generator is not None:
-            cfg.terrain_generator.use_cache = False
         super().__init__(cfg)
 
     def _import_observation_mesh(self, name, mesh):
