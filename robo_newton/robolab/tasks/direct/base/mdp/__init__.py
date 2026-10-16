@@ -32,5 +32,6 @@
 """This sub-module contains the functions that are specific to the locomotion environments."""
 
 from isaaclab.envs.mdp import *
+from robolab.utils.newton_mdp_events import randomize_rigid_body_com
 
 from .rewards import *
