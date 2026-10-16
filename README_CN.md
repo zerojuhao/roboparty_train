@@ -140,9 +140,6 @@ RP1 的 AMP、Parkour、PUFO 三个 sim2sim 入口统一使用 `robolab.utils.mu
 | `tools/visualize_robot.py`、`tools/visualize_terrain.py`、`tools/visualize_depth_domain_randomization.py` | 检查机器人关节/身体顺序、地形和相机噪声，作为可选诊断工具保留；目前使用 AppLauncher 场景。 |
 | `bind_gpu_local_rank.py` | 可选 torchrun 包装器，将各进程绑定到对应 GPU 附近的 CPU；依赖显式 `CUDA_VISIBLE_DEVICES` 和 Linux NUMA 拓扑。 |
 | `train_newton.py`、`play_newton.py` | Isaac Lab CLI 的轻量包装，不等同于完整的自定义 runner 入口。`smoke_newton_env.py` 会导入 `train_newton.py` 完成无 Kit 初始化，不能单独删除。 |
-| `tools/export_terrain.py` | 导出硬编码示例地形的网格、凸分解或高度场，不会复现 RP1 PUFO 地形包。属于待通用化或退役的旧工具。 |
-| `tools/preview_terrain.py` | 专门绘制 `HIGH_PLATFORM_45x60_CFG` 的截图和高度剖面，不是通用 XML 查看器，可考虑合并。 |
-| `tools/rename_template.py` | 遗留的 `ext_template` 项目初始化工具，预期模板目录已不存在，不用于训练，属于可删除项；不要对当前仓库运行。 |
 | `mujoco/sim2sim_*.py` | 各任务部署验证入口，观测和动作接口不同。保留与策略匹配的版本，旧 RPO 变体需单独核对兼容性后再合并。 |
 
 动作加载和 RP1 sim2sim 的 CPU 回归测试：

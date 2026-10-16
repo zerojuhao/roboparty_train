@@ -138,9 +138,6 @@ Paths below are relative to `robo_newton/scripts/`. Standalone diagnostic tools 
 | `tools/visualize_robot.py`, `tools/visualize_terrain.py`, `tools/visualize_depth_domain_randomization.py` | Inspect robot joint/link order, terrain, and camera noise. Keep as optional diagnostics; these use AppLauncher-based scenes. |
 | `bind_gpu_local_rank.py` | Optional torchrun wrapper binding each worker to CPUs local to its GPU. Requires explicit `CUDA_VISIBLE_DEVICES` and Linux NUMA topology. |
 | `train_newton.py`, `play_newton.py` | Thin Isaac Lab CLI wrappers, not equivalents of all custom runner features. `smoke_newton_env.py` imports `train_newton.py` for kitless initialization; do not remove it in isolation. |
-| `tools/export_terrain.py` | Exports a hard-coded example terrain to meshes, convex parts, or a height field. It does not reproduce the RP1 PUFO terrain bundle. Legacy utility to generalize or retire. |
-| `tools/preview_terrain.py` | Specialized screenshot/height-profile script for `HIGH_PLATFORM_45x60_CFG`, not a general XML viewer. Candidate for consolidation. |
-| `tools/rename_template.py` | Leftover `ext_template` project scaffolding. The expected template directory is absent; not a training tool and a removal candidate. Do not run it on this repository. |
 | `mujoco/sim2sim_*.py` | Deployment checks with task-specific observation/action contracts. Keep the entry matching the policy; older RPO variants need a separate compatibility audit before consolidation. |
 
 CPU regression tests for motion loading and RP1 sim2sim:
