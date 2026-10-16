@@ -41,8 +41,8 @@ export ROBO_TRAIN_LOG_ROOT="$PWD/logs/rsl_rl"
 
 ```text
 robo_newton/robolab/data/
-  robots/roboparty/rp1.3/  RP1 URDF、MJCF、网格
-  robots/roboparty/rpo/    RPO URDF、MJCF、网格
+  robots/rp1/  RP1 URDF、MJCF、网格
+  robots/rpo/    RPO URDF、MJCF、网格
   motions/newton/
     rp1/                  RP1 AMP、Parkour、SSR
     rp1_upper_run_bounded/ RP1 AMP 上半身参考动作
@@ -121,7 +121,7 @@ python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
 
 PUFO 导出还需要对应训练配置和动作数据。MuJoCo 验证脚本位于 `robo_newton/scripts/mujoco/`，应选择与策略任务及部署接口匹配的入口。
 
-PUFO sim2sim 资源位于 `robo_newton/robolab/data/robots/roboparty/rp1.3/mjcf/`：`rp1_simple_terrain/` 保存地形，`robot_24dof_newton_physics.json` 保存非随机化模型编译后的碰撞、接触和求解器参数。公共工具 `robolab.utils.mujoco_physics` 不加载 checkpoint；电机限幅由 URDF 和传入的执行器配置解析。其他任务可使用同一工具加载自己的物理资产，不会自动套用 PUFO 参数。`sim2sim_rp1_pufo.py --physics-asset PATH` 可选择其他资产。可从非随机化、单机器人加地面的 Newton 模型执行 `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` 重新生成。这些文件属于本地数据，需随机器人资产分发。
+PUFO sim2sim 资源位于 `robo_newton/robolab/data/robots/rp1/mjcf/`：`rp1_simple_terrain/` 保存地形，`robot_24dof_newton_physics.json` 保存非随机化模型编译后的碰撞、接触和求解器参数。公共工具 `robolab.utils.mujoco_physics` 不加载 checkpoint；电机限幅由 URDF 和传入的执行器配置解析。其他任务可使用同一工具加载自己的物理资产，不会自动套用 PUFO 参数。`sim2sim_rp1_pufo.py --physics-asset PATH` 可选择其他资产。可从非随机化、单机器人加地面的 Newton 模型执行 `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` 重新生成。这些文件属于本地数据，需随机器人资产分发。
 
 地形资产 `rp1_simple_terrain/rp1_simple_terrain.xml` 与 `rp1_simple_terrain/meta.json` 是预生成的，旧的服务器专用地形导出脚本已移除。地形元数据提供重置位置和地形描述，`robot_24dof_newton_physics.json` 提供 Newton 的碰撞、接触和求解器参数；两个 JSON 都是 PUFO sim2sim 所需文件，使用缩进格式保存。上述物理导出工具只生成物理 JSON，不生成地形。使用时需从机器人资源包安装两个地形文件；运行 sim2sim 不依赖外部 UFO 代码目录。
 

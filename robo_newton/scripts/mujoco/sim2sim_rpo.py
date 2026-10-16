@@ -309,9 +309,9 @@ if __name__ == '__main__':
 
         class sim_config:
             if args.terrain:
-                mujoco_model_path = f'{ISAAC_DATA_DIR}/robots/roboparty/rpo/mjcf/rpo_terrain.xml'
+                mujoco_model_path = f'{ISAAC_DATA_DIR}/robots/rpo/mjcf/rpo_terrain.xml'
             else:
-                mujoco_model_path = f'{ISAAC_DATA_DIR}/robots/roboparty/rpo/mjcf/rpo.xml'
+                mujoco_model_path = f'{ISAAC_DATA_DIR}/robots/rpo/mjcf/rpo.xml'
             sim_duration = 10.0
             dt = 0.001
             decimation = 20

@@ -12,7 +12,7 @@ from robolab.utils.tensors import as_torch_tensor
 
 def sample_reset_states(
     motion, env_ids, origins, default_joints, *,
-    lie_down_probability=0.3,
+    lie_down_probability=0.0,
     standing_startup_probability=0.0,
     joint_noise_range=(0.0, 0.0),
     arm_joint_noise_range=(0.0, 0.0),
@@ -88,6 +88,8 @@ def correct_terrain_penetration(env, env_ids, root, clearance=0.05, penetration_
     from robolab.terrains.native_importer import validate_terrain_colliders
     validate_terrain_colliders(env)
     robot = env.scene["robot"]
+    if not hasattr(env, "_pufo_reset_lift"):
+        env._pufo_reset_lift = torch.zeros(env.num_envs, device=env.device)
     dynamic_geom = torch.as_tensor(solver.mj_model.geom_bodyid > 0, device=env.device)
     env._pufo_reset_lift[env_ids] = 0
     env.scene.write_data_to_sim()
@@ -121,7 +123,7 @@ def correct_terrain_penetration(env, env_ids, root, clearance=0.05, penetration_
 
 
 def reset_pufo_from_motion(
-    env, env_ids, command_name, lie_down_probability=0.3,
+    env, env_ids, command_name, lie_down_probability=0.0,
     contact_clearance=0.05, penetration_scale=1.25,
     standing_startup_probability=0.0,
     joint_noise_range=(0.0, 0.0),

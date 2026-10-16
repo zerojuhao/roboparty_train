@@ -48,7 +48,7 @@ from robolab.tasks.manager_based.ufo.mdp.pufo_observations import (
 from robolab.tasks.manager_based.ufo.motion.torch_utils import quat_rotate_inverse
 
 LOG_ROOT = Path("/data/zym/roboparty_train/logs/rsl_rl/rp1_pufo")
-MJCF = DATA_ROOT / "robots/roboparty/rp1.3/mjcf/rp1_flat.xml"
+MJCF = DATA_ROOT / "robots/rp1/mjcf/rp1_flat.xml"
 NATIVE_PHYSICS = NewtonPhysicsAsset(MJCF.with_name("robot_24dof_newton_physics.json"),
                                     data_root=DATA_ROOT)
 TERRAIN_DIR = MJCF.parent / "rp1_simple_terrain"

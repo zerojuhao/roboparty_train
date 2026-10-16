@@ -155,6 +155,16 @@ class TestAgentConfiguration(unittest.TestCase):
         for name, parameter in agent._critic_shared.state_dict().items():
             torch.testing.assert_close(parameter, agent._target_critic_shared.state_dict()[name])
 
+    def test_ufo_defaults_to_shared_reward_critics(self):
+        self.assertTrue(RP1UFORunnerCfg().to_dict()["shared_value_net"])
+        agent = self.make_agent(visual=False, shared=None)
+        self.assertTrue(agent.shared_value_net)
+        self.assertTrue(hasattr(agent, "_critic_shared"))
+        self.assertFalse(hasattr(agent, "_critic"))
+        self.assertFalse(hasattr(agent, "_aux_critic"))
+        self.assertIn("critic_shared", agent.state_dict())
+        self.assertIn("target_critic_shared", agent.state_dict())
+
     def test_pufo_serializes_per_update_logging_without_changing_training_cadence(self):
         cfg = RP1PUFORunnerCfg().to_dict()
         self.assertTrue(cfg["log_every_update"])

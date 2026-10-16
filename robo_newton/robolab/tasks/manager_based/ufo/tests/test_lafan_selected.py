@@ -50,7 +50,7 @@ class TestMotionAlignment(unittest.TestCase):
         self.assertEqual(len(MOTION_NAMES), 40)
         self.assertEqual(cfg.commands.motion.motion_names, MOTION_NAMES)
         self.assertEqual(RP1PUFOEnvCfg().commands.motion.motion_names, MOTION_NAMES)
-        self.assertEqual(cfg.events.reset_root_state.params["lie_down_probability"], .3)
+        self.assertEqual(cfg.events.reset_root_state.params["lie_down_probability"], 0.)
         self.assertEqual(RP1PUFOEvalEnvCfg().events.reset_root_state.params["lie_down_probability"], 0.)
         self.assertIsNone(getattr(cfg.events, "reset_joint_state", None))
         self.assertEqual(cfg.actions.joint_pos.scale, .4)

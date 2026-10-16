@@ -27,7 +27,7 @@ from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab.managers import SceneEntityCfg
 
 import isaaclab.sim as sim_utils
-from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_newton.physics import NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
@@ -36,6 +36,7 @@ from robolab.assets.robots.roboparty import RP1_UFO_CFG
 from robolab.sensors.terrain_contact import TerrainContactSensorCfg
 
 from . import mdp
+from .pufo_physics import PUFOMJWarpSolverCfg
 from .lafan_selected import MOTION_NAMES
 
 # LAFAN motions shared with the RP1 WBC tracking task.
@@ -93,7 +94,11 @@ class UFOActionsCfg:
 class UFOObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
+        base_ang_vel = ObsTerm(
+            func=mdp.base_ang_vel,
+            noise=Unoise(n_min=-0.2, n_max=0.2),
+            scale=0.25,
+        )
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5))
@@ -175,7 +180,7 @@ class UFOEventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "mass_distribution_params": (0.9, 1.1),
+            "mass_distribution_params": (0.8, 1.2),
             "operation": "scale",
         },
     )
@@ -195,12 +200,12 @@ class UFOEventCfg:
         interval_range_s=(1.0, 3.0),
         params={
             "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
+                "x": (-1.0, 1.0),
+                "y": (-1.0, 1.0),
                 "z": (0.0, 0.0),
-                "roll": (-0.5, 0.5),
-                "pitch": (-0.5, 0.5),
-                "yaw": (-0.5, 0.5),
+                "roll": (-1.0, 1.0),
+                "pitch": (-1.0, 1.0),
+                "yaw": (-1.0, 1.0),
             },
         },
     )
@@ -281,15 +286,18 @@ class UFOTerminationsCfg:
 class PhysicsPresetCfg(PresetCfg):
     isaacsim_physx: PhysxCfg = PhysxCfg()
     newton_mjwarp: NewtonCfg = NewtonCfg(
-        solver_cfg=MJWarpSolverCfg(
+        solver_cfg=PUFOMJWarpSolverCfg(
             cone="pyramidal",
             impratio=1.0,
             integrator="implicitfast",
+            iterations=600,
+            tolerance=1.0e-2,
+            ls_iterations=80,
             update_data_interval=1,
             njmax=4096,
             nconmax=512,
         ),
-        num_substeps=1,
+        num_substeps=2,
         debug_mode=False,
     )
     default: NewtonCfg = newton_mjwarp

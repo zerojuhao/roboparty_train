@@ -260,7 +260,7 @@ class PUFOEventCfg:
         func=reset_pufo_from_motion,
         mode="reset",
         params={
-            "command_name": "motion", "lie_down_probability": 0.3,
+            "command_name": "motion", "lie_down_probability": 0.0,
             "contact_clearance": 0.05, "penetration_scale": 1.25,
         },
     )

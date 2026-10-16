@@ -103,7 +103,6 @@ class ContactAlignmentTests(unittest.TestCase):
     def test_body_impact_config_selects_only_waist_yaw_shoulders_and_hips(self):
         from isaaclab.utils.string import resolve_matching_names
         from robolab.assets.robots.roboparty import PR1_LINKS
-        from robolab.tasks.manager_based.ufo.agents.rp1_pufo_agent_cfg import RP1PUFORunnerCfg
         from robolab.tasks.manager_based.ufo.ufo_env_cfg import UFOEnvCfg
         from robolab.tasks.manager_based.ufo.mdp.rewards import pufo_penalty_body_impact
         from robolab.tasks.manager_based.ufo.mdp.rewards import JointLimitedBodyImpactPositionAction
@@ -136,7 +135,6 @@ class ContactAlignmentTests(unittest.TestCase):
         self.assertIs(ufo_cfg.rewards.penalty_body_impact.func, pufo_penalty_body_impact)
         self.assertIsInstance(ufo_cfg.scene.contact_forces, TerrainContactSensorCfg)
         self.assertFalse(hasattr(cfg.rewards, "penalty_body_contact"))
-        self.assertEqual(RP1PUFORunnerCfg().training_contract, "pufo_h200_alignment_v7_target_clip")
 
     def test_body_impact_matches_p3_reference_with_newton_force_sign(self):
         import ast

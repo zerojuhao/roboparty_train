@@ -39,13 +39,13 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     checkpoint_replay: bool = True
     replay_checkpoint_keep: int = 1
     resume_replay_warmup_steps: int = 10_240
-    seed: int = 52
+    seed: int = 42
 
     # Estimate yaw-frame root velocity from the proprioceptive history.  UFO
     # has no depth encoder, but uses the same supervised target as PUFO.
     estimated_velocity_enabled: bool = True
     velocity_estimator = FbCprMlpModelCfg(
-        hidden_dims=[256, 128],
+        hidden_dims=[512, 256],
         activation="elu",
         first_activation="elu",
         layer_norm=False,
@@ -105,10 +105,10 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
         loss_type="bce",
         reward_type="log_odds",
     )
-    # Share one trunk between the discriminator and auxiliary critic heads.
-    # Both losses are optimized together in one backward/optimizer step.
-    # Match H200 FB-CPR: discriminator and auxiliary critics have independent trunks.
-    shared_value_net: bool = False
+    # Share one trunk between the reward critic and auxiliary critic heads.
+    # Both Q losses are optimized together in one backward/optimizer step.
+    # The discriminator remains a separate network in FbCprAuxAgent.
+    shared_value_net: bool = True
     heading_critic_enabled: bool = True
     velocity_critic_enabled: bool = True
     shared_context_value_net: bool = True
@@ -130,8 +130,8 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     lr_velocity_critic: float = 3e-4
     heading_critic_pessimism_penalty: float = 0.5
     velocity_critic_pessimism_penalty: float = 0.5
-    reg_coeff_heading: float = 0.01
-    reg_coeff_velocity: float = 0.01
+    reg_coeff_heading: float = 0.002
+    reg_coeff_velocity: float = 0.002
     velocity_error_scale_mps: float = 0.5
     # Keep two independently parameterized members for pessimistic estimates.
     critic_ensemble_members: int = 2
@@ -157,7 +157,7 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     lr_f: float = 3e-4
     lr_b: float = 1e-5
     lr_actor: float = 3e-4
-    lr_discriminator: float = 2e-6
+    lr_discriminator: float = 5e-6
     lr_critic: float = 3e-4
     lr_aux_critic: float = 3e-4
     weight_decay: float = 0.0
@@ -202,5 +202,5 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     prioritization: bool = True
     prioritization_min_val: float = 0.5
     prioritization_max_val: float = 2.0
-    prioritization_scale: float = 1.5
+    prioritization_scale: float = 2.0
     prioritization_mode: str = "exp"  # lin | exp | bin

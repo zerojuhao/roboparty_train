@@ -77,48 +77,18 @@ def distributed_worker(rank, rendezvous, directory):
 
 
 class ReplayCheckpointTests(unittest.TestCase):
-    def test_target_clip_migration_requires_opt_in_and_recollects_unchanged_rewards(self):
+    def test_legacy_training_contract_metadata_is_not_retained(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "model.pt"
             source = runner()
-            source.cfg.training_contract = "pufo_h200_alignment_v6"
             source._reward_term_scales = {"unchanged": -0.1}
             source.save(path)
             dest = runner(steps=0)
-            dest.cfg.training_contract = "pufo_h200_alignment_v7_target_clip"
             dest._reward_term_scales = dict(source._reward_term_scales)
-            with self.assertRaisesRegex(ValueError, "training contract"):
-                dest.load(path)
-            dest.agent.load_state_dict.assert_not_called()
-            with patch('rsl_rl.runners.fbcpr_runner.load_replay') as replay_loader:
-                dest.load(path, allow_target_clip_migration=True)
-                replay_loader.assert_not_called()
+            dest.load(path)
             dest.agent.load_state_dict.assert_called_once()
             dest.agent.load_optimizer_state_dict.assert_called_once_with({"step": 80})
-            self.assertEqual((dest.env_iterations, dest.tot_iterations, dest._replay_warmup_until), (100, 80, 220))
-            self.assertTrue(dest.replay["train"].empty())
-            self.assertEqual(torch.load(path, weights_only=False)["training_contract"], "pufo_h200_alignment_v6")
-
-    def test_target_clip_flag_cannot_bypass_other_contracts_or_mix_replay(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "model.pt"
-            for saved, expected in (("pufo_h200_alignment_v5", "pufo_h200_alignment_v7_target_clip"),
-                                    ("pufo_h200_alignment_v7_target_clip", "pufo_h200_alignment_v6")):
-                source = runner()
-                source.cfg.training_contract = saved
-                source.save(path)
-                dest = runner(steps=0)
-                dest.cfg.training_contract = expected
-                with self.assertRaisesRegex(ValueError, "training contract"):
-                    dest.load(path, allow_target_clip_migration=True)
-                dest.agent.load_state_dict.assert_not_called()
-            source.cfg.training_contract = "pufo_h200_alignment_v6"
-            source.save(path)
-            dest = runner(steps=1)
-            dest.cfg.training_contract = "pufo_h200_alignment_v7_target_clip"
-            with self.assertRaisesRegex(ValueError, "empty replay"):
-                dest.load(path, allow_target_clip_migration=True)
-            dest.agent.load_state_dict.assert_not_called()
+            self.assertNotIn("training_contract", torch.load(path, weights_only=False))
 
     def test_changed_or_legacy_rewards_recollect_replay_and_preserve_optimizer(self):
         for saved in ({"old": -0.1}, {"new": -0.2}, None):
@@ -164,17 +134,6 @@ class ReplayCheckpointTests(unittest.TestCase):
             dest.agent.load_optimizer_state_dict.assert_called_once_with({"step": 80})
             self.assertEqual((dest.env_iterations, dest.tot_iterations, dest._replay_warmup_until), (100, 80, 220))
             self.assertTrue(dest.replay["train"].empty())
-
-    def test_training_profile_change_is_rejected_before_loading_weights(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "model.pt"
-            source = runner()
-            source.save(path)
-            dest = runner(steps=0)
-            dest.cfg.training_contract = "pufo_h200_alignment_v1"
-            with self.assertRaisesRegex(ValueError, "training contract"):
-                dest.load(path)
-            dest.agent.load_state_dict.assert_not_called()
 
     def test_partial_full_and_wrapped_buffer_roundtrip(self):
         for steps in (0, 4, 6, 9):

@@ -323,7 +323,10 @@ class FbCprRunner:
 
         self.history = make_ufo_history(self.num_envs, device, history_lengths if self.visual_enabled else None)
 
-        replay_device = "cpu" if self.visual_enabled else device
+        # Keep replay storage on host memory for both UFO and PUFO.  This
+        # avoids reserving the full multi-million-transition buffer on GPU;
+        # PUFO additionally compacts its uint8 depth history below.
+        replay_device = "cpu"
         depth_offsets = ()
         if self.visual_enabled:
             depth_params = mgr.cfg.observations.visual.depth_image.params
@@ -1194,12 +1197,17 @@ class FbCprRunner:
             robot.write_joint_velocity_to_sim_index(velocity=joint_vel)
             mgr.sim.forward()
             mgr.scene.update(dt=0.0)
-            if str(getattr(self.cfg, "training_contract", "")).startswith("pufo_h200_alignment_"):
-                from robolab.tasks.manager_based.ufo.mdp.pufo_reset import correct_terrain_penetration, refresh_reset_camera
-                ids = torch.arange(self.num_envs, device=self.device)
-                correct_terrain_penetration(mgr, ids, root_states)
-                mgr.sim.forward()
-                mgr.scene.update(dt=0.0)
+            # Reapply reset contact clearance after writing the reference pose.
+            # This is required by both flat and generated Newton scenes.  The
+            # camera refresh is conditional because UFO has no camera sensor.
+            from robolab.tasks.manager_based.ufo.mdp.pufo_reset import correct_terrain_penetration
+            ids = torch.arange(self.num_envs, device=self.device)
+            correct_terrain_penetration(mgr, ids, root_states)
+            mgr.sim.forward()
+            mgr.scene.update(dt=0.0)
+            sensors = getattr(mgr.scene, "sensors", {})
+            if "camera" in sensors:
+                from robolab.tasks.manager_based.ufo.mdp.pufo_reset import refresh_reset_camera
                 refresh_reset_camera(mgr, ids)
             self.history.reset(torch.arange(self.num_envs, device=self.device))
             obs_buf = mgr.observation_manager.compute()
@@ -1480,7 +1488,6 @@ class FbCprRunner:
                     "action_rescale": self.action_rescale,
                     "world_size": world_size,
                     "num_envs": self.num_envs,
-                    "training_contract": getattr(self.cfg, "training_contract", None),
                     "reward_term_scales": getattr(self, "_reward_term_scales", {}),
                     "replay_checkpoint": replay_name if self.checkpoint_replay else None,
                 }, temporary)
@@ -1528,22 +1535,8 @@ class FbCprRunner:
         except Exception as exc:
             print(f"[CHECKPOINT] WARNING: replay retention failed: {exc}", flush=True)
 
-    def load(self, path, load_optimizer=True, *, allow_target_clip_migration=False):
+    def load(self, path, load_optimizer=True):
         payload = torch.load(path, map_location="cpu", weights_only=False)
-        expected_contract = getattr(self.cfg, "training_contract", None)
-        target_clip_migration = bool(
-            allow_target_clip_migration
-            and payload.get("training_contract") == "pufo_h200_alignment_v6"
-            and expected_contract == "pufo_h200_alignment_v7_target_clip"
-        )
-        if expected_contract != payload.get("training_contract") and not target_clip_migration:
-            raise ValueError(
-                f"Checkpoint training contract {payload.get('training_contract')!r} does not match "
-                f"{expected_contract!r}. Depth, reset and motion sampling changed; use a fresh run "
-                "or load with the original saved configuration."
-            )
-        if target_clip_migration and load_optimizer and len(self.replay["train"]):
-            raise ValueError("Target clipping migration requires an empty replay buffer")
         world_size = torch.distributed.get_world_size() if self.is_distributed else 1
         for key, expected in (("world_size", world_size), ("num_envs", self.num_envs)):
             if load_optimizer and key in payload and payload[key] != expected:
@@ -1575,11 +1568,6 @@ class FbCprRunner:
         available = bool(replay_dir and (replay_dir / "manifest.json").is_file() and all(
             (replay_dir / f"rank_{rank}" / "manifest.json").is_file() for rank in range(world_size)
         ))
-        if target_clip_migration:
-            available = False
-            if self.is_main_process:
-                print("[RECOVERY] Explicit PUFO v6 -> v7 target clipping migration; retain model/optimizer "
-                      "and counters, discard old replay and collect fresh transitions", flush=True)
         # Stored aux_reward cannot be recomputed after changing the reward contract.
         if payload.get("reward_term_scales", {}) != getattr(self, "_reward_term_scales", {}):
             available = False

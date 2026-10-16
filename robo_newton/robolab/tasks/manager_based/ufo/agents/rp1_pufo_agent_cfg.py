@@ -213,8 +213,6 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     eval_reference_chunk: int = 128
     eval_timeout_s: float = 1800.0
     prioritization: bool = True
-    # Absolute PD targets are now clipped; old transition replay is not compatible.
-    training_contract: str = "pufo_h200_alignment_v7_target_clip"
     prioritization_min_val: float = 0.5
     prioritization_max_val: float = 2.0
     prioritization_scale: float = 2.0

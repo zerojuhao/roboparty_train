@@ -1234,7 +1234,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    mjcf_dir = f"{ISAAC_DATA_DIR}/robots/roboparty/rpo/mjcf"
+    mjcf_dir = f"{ISAAC_DATA_DIR}/robots/rpo/mjcf"
     scene_xml = {
         "stairs": f"{mjcf_dir}/rpo_stairs.xml",
         "terrain": f"{mjcf_dir}/rpo_terrain.xml",

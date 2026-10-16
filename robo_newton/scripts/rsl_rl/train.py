@@ -67,10 +67,6 @@ parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
 )
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
-parser.add_argument(
-    "--pufo_resume_target_clip", action="store_true",
-    help="Explicitly migrate PUFO v6 to v7 target clipping, preserving model/optimizer but recollecting replay.",
-)
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument(
     "--resume_learning_rate", type=float, default=None,
@@ -590,12 +586,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     print(f"[INFO] Logging experiment in directory: {log_root_path}")
 
     should_resume = agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation"
-    if args_cli.pufo_resume_target_clip and (
-        not agent_cfg.resume or agent_cfg.class_name != "FbCprRunner"
-        or getattr(agent_cfg, "training_contract", None) != "pufo_h200_alignment_v7_target_clip"
-        or env_cfg.actions.joint_pos.class_type.__name__ != "JointLimitedBodyImpactPositionAction"
-    ):
-        raise ValueError("--pufo_resume_target_clip requires resumed PUFO v7 with target clipping enabled")
     log_dir, resume_path = _resolve_log_dir(
         log_root_path,
         resume=should_resume,
@@ -686,7 +676,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
         if isinstance(runner, FbCprRunner):
-            runner.load(resume_path, allow_target_clip_migration=args_cli.pufo_resume_target_clip)
+            runner.load(resume_path)
         elif args_cli.reset_amp_discriminators:
             if agent_cfg.algorithm.class_name != "PPOAMP":
                 raise ValueError("--reset_amp_discriminators is only supported for PPOAMP training")

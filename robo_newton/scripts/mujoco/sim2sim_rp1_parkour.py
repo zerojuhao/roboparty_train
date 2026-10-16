@@ -65,7 +65,7 @@ def load_robot_config(env_config=None):
 def make_motor(model, robot_config):
     names = [model.joint(j).name for j in range(model.njnt) if model.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE]
     motor = RoboPartyMujocoActuator(
-        Path(ISAAC_DATA_DIR) / "robots/roboparty/rp1.3/urdf/rp1_24dof.urdf",
+        Path(ISAAC_DATA_DIR) / "robots/rp1/urdf/rp1_24dof.urdf",
         names, robot_config["actuators"]["all_joints"],
     )
     return motor, motor.bind(model)
@@ -1728,7 +1728,7 @@ if __name__ == "__main__":
         _record_behavior_grid(args)
         raise SystemExit(0)
 
-    mjcf_dir = f"{ISAAC_DATA_DIR}/robots/roboparty/rp1.3/mjcf"
+    mjcf_dir = f"{ISAAC_DATA_DIR}/robots/rp1/mjcf"
     scene_xml = {
         "stairs": f"{mjcf_dir}/rp1_stairs.xml",
         "terrain": f"{mjcf_dir}/rp1_rough.xml",

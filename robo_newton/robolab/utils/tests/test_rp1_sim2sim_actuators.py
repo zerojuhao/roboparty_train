@@ -16,7 +16,7 @@ import yaml
 from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
 
 ROOT = Path(__file__).resolve().parents[3]
-MJCF = ROOT / "data/robots/roboparty/rp1.3/mjcf/rp1_flat.xml"
+MJCF = ROOT / "data/robots/rp1/mjcf/rp1_flat.xml"
 
 
 def script(name):
