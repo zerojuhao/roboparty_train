@@ -170,6 +170,11 @@ class RPOAmpEnvCfg(AmpEnvCfg):
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
 
+        # RPO's URDF has a single torso link instead of RP1's waist chain.
+        self.events.randomize_rigid_body_com.params["asset_cfg"] = SceneEntityCfg(
+            "robot", body_names="torso_link"
+        )
+
         # ------------------------------------------------------
         # motion data
         # ------------------------------------------------------
@@ -190,6 +195,12 @@ class RPOAmpEnvCfg(AmpEnvCfg):
             "run_stop_180_R_001__A345_M":3,
             "run_stop_180_R_001__A345":3
         }
+
+        # RPO uses the general discriminator only.  The inherited upper-body
+        # discriminator is RP1-specific and leaves required joint/body indices
+        # unresolved when it is kept in the observation manager.
+        self.observations.upper_disc = None
+        self.observations.upper_disc_demo = None
         
         # ------------------------------------------------------
         # animation

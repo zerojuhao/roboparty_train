@@ -426,14 +426,6 @@ class RewardsCfg:
             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
         },
     )
-    braking_power_peak_l2 = RewTerm(
-        func=mdp.braking_power_peak_l2, weight=-0.02,
-        params={"command_name": "base_velocity", "power_threshold": 2500.0, "min_speed": 0.2, "max_command": 0.1},
-    )
-    braking_torque_step_l2 = RewTerm(
-        func=mdp.braking_torque_step_l2, weight=-0.01,
-        params={"command_name": "base_velocity", "min_speed": 0.2, "max_command": 0.1},
-    )
     # dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     feet_slide = RewTerm(
         func=mdp.feet_slide,

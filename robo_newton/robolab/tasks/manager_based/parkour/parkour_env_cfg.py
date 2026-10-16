@@ -482,10 +482,10 @@ class CommandsCfg:
             "platforms": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
             "trapezoid_stairs": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
             "trapezoid_stairs_inv": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
-            "stairs_gap_platforms": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
-            "threshold_bars": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
-            "boxes": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
-            "mesh_boxes": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
+            # "stairs_gap_platforms": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
+            # "threshold_bars": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
+            # "boxes": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
+            # "mesh_boxes": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
             "hf_pyramid_slope_inv": {"lin_vel_x": (0.4, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
         },
         only_positive_lin_vel_x=True,
@@ -533,7 +533,7 @@ class ParkourRewardsCfg(MultiRewardCfg):
             "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
             "terrain_forward_tolerances": {
                 "square_gaps": math.radians(15.0),
-                "stairs_gap_platforms": math.radians(15.0),
+                # "stairs_gap_platforms": math.radians(15.0),
                 "pyramid_stairs": math.radians(15.0),
                 "pyramid_stairs_inv": math.radians(15.0),
                 "platforms": math.radians(15.0),
@@ -1040,12 +1040,6 @@ class ParkourEnvCfg(AmpEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         super().__post_init__()
-        # This optional terrain may be disabled in the shared terrain preset.
-        if "stairs_gap_platforms" not in self.scene.terrain.terrain_generator.sub_terrains:
-            self.commands.base_velocity.velocity_ranges.pop("stairs_gap_platforms", None)
-            orientation_reward = getattr(self.rewards.locomotion, "pelvis_orientation_l2", None)
-            if orientation_reward is not None:
-                orientation_reward.params.get("terrain_forward_tolerances", {}).pop("stairs_gap_platforms", None)
         # Preserve the task's solver parameters; only replace backend dispatch.
         physics = self.sim.physics.newton_mjwarp
         solver = physics.solver_cfg

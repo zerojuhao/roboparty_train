@@ -451,58 +451,6 @@ def joint_torque_saturation_l2(
     return torch.mean(torch.square(normalized_excess), dim=1)
 
 
-def _is_braking(env, command_name, min_speed, max_command):
-    command = env.command_manager.get_command(command_name)
-    speed = torch.linalg.vector_norm(_as_torch(env.scene["robot"].data.root_lin_vel_b)[:, :2], dim=1)
-    return (torch.linalg.vector_norm(command[:, :2], dim=1) < max_command) & (speed > min_speed)
-
-
-def braking_power_peak_l2(
-    env: ManagerBasedRLEnv, command_name: str, power_threshold: float = 2500.0,
-    min_speed: float = 0.2, max_command: float = 0.1,
-) -> torch.Tensor:
-    """Penalize excessive mechanical absorption during zero-command braking.
-
-    Sum negative joint mechanical powers without cancelling them against
-    motoring joints. This is a regeneration proxy, not a DC bus voltage model.
-    """
-    if not math.isfinite(power_threshold) or power_threshold <= 0:
-        raise ValueError("power_threshold must be finite and positive.")
-    excess = torch.relu(env.motor_load.braking_power_peak / power_threshold - 1.0)
-    return excess.square() * _is_braking(env, command_name, min_speed, max_command)
-
-
-def braking_torque_step_l2(
-    env: ManagerBasedRLEnv, command_name: str, min_speed: float = 0.2, max_command: float = 0.1,
-) -> torch.Tensor:
-    """Penalize the largest normalized physics-step torque jump during braking."""
-    return env.motor_load.torque_delta_ratio_peak.square() * _is_braking(env, command_name, min_speed, max_command)
-
-
-def braking_load_metrics(
-    env: ManagerBasedRLEnv, command_name: str, power_threshold: float = 2500.0,
-    min_speed: float = 0.2, max_command: float = 0.1,
-    power_weight: float = -0.02,
-) -> dict[str, torch.Tensor]:
-    """Retain braking samples so the logger weights conditional means by count.
-
-    Power samples are control-interval peaks in watts, not electrical bus power.
-    Empty conditional metrics are omitted rather than logged as zero or NaN.
-    """
-    braking = _is_braking(env, command_name, min_speed, max_command)
-    metrics = {"Braking/active_fraction": braking.float()}
-    power = env.motor_load.braking_power_peak[braking]
-    if power.numel():
-        excess = torch.relu(power / power_threshold - 1.0).square()
-        metrics.update({
-            "Braking/power_peak_w": power,
-            "Braking/power_excess_fraction": (power > power_threshold).float(),
-            "Braking/power_penalty": excess * power_weight,
-            "Braking/torque_delta_ratio_peak": env.motor_load.torque_delta_ratio_peak[braking],
-        })
-    return metrics
-
-
 def link_close_y_gauss(
     env: ManagerBasedRLEnv,
     threshold: float,

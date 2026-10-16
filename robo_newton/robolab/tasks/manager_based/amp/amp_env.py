@@ -41,7 +41,6 @@ from robolab.tasks.manager_based.amp.managers import MotionDataManager, Animatio
 from .animation_env import AnimationEnv
 from .amp_env_cfg import AmpEnvCfg
 from .mdp.motor_load import MotorLoadTracker
-from .mdp.rewards import braking_load_metrics
 
 class AmpEnv(AnimationEnv):
     
@@ -138,11 +137,6 @@ class AmpEnv(AnimationEnv):
         self.reset_time_outs = self.termination_manager.time_outs
         # -- reward computation
         self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
-        power_term = self.cfg.rewards.braking_power_peak_l2
-        braking_metrics = (
-            braking_load_metrics(self, **power_term.params, power_weight=power_term.weight)
-            if power_term is not None else {}
-        )
         # # -- update AMP observations
         # amp_obs = self._get_amp_observations()
 
@@ -168,13 +162,6 @@ class AmpEnv(AnimationEnv):
 
             # trigger recorder terms for post-reset calls
             self.recorder_manager.record_post_reset(reset_env_ids)
-
-        # Use a fresh log dictionary: the runner retains each step until logging.
-        self.extras["log"] = {
-            **{key: value for key, value in self.extras.get("log", {}).items()
-               if not key.startswith("Braking/")},
-            **braking_metrics,
-        }
 
         # -- update command
         self.command_manager.compute(dt=self.step_dt)
