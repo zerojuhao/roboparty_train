@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import numpy as np
 import os
-import random
 import torch
 import trimesh
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -299,6 +298,14 @@ class GreedyconcatEdgeCylinder(EdgeCylinder):
         self.angle_threshold = cfg.angle_threshold
 
     def process_edges(self, edge_coords: np.ndarray) -> np.ndarray:
+        """Concatenate adjacent mesh edges into deterministic, near-linear segments.
+
+        Mesh adjacency is stored in sets, so iterating it directly makes the
+        generated virtual obstacles depend on hash iteration order.  The
+        terrain mesh is static, therefore there is no benefit to introducing
+        randomness here: stable vertex/candidate ordering makes terrain
+        generation reproducible across processes and machines.
+        """
         line_pts = edge_coords.reshape(-1, 3)
         V, inv_idx = np.unique(line_pts, axis=0, return_inverse=True)
         E_pairs = inv_idx.reshape(-1, 2)
@@ -313,6 +320,7 @@ class GreedyconcatEdgeCylinder(EdgeCylinder):
         available_edges = set(np.where(num_edges_V > 0)[0])
 
         cos_threshold = np.cos(np.deg2rad(self.cfg.adjacent_angle_threshold))
+        line_distance_threshold = self.cfg.point_distance_threshold
 
         processed_edge_coords = []
 
@@ -328,75 +336,80 @@ class GreedyconcatEdgeCylinder(EdgeCylinder):
             max_idx = np.argmax(dists)
             return v_set[max_idx], dists[max_idx]
 
+        def remove_edge(u: int, v: int) -> None:
+            """Remove an undirected edge and update the active vertex set."""
+            adj_list[u].remove(v)
+            adj_list[v].remove(u)
+            for vertex in (u, v):
+                num_edges_V[vertex] -= 1
+                if num_edges_V[vertex] == 0:
+                    available_edges.discard(vertex)
+
+        def choose_neighbor(vertex: int, direction: np.ndarray) -> int | None:
+            """Choose the best aligned neighbor, breaking ties by vertex ID."""
+            neighbors = np.asarray(sorted(adj_list[vertex]), dtype=np.int64)
+            if neighbors.size == 0:
+                return None
+
+            directions = V[neighbors] - V[vertex]
+            lengths = np.linalg.norm(directions, axis=1)
+            eps = np.finfo(np.float64).eps
+            valid = lengths > eps
+            if not np.any(valid):
+                return None
+            directions[valid] /= lengths[valid, None]
+            direction_norm = np.linalg.norm(direction)
+            if direction_norm <= eps:
+                return None
+            dots = directions @ (direction / direction_norm)
+            valid &= dots > cos_threshold
+            if not np.any(valid):
+                return None
+
+            candidate_ids = neighbors[valid]
+            candidate_dots = dots[valid]
+            # Highest alignment wins; the vertex ID is a stable tie-breaker.
+            return int(candidate_ids[np.lexsort((candidate_ids, -candidate_dots))[0]])
+
         while available_edges:
-            selected_vertex = random.choice(list(available_edges))
+            # V is lexicographically sorted by np.unique, so this is stable.
+            selected_vertex = min(available_edges)
             v_set = [selected_vertex]
 
             if adj_list[selected_vertex]:
-                neighbor = next(iter(adj_list[selected_vertex]))
+                neighbor = min(adj_list[selected_vertex])
                 v_set.append(neighbor)
-                adj_list[selected_vertex].remove(neighbor)
-                adj_list[neighbor].remove(selected_vertex)
-                for vid in [selected_vertex, neighbor]:
-                    num_edges_V[vid] -= 1
-                    if num_edges_V[vid] == 0:
-                        available_edges.discard(vid)
+                remove_edge(selected_vertex, neighbor)
 
             while True:
                 find_neighbor = False
                 start, end = v_set[0], v_set[-1]
 
-                neighbors = list(adj_list[start])
-                if neighbors:
-                    dirs = V[start] - V[neighbors]
-                    dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
-                    start_dir = V[v_set[1]] - V[start]
-                    start_dir /= np.linalg.norm(start_dir)
-                    dots = dirs @ start_dir
-                    idx = np.where(dots > cos_threshold)[0]
-                    if idx.size > 0:
-                        n = neighbors[idx[0]]
-                        v_set.insert(0, n)
-                        adj_list[start].remove(n)
-                        adj_list[n].remove(start)
-                        for vid in [start, n]:
-                            num_edges_V[vid] -= 1
-                            if num_edges_V[vid] == 0:
-                                available_edges.discard(vid)
-                        find_neighbor = True
+                n = choose_neighbor(start, V[start] - V[v_set[1]])
+                if n is not None:
+                    v_set.insert(0, n)
+                    remove_edge(start, n)
+                    find_neighbor = True
 
-                neighbors = list(adj_list[end])
-                if neighbors:
-                    dirs = V[neighbors] - V[end]
-                    dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
-                    end_dir = V[end] - V[v_set[-2]]
-                    end_dir /= np.linalg.norm(end_dir)
-                    dots = dirs @ end_dir
-                    idx = np.where(dots > cos_threshold)[0]
-                    if idx.size > 0:
-                        n = neighbors[idx[0]]
-                        v_set.append(n)
-                        adj_list[end].remove(n)
-                        adj_list[n].remove(end)
-                        for vid in [end, n]:
-                            num_edges_V[vid] -= 1
-                            if num_edges_V[vid] == 0:
-                                available_edges.discard(vid)
-                        find_neighbor = True
+                n = choose_neighbor(end, V[end] - V[v_set[-2]])
+                if n is not None:
+                    v_set.append(n)
+                    remove_edge(end, n)
+                    find_neighbor = True
 
                 if not find_neighbor:
                     break
 
             while len(v_set) >= self.cfg.min_points:
                 for i in range(len(v_set) - 1):
-                    max_vi, max_dist = compute_max_distance_to_line_vec(V, v_set[i:])
-                    if max_dist < 0.05:
+                    _, max_dist = compute_max_distance_to_line_vec(V, v_set[i:])
+                    if max_dist < line_distance_threshold:
                         break
                 if len(v_set) - i >= self.cfg.min_points:
                     processed_edge_coords.append(np.concatenate([V[v_set[i]], V[v_set[-1]]]))
                 v_set = v_set[: i + 1]
 
-        return np.array(processed_edge_coords, dtype=np.float32)
+        return np.asarray(processed_edge_coords, dtype=np.float32).reshape(-1, 6)
 
 
 class RayEdgeCylinder(VirtualObstacleBase):
