@@ -9,10 +9,10 @@ from robolab.tasks.manager_based.ufo.mdp.pufo_reset import sample_reset_states
 from robolab.tasks.manager_based.ufo.pufo_terrain_importer import box_bounds
 from robolab.tasks.manager_based.ufo.pufo_env_cfg import RP1PUFOEnvCfg, RP1PUFOEvalEnvCfg
 from robolab.tasks.manager_based.ufo.agents.rp1_pufo_agent_cfg import RP1PUFORunnerCfg
-from robolab.tasks.manager_based.ufo.lafan_selected import H200_MOTION_NAMES
+from robolab.tasks.manager_based.ufo.lafan_selected import MOTION_NAMES
 
 
-class TestH200Alignment(unittest.TestCase):
+class TestMotionAlignment(unittest.TestCase):
     def test_motion_reset_is_fresh_and_preserves_height_and_velocities(self):
         n = 512
         ids = torch.arange(n)
@@ -47,8 +47,9 @@ class TestH200Alignment(unittest.TestCase):
 
     def test_profile_preserves_control_and_selects_h200_distribution(self):
         cfg, agent = RP1PUFOEnvCfg(), RP1PUFORunnerCfg()
-        self.assertEqual(len(H200_MOTION_NAMES), 40)
-        self.assertEqual(cfg.commands.motion.motion_names, H200_MOTION_NAMES)
+        self.assertEqual(len(MOTION_NAMES), 40)
+        self.assertEqual(cfg.commands.motion.motion_names, MOTION_NAMES)
+        self.assertEqual(RP1PUFOEnvCfg().commands.motion.motion_names, MOTION_NAMES)
         self.assertEqual(cfg.events.reset_root_state.params["lie_down_probability"], .3)
         self.assertEqual(RP1PUFOEvalEnvCfg().events.reset_root_state.params["lie_down_probability"], 0.)
         self.assertIsNone(getattr(cfg.events, "reset_joint_state", None))

@@ -112,8 +112,17 @@ class FbCprAuxAgent:
                 **model_kwargs(cfg.actor),
             )
         else:
+            estimate_velocity = bool(getattr(cfg, "estimated_velocity_enabled", False))
+            estimator_cfg = (
+                model_kwargs(getattr(cfg, "velocity_estimator"))
+                if estimate_velocity and hasattr(cfg, "velocity_estimator")
+                else None
+            )
             self._actor = ResidualActor(
                 self.actor_obs_dim, z_dim, action_dim,
+                estimator_cfg=estimator_cfg,
+                estimate_velocity=estimate_velocity,
+                velocity_dim=self.obs_dims.get("velocity_target_yaw", 3),
                 **model_kwargs(cfg.actor),
             )
         self._backward_map = BackwardMap(
@@ -123,7 +132,10 @@ class FbCprAuxAgent:
             **model_kwargs(cfg.backward_map),
         )
         if inference_only:
-            context_keys = ("heading", "velocity_command", "velocity_target_yaw") if self.visual_enabled else ()
+            context_keys = (
+                ("heading", "velocity_command", "velocity_target_yaw")
+                if "heading" in self.obs_dims else ("velocity_target_yaw",)
+            )
             self._obs_normalizer = ObsNormalizer(self.obs_dims, momentum=0.01, identity_keys=context_keys)
             for module in (self._actor, self._backward_map, self._obs_normalizer):
                 module.to(device)
@@ -178,7 +190,10 @@ class FbCprAuxAgent:
             self._target_critic = copy.deepcopy(self._critic)
             self._target_aux_critic = copy.deepcopy(self._aux_critic)
 
-        context_keys = ("heading", "velocity_command", "velocity_target_yaw") if self.visual_enabled else ()
+        context_keys = (
+            ("heading", "velocity_command", "velocity_target_yaw")
+            if "heading" in self.obs_dims else ("velocity_target_yaw",)
+        )
         self._obs_normalizer = ObsNormalizer(self.obs_dims, momentum=0.01, identity_keys=context_keys)
         self._aux_reward_normalizer = EMA(tau=0.99, translate=False, scale=True)
 

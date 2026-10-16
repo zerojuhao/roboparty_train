@@ -62,19 +62,27 @@ UFO_POLICY_SLICES = {
 UFO_HISTORY_LENGTHS = dict.fromkeys(HISTORY_KEYS, 4)
 
 
-def ufo_obs_dims(critic_dim: int, history_lengths: dict[str, int] | None = None) -> dict[str, int]:
+def ufo_obs_dims(
+    critic_dim: int,
+    history_lengths: dict[str, int] | None = None,
+    context_enabled: bool = False,
+) -> dict[str, int]:
     joint_dim = UFO_POLICY_SLICES["joint_pos"].stop - UFO_POLICY_SLICES["joint_pos"].start
     history_lengths = history_lengths or UFO_HISTORY_LENGTHS
     history_dim = sum(
         (part.stop - part.start) * history_lengths[name]
         for name, part in UFO_POLICY_SLICES.items()
     )
-    return {
+    dims = {
         "state": 2 * joint_dim + 6,
         "privileged_state": critic_dim,
         "last_action": joint_dim,
         "history_actor": history_dim,
+        "velocity_target_yaw": 3,
     }
+    if context_enabled:
+        dims.update({"heading": 2, "velocity_command": 3})
+    return dims
 
 
 def make_ufo_history(num_envs: int, device, history_lengths=None) -> "HistoryHandler":
@@ -109,6 +117,7 @@ def ufo_obs_dict(obs_buf: dict, history: "HistoryHandler", with_history: bool = 
         ),
         "last_action": values["actions"],
         "privileged_state": obs_buf["critic"],
+        "velocity_target_yaw": obs_buf["velocity_target_yaw"],
     }
     if with_history:
         obs["history_actor"] = history.flat()
@@ -285,6 +294,10 @@ class FbCprRunner:
             raise ValueError("max_episode_length_s must be finite and positive.")
 
         self.visual_enabled = bool(getattr(train_cfg, "visual_enabled", False))
+        self.context_enabled = self.visual_enabled or bool(
+            getattr(train_cfg, "heading_critic_enabled", False)
+            or getattr(train_cfg, "velocity_critic_enabled", False)
+        )
         if self.visual_enabled:
             self._mgr_env._pufo_velocity_error_scale_mps = float(
                 getattr(train_cfg, "velocity_error_scale_mps", 0.5)
@@ -295,10 +308,10 @@ class FbCprRunner:
         obs_dims = (
             pufo_obs_dims(critic_dim, terrain_priv_dim, history_lengths)
             if self.visual_enabled
-            else ufo_obs_dims(critic_dim)
+            else ufo_obs_dims(critic_dim, context_enabled=self.context_enabled)
         )
         self.obs_dims = obs_dims
-        agent_class = PufoAgent if self.visual_enabled else FbCprAuxAgent
+        agent_class = PufoAgent if self.context_enabled else FbCprAuxAgent
         self.agent = agent_class(
             obs_dims, mgr.action_manager.total_action_dim, train_cfg,
             device=self.device, inference_only=inference_only,
@@ -453,7 +466,7 @@ class FbCprRunner:
             base_ang_vel_scale=base_ang_vel_scale,
         )
         expert_keys = ("observation",)
-        if self.visual_enabled:
+        if self.context_enabled:
             expert_keys += (
                 "heading_forward_xy",
                 "reference_velocity_world_xy",
@@ -661,6 +674,9 @@ class FbCprRunner:
         return metrics
 
     def _learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
+        # Lightweight runner test doubles from older integrations do not run
+        # the full constructor; preserve their UFO-only behavior.
+        self.context_enabled = getattr(self, "context_enabled", self.visual_enabled)
         if not self._expert_built:
             self._build_expert_buffer()
 
@@ -731,7 +747,7 @@ class FbCprRunner:
             current_obs_values = self._current_obs_values(obs_buf)
             step_count = self._mgr_env.episode_length_buf.clone()
             current_heading = None
-            if self.visual_enabled:
+            if self.context_enabled:
                 current_heading, _ = self._root_heading_velocity()
                 self._context = self.agent.advance_rollout_context(
                     self._context, step_count, current_heading, self.replay
@@ -792,7 +808,7 @@ class FbCprRunner:
                 "rollout/termination_fraction": action_terminated.float().mean(),
             }
             aux = {name: value.to(self.device) for name, value in self._evaluate_reward_terms().items()}
-            if self.visual_enabled:
+            if self.context_enabled:
                 next_heading, actual_velocity = self._root_heading_velocity()
                 if bool(dones.any()):
                     kinematics = step_infos["final_obs"]["transition_kinematics"].to(self.device)
@@ -843,7 +859,7 @@ class FbCprRunner:
             final_observation = None
             if bool(dones.any()):
                 final_observation = self._obs_dict(step_infos["final_obs"])
-                if self.visual_enabled:
+                if self.context_enabled:
                     final_observation.update({
                         "heading": aux["heading_next"], "velocity_command": aux["velocity_next"],
                     })
@@ -1210,7 +1226,7 @@ class FbCprRunner:
             # device->host copies per clip per step).
             buf_state = torch.empty(max_ctx_chunk, len_chunk, num_dofs, device=self.device)
             buf_joint = torch.empty(max_ctx_chunk, len_chunk, initial_joint.shape[-1], device=self.device)
-            measure_velocity = self.visual_enabled and self.agent._actor.estimate_velocity
+            measure_velocity = bool(getattr(self.agent._actor, "estimate_velocity", False))
             buf_velocity_error = (torch.empty(max_ctx_chunk, len_chunk, 3, device=self.device)
                                   if measure_velocity else None)
             init_state_cpu = [_joint_state_observation(initial_state[c_i], num_dofs).cpu() for c_i in range(len_chunk)]
@@ -1225,7 +1241,7 @@ class FbCprRunner:
             for step in range(max_ctx_chunk):
                 obs_dict = self._obs_dict(obs_buf)
                 current_values = self._current_obs_values(obs_buf)
-                if self.visual_enabled:
+                if self.context_enabled:
                     current_heading, _ = self._root_heading_velocity()
                     target_heading = heading_padded[:, step]
                     target_velocity = velocity_padded[:, step]

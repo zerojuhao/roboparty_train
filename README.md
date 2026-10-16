@@ -98,6 +98,8 @@ python -m torch.distributed.run --standalone --nproc_per_node=8 \
 
 Resume compatible runs with `--resume --load_run RUN --checkpoint model_N.pt`. The URDF migration changes AMP discriminator inputs, including upper-body inputs. Legacy AMP/Parkour/SSR/BeyondMimic checkpoints are rejected until explicitly migrated; equal tensor dimensions do not imply compatible joint semantics. Start a new run for the new convention. Running processes are not migrated automatically.
 
+RP1 UFO and PUFO use the same selected 40-clip LAFAN motion subset. UFO remains a flat, non-visual task, but now uses the shared terrain-contact reward terms, proprioceptive yaw-frame velocity estimator, and heading/velocity context critics; PUFO adds the depth and terrain branches.
+
 ## Evaluation and Export
 
 Use absolute checkpoint paths to avoid ambiguity between log roots:

@@ -47,7 +47,7 @@ from .pufo_terrain_cfg import PUFO_TERRAIN_CFG, PUFO_TILE_SIZE
 from .pufo_terrain_importer import PUFOTerrainImporter
 from robolab.sensors.terrain_contact import TerrainContactSensorCfg
 from .pufo_physics import PUFOMJWarpSolverCfg
-from .lafan_selected import H200_MOTION_NAMES
+from .lafan_selected import MOTION_NAMES
 from .mdp.pufo_reset import reset_pufo_from_motion
 from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg as FiledTerrainImporterCfg
 
@@ -148,7 +148,7 @@ class PUFOSceneCfg(InteractiveSceneCfg):
 @configclass
 class PUFOCommandsCfg:
     motion = mdp.UFOMotionCommandCfg(
-        asset_name="robot", manifest_path=MOTION_MANIFEST, motion_names=H200_MOTION_NAMES
+        asset_name="robot", manifest_path=MOTION_MANIFEST, motion_names=MOTION_NAMES
     )
 
 

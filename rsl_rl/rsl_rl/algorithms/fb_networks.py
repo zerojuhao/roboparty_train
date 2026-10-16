@@ -306,23 +306,43 @@ class SharedCriticMap(nn.Module):
 class ResidualActor(nn.Module):
     def __init__(
         self, obs_dim, z_dim, action_dim, *, hidden_dim, hidden_layers, embedding_layers, activation, layer_norm,
+        estimator_cfg=None, estimate_velocity=False, velocity_dim=3,
     ):
         super().__init__()
         if hidden_layers < 0:
             raise ValueError("hidden_layers must be non-negative")
-        self.embed_z = residual_embedding(obs_dim + z_dim, hidden_dim, embedding_layers, activation, layer_norm)
-        self.embed_s = residual_embedding(obs_dim, hidden_dim, embedding_layers, activation, layer_norm)
+        self.estimate_velocity = bool(estimate_velocity)
+        if self.estimate_velocity:
+            if estimator_cfg is None:
+                raise ValueError("estimate_velocity requires estimator_cfg")
+            self.velocity_estimator = mlp(obs_dim, velocity_dim, **estimator_cfg)
+            policy_obs_dim = obs_dim + velocity_dim
+        else:
+            self.velocity_estimator = None
+            policy_obs_dim = obs_dim
+        self.embed_z = residual_embedding(policy_obs_dim + z_dim, hidden_dim, embedding_layers, activation, layer_norm)
+        self.embed_s = residual_embedding(policy_obs_dim, hidden_dim, embedding_layers, activation, layer_norm)
         seq = [ResidualBlock(hidden_dim, activation, layer_norm) for _ in range(hidden_layers)]
         seq += [Block(hidden_dim, action_dim, None, layer_norm)]
         self.policy = nn.Sequential(*seq)
 
     def forward(self, obs, z, std):
-        z_embedding = self.embed_z(torch.cat([obs, z], dim=-1))
-        s_embedding = self.embed_s(obs)
+        velocity_estimate = None
+        policy_obs = obs
+        if self.estimate_velocity:
+            velocity_estimate = self.velocity_estimator(obs)
+            # Keep the auxiliary target from changing the policy gradient path,
+            # matching VisualResidualActor's deployment/training contract.
+            policy_obs = torch.cat([obs, velocity_estimate.detach()], dim=-1)
+        z_embedding = self.embed_z(torch.cat([policy_obs, z], dim=-1))
+        s_embedding = self.embed_s(policy_obs)
         embedding = torch.cat([s_embedding, z_embedding], dim=-1)
         mu = torch.tanh(self.policy(embedding))
         std = torch.ones_like(mu) * std
-        return TruncatedNormal(mu, std)
+        dist = TruncatedNormal(mu, std)
+        if velocity_estimate is not None:
+            dist.velocity_estimate = velocity_estimate
+        return dist
 
 
 class _FixedAdaptiveAvgPool2d(nn.Module):

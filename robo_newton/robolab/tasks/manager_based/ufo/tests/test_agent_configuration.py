@@ -56,14 +56,18 @@ class TestAgentConfiguration(unittest.TestCase):
         cfg.use_fused_adam = cfg.use_bf16_amp = False
         cfg.torch_compile_mode = None
         cfg.batch_size = cfg.z_buffer_size = 8
-        dims = dict(state=4, privileged_state=6, last_action=2, history_actor=3)
+        dims = dict(
+            state=4, privileged_state=6, last_action=2, history_actor=3,
+            velocity_target_yaw=3, heading=2, velocity_command=3,
+        )
+        cfg.estimated_velocity_enabled = estimate
         if visual:
             if shared_context is not None:
                 cfg.shared_context_value_net = shared_context
             cfg.heading_critic_enabled, cfg.velocity_critic_enabled = context_enabled
             if depth_shape is not None:
                 cfg.depth_encoder.input_shape = depth_shape
-            dims.update(heading=2, velocity_command=3, velocity_target_yaw=3, terrain_priv=5)
+            dims.update(terrain_priv=5)
             cfg.heading_critic.hidden_dim, cfg.heading_critic.hidden_layers = 18, 1
             cfg.heading_critic.embedding_layers = 2
             cfg.velocity_critic.hidden_dim, cfg.velocity_critic.hidden_layers = 22, 3
@@ -84,6 +88,15 @@ class TestAgentConfiguration(unittest.TestCase):
         serialized = SimpleNamespace(**cfg.to_dict()) if serialize else cfg
         agent_cls = PufoAgent if visual else FbCprAuxAgent
         return agent_cls(dims, 2, serialized, device=device, inference_only=inference_only)
+
+    def test_ufo_enables_proprioceptive_velocity_estimator(self):
+        cfg = RP1UFORunnerCfg()
+        self.assertTrue(cfg.estimated_velocity_enabled)
+        agent = self.make_agent(visual=False)
+        self.assertTrue(agent._actor.estimate_velocity)
+        obs = {key: torch.randn(4, size) for key, size in agent.obs_dims.items()}
+        dist = agent._actor_forward(agent._norm_parts(obs), torch.randn(4, agent.z_dim))
+        self.assertEqual(tuple(dist.velocity_estimate.shape), (4, 3))
 
     def test_tracking_inference_matches_full_agent_without_training_modules(self):
         for visual in (False, True):

@@ -1,9 +1,9 @@
-"""Motion identities from the H200 reference run's 902-clip evaluation list.
+"""The shared 40-clip motion subset used by UFO and PUFO.
 
 Filtering changes the training distribution without altering the source dataset.
 """
 
-H200_MOTION_NAMES = (
+MOTION_NAMES = (
     "dance1_subject1", "dance1_subject2", "dance1_subject3",
     "dance2_subject1", "dance2_subject2", "dance2_subject3", "dance2_subject4", "dance2_subject5",
     "fallAndGetUp1_subject1", "fallAndGetUp1_subject4", "fallAndGetUp1_subject5",

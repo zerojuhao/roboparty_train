@@ -41,6 +41,25 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     resume_replay_warmup_steps: int = 10_240
     seed: int = 52
 
+    # Estimate yaw-frame root velocity from the proprioceptive history.  UFO
+    # has no depth encoder, but uses the same supervised target as PUFO.
+    estimated_velocity_enabled: bool = True
+    velocity_estimator = FbCprMlpModelCfg(
+        hidden_dims=[256, 128],
+        activation="elu",
+        first_activation="elu",
+        layer_norm=False,
+    )
+    velocity_estimator_loss_coef: float = 1.0
+    actor_obs_keys: tuple[str, ...] = (
+        "state", "last_action", "history_actor", "heading", "velocity_command",
+    )
+    privileged_obs_keys: tuple[str, ...] = ("state", "privileged_state")
+    full_obs_keys: tuple[str, ...] = (
+        "state", "privileged_state", "last_action", "history_actor",
+        "heading", "velocity_command", "velocity_target_yaw",
+    )
+
     z_dim: int = 256
     norm_z: bool = True
     actor = FbCprResidualModelCfg(
@@ -90,6 +109,30 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     # Both losses are optimized together in one backward/optimizer step.
     # Match H200 FB-CPR: discriminator and auxiliary critics have independent trunks.
     shared_value_net: bool = False
+    heading_critic_enabled: bool = True
+    velocity_critic_enabled: bool = True
+    shared_context_value_net: bool = True
+    heading_critic = FbCprResidualModelCfg(
+        hidden_dim=1024,
+        hidden_layers=3,
+        embedding_layers=3,
+        activation="mish",
+        layer_norm=True,
+    )
+    velocity_critic = FbCprResidualModelCfg(
+        hidden_dim=1024,
+        hidden_layers=3,
+        embedding_layers=3,
+        activation="mish",
+        layer_norm=True,
+    )
+    lr_heading_critic: float = 3e-4
+    lr_velocity_critic: float = 3e-4
+    heading_critic_pessimism_penalty: float = 0.5
+    velocity_critic_pessimism_penalty: float = 0.5
+    reg_coeff_heading: float = 0.01
+    reg_coeff_velocity: float = 0.01
+    velocity_error_scale_mps: float = 0.5
     # Keep two independently parameterized members for pessimistic estimates.
     critic_ensemble_members: int = 2
     forward_ensemble_members: int = 2

@@ -131,8 +131,10 @@ class ContactAlignmentTests(unittest.TestCase):
             for axis in ("pitch", "roll", "yaw")
         }
         self.assertEqual(set(names), expected)
-        self.assertFalse(hasattr(UFOEnvCfg().rewards, "penalty_body_contact"))
-        self.assertFalse(hasattr(UFOEnvCfg().rewards, "penalty_body_impact"))
+        ufo_cfg = UFOEnvCfg()
+        self.assertFalse(hasattr(ufo_cfg.rewards, "penalty_body_contact"))
+        self.assertIs(ufo_cfg.rewards.penalty_body_impact.func, pufo_penalty_body_impact)
+        self.assertIsInstance(ufo_cfg.scene.contact_forces, TerrainContactSensorCfg)
         self.assertFalse(hasattr(cfg.rewards, "penalty_body_contact"))
         self.assertEqual(RP1PUFORunnerCfg().training_contract, "pufo_h200_alignment_v7_target_clip")
 

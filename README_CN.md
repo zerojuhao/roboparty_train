@@ -100,6 +100,8 @@ python -m torch.distributed.run --standalone --nproc_per_node=8 \
 
 兼容的训练使用 `--resume --load_run RUN --checkpoint model_N.pt` 续训。URDF 顺序迁移会改变 AMP 判别器输入，包括上半身输入。旧 AMP/Parkour/SSR/BeyondMimic checkpoint 在显式迁移前会被 runner 拒绝加载，不能仅凭张量维度相同就直接续训。新规则应从新训练开始；已运行进程不会自动迁移。
 
+RP1 UFO 与 PUFO 共用筛选后的 40 条 LAFAN 动作。UFO 仍是无视觉的平面任务，但现在使用统一的地形接触奖励、本体偏航坐标系速度估计器以及 heading/velocity context critic；PUFO 在此基础上增加深度图和地形分支。
+
 ## 测试与导出
 
 使用绝对 checkpoint 路径，避免日志根目录歧义：

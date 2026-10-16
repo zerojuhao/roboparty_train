@@ -4,6 +4,9 @@ Observation groups (consumed by the FbCpr runner, which assembles the UFO
 dict-obs `state / last_action / history_actor / privileged_state`):
   - policy:  base_ang_vel(3) + projected_gravity(3) + joint_pos(24) + joint_vel(24) + last_action(24) = 78
   - critic:  local_self_obs (373), computed with the vendored UFO observation math
+  - velocity_target_yaw: current root velocity in the yaw frame for the
+    proprioceptive velocity estimator
+  - transition_kinematics: terminal-safe heading and velocity metadata
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.sensors import ContactSensorCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils.configclass import configclass
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
@@ -31,8 +33,10 @@ from isaaclab_tasks.utils import PresetCfg
 
 from robolab.assets import ISAAC_DATA_DIR
 from robolab.assets.robots.roboparty import RP1_UFO_CFG
+from robolab.sensors.terrain_contact import TerrainContactSensorCfg
 
 from . import mdp
+from .lafan_selected import MOTION_NAMES
 
 # LAFAN motions shared with the RP1 WBC tracking task.
 MOTION_MANIFEST = os.environ.get(
@@ -56,9 +60,10 @@ class UFOSceneCfg(InteractiveSceneCfg):
     )
     robot = RP1_UFO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     light = AssetBaseCfg(prim_path="/World/light", spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0))
-    contact_forces = ContactSensorCfg(
+    contact_forces = TerrainContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*",
-        history_length=mdp.rewards.UNDESIRED_CONTACT_HISTORY_WINDOW,
+        history_length=4,
+        track_friction_forces=True,
         track_air_time=False,
     )
 
@@ -68,12 +73,20 @@ class UFOCommandsCfg:
     motion = mdp.UFOMotionCommandCfg(
         asset_name="robot",
         manifest_path=MOTION_MANIFEST,
+        motion_names=MOTION_NAMES,
     )
 
 
 @configclass
 class UFOActionsCfg:
-    joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], scale=0.4, use_default_offset=True)
+    joint_pos = mdp.JointPositionActionCfg(
+        class_type=getattr(
+            getattr(mdp, "rewards", None),
+            "JointLimitedBodyImpactPositionAction",
+            mdp.JointPositionActionCfg,
+        ),
+        asset_name="robot", joint_names=[".*"], scale=0.4, use_default_offset=True,
+    )
 
 
 @configclass
@@ -99,6 +112,26 @@ class UFOObservationsCfg:
 
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
+
+    @configclass
+    class VelocityTargetCfg(ObsGroup):
+        velocity_target_yaw = ObsTerm(func=mdp.pufo_velocity_target_yaw)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    velocity_target_yaw: VelocityTargetCfg = VelocityTargetCfg()
+
+    @configclass
+    class TransitionKinematicsCfg(ObsGroup):
+        transition_kinematics = ObsTerm(func=mdp.pufo_transition_kinematics)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    transition_kinematics: TransitionKinematicsCfg = TransitionKinematicsCfg()
 
 
 @configclass
@@ -177,16 +210,52 @@ class UFOEventCfg:
 class UFORewardsCfg:
     penalty_action_rate = RewTerm(
         func=mdp.rewards.penalty_action_rate,
-        weight=-0.1,
+        weight=-0.2,
+    )
+    sound_suppression_acc_per_foot = RewTerm(
+        func=mdp.rewards.sound_suppression_acc_per_foot,
+        weight=-5e-3,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
+    )
+    joint_acc_l2 = RewTerm(
+        func=mdp.rewards.joint_acc_l2,
+        weight=-1e-6,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
+    )
+    joint_vel_l2 = RewTerm(
+        func=mdp.rewards.joint_vel_l2,
+        weight=-1e-3,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
     limits_dof_pos = RewTerm(
         func=mdp.rewards.limits_dof_pos,
         weight=-10.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
+    penalty_body_impact = RewTerm(
+        func=mdp.rewards.pufo_penalty_body_impact,
+        weight=-1.0,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                body_names=["waist_yaw_link", ".*_shoulder_.*_link", ".*_hip_.*_link"],
+                preserve_order=True,
+            ),
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=["waist_yaw_link", ".*_shoulder_.*_link", ".*_hip_.*_link"],
+                preserve_order=True,
+            ),
+            "force_threshold_ratio": 0.05,
+            "smooth_l1_beta": 0.25,
+            "impact_velocity_scale": 1.0,
+            "impact_velocity_cap": 2.0,
+            "severity_cap": 4.0,
+        },
+    )
     penalty_slippage = RewTerm(
-        func=mdp.rewards.penalty_slippage,
-        weight=-2.0,
+        func=mdp.rewards.pufo_penalty_slippage,
+        weight=-4.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
@@ -198,7 +267,7 @@ class UFORewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*ankle_roll.*")},
     )
     feet_stumble = RewTerm(
-        func=mdp.rewards.feet_stumble,
+        func=mdp.rewards.pufo_feet_stumble,
         weight=-2.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link")},
     )
