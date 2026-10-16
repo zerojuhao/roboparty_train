@@ -34,4 +34,5 @@ import os
 # Conveniences to other module directories via project-relative paths.
 ISAAC_ASSET_DIR = os.path.abspath(os.path.dirname(__file__))
 ROBO_NEWTON_DIR = os.path.abspath(os.path.join(ISAAC_ASSET_DIR, "../.."))
-ISAAC_DATA_DIR = os.path.join(ROBO_NEWTON_DIR, "data")
+# Keep data next to ``assets`` inside the package so a checkout is self-contained.
+ISAAC_DATA_DIR = os.path.join(os.path.dirname(ISAAC_ASSET_DIR), "data")

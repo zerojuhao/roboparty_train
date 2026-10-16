@@ -46,6 +46,7 @@ import isaaclab.terrains as terrain_gen
 
 from robolab.assets.robots.roboparty import RPO_CFG
 from robolab import ROBOLAB_ROOT_DIR
+from robolab.utils.data_paths import motion_data_dir
 
 # The motion loader selects and reorders NPZ key-body tracks by these names.
 KEY_BODY_NAMES = [
@@ -172,9 +173,7 @@ class RPOAmpEnvCfg(AmpEnvCfg):
         # ------------------------------------------------------
         # motion data
         # ------------------------------------------------------
-        self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rpo"
-        )
+        self.motion_data.motion_dataset.motion_data_dir = motion_data_dir("rpo")
         self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights={
             

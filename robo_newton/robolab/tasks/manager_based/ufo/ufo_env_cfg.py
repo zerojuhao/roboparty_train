@@ -31,7 +31,7 @@ from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from robolab.assets import ISAAC_DATA_DIR
+from robolab.utils.data_paths import motion_file
 from robolab.assets.robots.roboparty import RP1_UFO_CFG
 from robolab.sensors.terrain_contact import TerrainContactSensorCfg
 
@@ -41,7 +41,7 @@ from .lafan_selected import MOTION_NAMES
 # LAFAN motions shared with the RP1 WBC tracking task.
 MOTION_MANIFEST = os.environ.get(
     "UFO_MOTION_MANIFEST",
-    os.path.join(ISAAC_DATA_DIR, "motions", "newton", "rp1_lafan", "manifest.json"),
+    motion_file("rp1_lafan", "manifest.json"),
 )
 
 

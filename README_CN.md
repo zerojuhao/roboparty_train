@@ -11,10 +11,10 @@ robo_newton/robolab/       机器人配置、任务、传感器和工具函数
 robo_newton/scripts/       训练、测试、导出和诊断工具
 rsl_rl/rsl_rl/             修改后的算法和 runner
 rsl_rl/tests/              训练库测试
-robo_newton/data/          本地机器人资产与动作数据，不纳入 Git
+robo_newton/robolab/data/  本地机器人资产与统一动作数据
 ```
 
-源码目录由本仓库直接管理，不是 Git submodule。Isaac Lab 单独安装；`IsaacLab/`、`IsaacLab-3.0/`、`project_ops/`、日志、checkpoint 和本地运行数据均不上传。当前仓库尚未包含动作数据的发布副本。
+源码目录由本仓库直接管理，不是 Git submodule。Isaac Lab 单独安装；`IsaacLab/`、`IsaacLab-3.0/`、`project_ops/`、日志、checkpoint 和本地数据包不上传。机器人资产与统一后的训练动作统一放在每份 checkout 的 `robo_newton/robolab/data/` 下。
 
 ## 环境与安装
 
@@ -37,10 +37,10 @@ export ROBO_TRAIN_LOG_ROOT="$PWD/logs/rsl_rl"
 
 ## 统一数据集
 
-`robo_newton/data` 可以链接到本地数据盘，默认目录为：
+`robo_newton/robolab/data` 是 checkout 内的数据根目录，已加入 Git 忽略规则。训练前请将统一 NPZ 数据包和机器人资源准备到这里。数据搜索顺序为 `--data_root`、`ROBO_TRAIN_DATA_ROOT`、本地 `robo_newton/robolab/data`。
 
 ```text
-robo_newton/data/
+robo_newton/robolab/data/
   robots/roboparty/rp1.3/  RP1 URDF、MJCF、网格
   robots/roboparty/rpo/    RPO URDF、MJCF、网格
   motions/newton/
@@ -67,7 +67,7 @@ UFO/PUFO 默认读取 `motions/newton/rp1_lafan/manifest.json`，可用 `UFO_MOT
 
 请使用外部工具完成动作重定向，并在训练前准备符合上述规范的 NPZ 数据。历史重定向、CSV/PKL 处理和一次性迁移脚本已移除。训练运行时的数据校验与按名称映射仍由 [motion_npz.py](robo_newton/robolab/utils/motion_npz.py) 提供；该模块不会重新重定向、补全缺失轨迹或猜测来源数据的排列约定。
 
-当前精简后的数据集共 125 段动作，总计约 752 MiB：
+当前精简后的本地数据集共 125 段动作，总计约 752 MiB：
 
 | 目录 | 动作数 | NPZ 体积 |
 | --- | ---: | ---: |
@@ -76,16 +76,16 @@ UFO/PUFO 默认读取 `motions/newton/rp1_lafan/manifest.json`，可用 `UFO_MOT
 | `rp1_upper_run_bounded` | 1 | 小于 0.1 MiB |
 | `rp1_lafan/npz` | 55 | 743.5 MiB |
 
-这里统计的是本地训练数据包，不代表源码仓库已经附带这些文件。训练不需要原始动作、中间 PKL 或重复备份；NPZ 旁仍需保留 LAFAN 清单及相关来源记录。机器人资产另行准备。
+这些文件应放在 `robo_newton/robolab/data/motions/newton/`。训练不需要原始动作、中间 PKL 或重复备份；NPZ 旁保留 LAFAN 清单及相关来源记录。机器人资产放在同级的 `robots/` 目录。
 
 动作数据不自动适用源码许可证。[Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) 使用 [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) 许可。重定向不会消除上游许可限制，发布修改后的动作数据前需确认再分发权利；其他目录中的 LAFAN 衍生片段同样需要确认。
 
 ## 训练
 
-从仓库根目录运行，主要训练入口是 `robo_newton/scripts/rsl_rl/train.py`。常用任务：`RP1-AMP`、`RP1-AMP-Path`、`RP1-Parkour`、`RP1-SSR`、`RP1-UFO`、`RP1-PUFO`、`RPO-AMP`、`RPO-Parkour`。
+从任意工作目录都可以使用统一入口 `robo_newton/scripts/train_newton.py`；它会转发到 RSL-RL 的 `train.py`，并自动设置项目路径和数据路径。常用任务：`RP1-AMP`、`RP1-AMP-Path`、`RP1-Parkour`、`RP1-SSR`、`RP1-UFO`、`RP1-PUFO`、`RPO-AMP`、`RPO-Parkour`。
 
 ```bash
-python robo_newton/scripts/rsl_rl/train.py \
+python robo_newton/scripts/train_newton.py --rl_library rsl_rl \
   --task RP1-AMP-Path --num_envs 1024 --device cuda:0 \
   --visualizer none --logger tensorboard
 ```
@@ -94,7 +94,7 @@ python robo_newton/scripts/rsl_rl/train.py \
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=8 \
-  robo_newton/scripts/rsl_rl/train.py --task RP1-PUFO \
+  robo_newton/scripts/train_newton.py --rl_library rsl_rl --task RP1-PUFO \
   --num_envs 1024 --device cuda --distributed --visualizer none --logger tensorboard
 ```
 
@@ -121,7 +121,7 @@ python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
 
 PUFO 导出还需要对应训练配置和动作数据。MuJoCo 验证脚本位于 `robo_newton/scripts/mujoco/`，应选择与策略任务及部署接口匹配的入口。
 
-PUFO sim2sim 资源位于 `robo_newton/data/robots/roboparty/rp1.3/mjcf/`：`rp1_simple_terrain/` 保存地形，`robot_24dof_newton_physics.json` 保存非随机化模型编译后的碰撞、接触和求解器参数。公共工具 `robolab.utils.mujoco_physics` 不加载 checkpoint；电机限幅由 URDF 和传入的执行器配置解析。其他任务可使用同一工具加载自己的物理资产，不会自动套用 PUFO 参数。`sim2sim_rp1_pufo.py --physics-asset PATH` 可选择其他资产。可从非随机化、单机器人加地面的 Newton 模型执行 `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` 重新生成。这些文件属于本地数据，需随机器人资产分发。
+PUFO sim2sim 资源位于 `robo_newton/robolab/data/robots/roboparty/rp1.3/mjcf/`：`rp1_simple_terrain/` 保存地形，`robot_24dof_newton_physics.json` 保存非随机化模型编译后的碰撞、接触和求解器参数。公共工具 `robolab.utils.mujoco_physics` 不加载 checkpoint；电机限幅由 URDF 和传入的执行器配置解析。其他任务可使用同一工具加载自己的物理资产，不会自动套用 PUFO 参数。`sim2sim_rp1_pufo.py --physics-asset PATH` 可选择其他资产。可从非随机化、单机器人加地面的 Newton 模型执行 `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` 重新生成。这些文件属于本地数据，需随机器人资产分发。
 
 地形资产 `rp1_simple_terrain/rp1_simple_terrain.xml` 与 `rp1_simple_terrain/meta.json` 是预生成的，旧的服务器专用地形导出脚本已移除。地形元数据提供重置位置和地形描述，`robot_24dof_newton_physics.json` 提供 Newton 的碰撞、接触和求解器参数；两个 JSON 都是 PUFO sim2sim 所需文件，使用缩进格式保存。上述物理导出工具只生成物理 JSON，不生成地形。使用时需从机器人资源包安装两个地形文件；运行 sim2sim 不依赖外部 UFO 代码目录。
 

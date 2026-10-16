@@ -37,6 +37,7 @@ from robolab.tasks.manager_based.beyondmimic.beyondmimic_env_cfg import BeyondMi
 
 from isaaclab.utils import configclass
 from robolab import ROBOLAB_ROOT_DIR
+from robolab.utils.data_paths import motion_file
 
 s_body_name=[
     'left_thigh_yaw_link', 
@@ -56,7 +57,7 @@ class RPOBeyondMimicEnvCfg(BeyondMimicEnvCfg):
 
         self.scene.robot = RPO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.commands.motion.motion_file = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rpo", "yundong1.npz"
+            motion_file("rpo", "yundong1.npz")
         )
         self.commands.motion.anchor_body_name = "torso_link"
         self.commands.motion.body_names = [

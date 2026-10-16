@@ -5,6 +5,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 from robolab import ROBOLAB_ROOT_DIR
+from robolab.utils.data_paths import motion_data_dir
 from robolab.assets.robots.roboparty import PR1_LINKS, RP1_24DOF_CFG
 from robolab.sensors import Grid3dPointsGeneratorCfg, get_link_prim_targets
 from robolab.tasks.manager_based.parkour.parkour_env_cfg import (
@@ -151,9 +152,7 @@ class RP1ParkourEnvCfg(ParkourEnvCfg):
         self.scene.camera.offset.pos = (0.09175, 0.011, 0.3982)
         self.scene.camera.offset.rot = (0.0, 0.5, 0.0, 0.866)
         self.scene.camera.mesh_prim_paths.extend(get_link_prim_targets(PR1_LINKS))
-        self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rp1"
-        )
+        self.motion_data.motion_dataset.motion_data_dir = motion_data_dir("rp1")
         self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights = dict(RP1_GENERAL_MOTION_DATA_WEIGHTS)
         self.animation.animation.num_steps_to_use = AMP_NUM_STEPS

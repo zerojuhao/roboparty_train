@@ -31,10 +31,12 @@ IsaacLab-3.0/
 *.mp4
 *.pt
 
-# Match both real directories and host-specific symlinks to external data.
+# Local robot assets and unified motion data are provisioned with the checkout,
+# but remain outside the source repository because the motion licenses do not
+# permit publishing this bundle here.
+/robo_newton/robolab/data/
 /data
 /ufo_data
-/robo_newton/data
 
 # Host-local experiment scripts and notes are not repository sources.
 /project_ops/

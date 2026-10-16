@@ -37,6 +37,7 @@ from robolab.tasks.manager_based.beyondmimic.beyondmimic_env_cfg import BeyondMi
 
 from isaaclab.utils import configclass
 from robolab import ROBOLAB_ROOT_DIR
+from robolab.utils.data_paths import motion_file
 
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -51,7 +52,7 @@ class RPOGetupMimicEnvCfg(BeyondMimicEnvCfg):
 
         self.scene.robot = RPO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.commands.motion.motion_file = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rpo", "getup_supin2prone.npz"
+            motion_file("rpo", "getup_supin2prone.npz")
         )
         self.commands.motion.anchor_body_name = "base_link"
         self.commands.motion.body_names = [

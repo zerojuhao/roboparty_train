@@ -39,7 +39,7 @@ DEFAULT_RUN = Path(
     "2026-10-09_02-24-22_rp1_amp_lsgan_disc4_currsync_20261009"
 )
 DEFAULT_CHECKPOINT = DEFAULT_RUN / "model_9999.pt"
-DEFAULT_MJCF = ROOT / "robo_newton/data/robots/roboparty/rp1.3/mjcf/rp1_flat.xml"
+DEFAULT_MJCF = ROOT / "robo_newton/robolab/data/robots/roboparty/rp1.3/mjcf/rp1_flat.xml"
 
 # MuJoCo/URDF traversal order used by robot_24dof.xml.
 MJ_JOINT_NAMES = (

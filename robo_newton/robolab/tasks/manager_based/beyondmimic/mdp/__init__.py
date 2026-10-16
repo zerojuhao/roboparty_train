@@ -35,6 +35,7 @@
 from robolab.tasks.manager_based.beyondmimic.mdp import *  # noqa: F401, F403
 
 from isaaclab.envs.mdp import *  # noqa: F401, F403
+from robolab.utils.newton_mdp_events import randomize_rigid_body_com
 
 from .commands import *  # noqa: F401, F403
 from .events import *  # noqa: F401, F403

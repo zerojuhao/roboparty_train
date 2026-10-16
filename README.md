@@ -11,10 +11,10 @@ robo_newton/robolab/       Robot definitions, tasks, sensors, and utilities
 robo_newton/scripts/       Training, evaluation, export, and diagnostic tools
 rsl_rl/rsl_rl/             Modified algorithms and runners
 rsl_rl/tests/              Training-library tests
-robo_newton/data/          Local robot assets and motion data (not tracked)
+robo_newton/robolab/data/  Local robot assets and unified motion data
 ```
 
-Source directories are ordinary tracked directories, not Git submodules. Isaac Lab is installed separately. `IsaacLab/`, `IsaacLab-3.0/`, `project_ops/`, logs, checkpoints, and local runtime data are excluded from Git. Motion-data publication is not yet included in this repository.
+Source directories are ordinary tracked directories, not Git submodules. Isaac Lab is installed separately. `IsaacLab/`, `IsaacLab-3.0/`, `project_ops/`, logs, checkpoints, and the local data bundle are excluded from Git. The robot assets and unified training motions are kept together under `robo_newton/robolab/data/` for each checkout.
 
 ## Installation
 
@@ -37,10 +37,10 @@ Private repositories require GitHub access. Provision the following robot assets
 
 ## Motion Data
 
-`robo_newton/data` may be a symlink to a local data disk:
+`robo_newton/robolab/data` is the checkout-local data root. It is intentionally ignored by Git; provision the unified NPZ bundle and robot resources there before training. Data lookup order is `--data_root`, `ROBO_TRAIN_DATA_ROOT`, then this local data root.
 
 ```text
-robo_newton/data/
+robo_newton/robolab/data/
   robots/roboparty/rp1.3/  RP1 URDF, MJCF, and meshes
   robots/roboparty/rpo/    RPO URDF, MJCF, and meshes
   motions/newton/
@@ -65,7 +65,7 @@ UFO/PUFO defaults to `motions/newton/rp1_lafan/manifest.json`; override with `UF
 
 Retarget motions with external tools and prepare NPZ files that follow the schema above before training. Legacy retargeting, CSV/PKL preparation, and one-time migration scripts have been removed. Runtime validation and name-based mapping remain in [motion_npz.py](robo_newton/robolab/utils/motion_npz.py); this module does not retarget motions or infer missing tracks or source conventions.
 
-The current slimmed dataset contains 125 clips, approximately 752 MiB in total:
+The current slimmed local dataset contains 125 clips, approximately 752 MiB in total:
 
 | Directory | Clips | NPZ Size |
 | --- | ---: | ---: |
@@ -74,16 +74,16 @@ The current slimmed dataset contains 125 clips, approximately 752 MiB in total:
 | `rp1_upper_run_bounded` | 1 | Less than 0.1 MiB |
 | `rp1_lafan/npz` | 55 | 743.5 MiB |
 
-These counts describe the local training bundle, not files bundled with the source checkout. Original motions, intermediate PKLs, and duplicate backups are not needed. Keep the LAFAN manifest and relevant provenance records alongside the NPZs. Robot assets must be provisioned separately.
+These files belong under `robo_newton/robolab/data/motions/newton/`. Original motions, intermediate PKLs, and duplicate backups are not needed. Keep the LAFAN manifest and relevant provenance records alongside the NPZs. Robot assets belong under the sibling `robots/` directory.
 
 Motion data does not inherit the source-code license. [Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) is released under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Retargeting does not remove upstream restrictions; confirm redistribution rights before publishing modified motion data. This also applies to LAFAN-derived clips stored in other folders.
 
 ## Training
 
-Run from the repository root, using `robo_newton/scripts/rsl_rl/train.py` as the primary training entry point. Common task IDs: `RP1-AMP`, `RP1-AMP-Path`, `RP1-Parkour`, `RP1-SSR`, `RP1-UFO`, `RP1-PUFO`, `RPO-AMP`, `RPO-Parkour`.
+Use `robo_newton/scripts/train_newton.py` as the portable entry point from any working directory. It dispatches to the RSL-RL `train.py` backend and sets project/data paths. Common task IDs: `RP1-AMP`, `RP1-AMP-Path`, `RP1-Parkour`, `RP1-SSR`, `RP1-UFO`, `RP1-PUFO`, `RPO-AMP`, `RPO-Parkour`.
 
 ```bash
-python robo_newton/scripts/rsl_rl/train.py \
+python robo_newton/scripts/train_newton.py --rl_library rsl_rl \
   --task RP1-AMP-Path --num_envs 1024 --device cuda:0 \
   --visualizer none --logger tensorboard
 ```
@@ -92,7 +92,7 @@ Multi-GPU example (`num_envs` per worker):
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=8 \
-  robo_newton/scripts/rsl_rl/train.py --task RP1-PUFO \
+  robo_newton/scripts/train_newton.py --rl_library rsl_rl --task RP1-PUFO \
   --num_envs 1024 --device cuda --distributed --visualizer none --logger tensorboard
 ```
 
@@ -119,7 +119,7 @@ python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
 
 PUFO export also needs saved run configuration and motion data. MuJoCo checks live under `robo_newton/scripts/mujoco/`; select the entry point and deployment contract matching the policy.
 
-PUFO sim2sim assets live in `robo_newton/data/robots/roboparty/rp1.3/mjcf/`: `rp1_simple_terrain/` contains the terrain, and `robot_24dof_newton_physics.json` contains nominal compiled collision/contact/solver data. The shared `robolab.utils.mujoco_physics` utility applies these assets without loading a checkpoint; motor limits are resolved from the URDF and supplied actuator configuration. Other tasks can use their own assets through the same utility, not inherit PUFO parameters implicitly. `sim2sim_rp1_pufo.py --physics-asset PATH` selects an alternative asset. Regenerate assets with `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` from a nonrandomized, single-robot Newton model with a ground plane. These files are local data and must be distributed alongside the robot assets.
+PUFO sim2sim assets live in `robo_newton/robolab/data/robots/roboparty/rp1.3/mjcf/`: `rp1_simple_terrain/` contains the terrain, and `robot_24dof_newton_physics.json` contains nominal compiled collision/contact/solver data. The shared `robolab.utils.mujoco_physics` utility applies these assets without loading a checkpoint; motor limits are resolved from the URDF and supplied actuator configuration. Other tasks can use their own assets through the same utility, not inherit PUFO parameters implicitly. `sim2sim_rp1_pufo.py --physics-asset PATH` selects an alternative asset. Regenerate assets with `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` from a nonrandomized, single-robot Newton model with a ground plane. These files are local data and must be distributed alongside the robot assets.
 
 The terrain assets `rp1_simple_terrain/rp1_simple_terrain.xml` and `rp1_simple_terrain/meta.json` are pre-generated; the old machine-specific terrain exporter has been removed. The metadata supplies reset positions and terrain descriptions, while `robot_24dof_newton_physics.json` supplies Newton collision, contact, and solver parameters. Both JSON files are required by PUFO sim2sim and use indented formatting. The physics exporter above regenerates only the physics JSON, not the terrain. Install both terrain files from the robot asset bundle; an external UFO checkout is not needed to run sim2sim.
 

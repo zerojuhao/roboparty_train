@@ -24,6 +24,7 @@ import xml.etree.ElementTree as ET
 os.environ.setdefault("MUJOCO_GL", "egl")
 ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT / "rsl_rl"), str(ROOT / "robo_newton")]
+DATA_ROOT = ROOT / "robo_newton/robolab/data"
 
 import cv2
 import imageio_ffmpeg
@@ -47,9 +48,9 @@ from robolab.tasks.manager_based.ufo.mdp.pufo_observations import (
 from robolab.tasks.manager_based.ufo.motion.torch_utils import quat_rotate_inverse
 
 LOG_ROOT = Path("/data/zym/roboparty_train/logs/rsl_rl/rp1_pufo")
-MJCF = ROOT / "robo_newton/data/robots/roboparty/rp1.3/mjcf/rp1_flat.xml"
+MJCF = DATA_ROOT / "robots/roboparty/rp1.3/mjcf/rp1_flat.xml"
 NATIVE_PHYSICS = NewtonPhysicsAsset(MJCF.with_name("robot_24dof_newton_physics.json"),
-                                    data_root=ROOT / "robo_newton/data")
+                                    data_root=DATA_ROOT)
 TERRAIN_DIR = MJCF.parent / "rp1_simple_terrain"
 TERRAIN_XML = TERRAIN_DIR / "rp1_simple_terrain.xml"
 
@@ -59,7 +60,7 @@ def terrain_metadata():
 
 
 def default_motion_manifest():
-    return ROOT / "robo_newton/data/motions/newton/rp1_lafan/manifest.json"
+    return DATA_ROOT / "motions/newton/rp1_lafan/manifest.json"
 
 
 def read_motion(path, joint_names, body_names):
@@ -570,7 +571,7 @@ def main():
     motion["body_pos_w"][..., :2] -= motion["body_pos_w"][0, 0, :2].copy()
     names = metadata["npz"]["joint_order"]
     terrain = terrain_metadata()
-    physics_asset = NewtonPhysicsAsset(args.physics_asset, data_root=ROOT / "robo_newton/data")
+    physics_asset = NewtonPhysicsAsset(args.physics_asset, data_root=DATA_ROOT)
     sims = [Simulation(make_model(stairs, args.physics_profile, physics_asset=physics_asset), names, env_cfg,
                        physics_asset=physics_asset)
             for stairs in (False, False, True)]

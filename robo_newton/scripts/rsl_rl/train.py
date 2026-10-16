@@ -41,6 +41,7 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -54,6 +55,14 @@ parser.add_argument("--video_length", type=int, default=200, help="Length of the
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument(
+    "--data_root", type=str, default=None,
+    help="Motion-data root containing motions/newton; defaults to ROBO_TRAIN_DATA_ROOT or robo_newton/robolab/data/.",
+)
+parser.add_argument(
+    "--motion_manifest", type=str, default=None,
+    help="Explicit UFO/PUFO motion manifest path; overrides UFO_MOTION_MANIFEST.",
+)
 parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
 )
@@ -111,6 +120,18 @@ cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+
+# Resolve project-local paths before task modules are imported. This keeps the
+# existing train.py --task interface usable from any working directory.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if args_cli.data_root is not None:
+    os.environ["ROBO_TRAIN_DATA_ROOT"] = str(Path(args_cli.data_root).expanduser().resolve())
+elif "ROBO_TRAIN_DATA_ROOT" not in os.environ:
+    local_data = _PROJECT_ROOT / "robo_newton" / "robolab" / "data"
+    if local_data.is_dir():
+        os.environ["ROBO_TRAIN_DATA_ROOT"] = str(local_data)
+if args_cli.motion_manifest is not None:
+    os.environ["UFO_MOTION_MANIFEST"] = str(Path(args_cli.motion_manifest).expanduser().resolve())
 
 # auto-enable distributed training when launched with torchrun / torch.distributed.run
 if int(os.getenv("WORLD_SIZE", "1")) > 1:
@@ -181,7 +202,7 @@ import robolab.tasks
 # PLACEHOLDER: Extension template (do not remove this comment)
 
 
-DEFAULT_RSL_RL_LOG_ROOT = "/data/zym/roboparty_train/logs/rsl_rl"
+DEFAULT_RSL_RL_LOG_ROOT = str(_PROJECT_ROOT / "logs" / "rsl_rl")
 
 
 def _rsl_rl_log_root(experiment_name: str) -> str:

@@ -1,5 +1,6 @@
 from isaaclab.envs.mdp import *
 from isaaclab_tasks.core.velocity.mdp import *
+from robolab.utils.newton_mdp_events import randomize_rigid_body_com
 from .observations import *
 from .rewards import *
 from .terminations import *

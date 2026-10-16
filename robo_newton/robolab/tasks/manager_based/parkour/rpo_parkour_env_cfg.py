@@ -5,6 +5,7 @@ from isaaclab.utils import configclass
 from isaaclab.managers import SceneEntityCfg
 
 from robolab import ROBOLAB_ROOT_DIR
+from robolab.utils.data_paths import motion_data_dir
 from robolab.assets.robots.roboparty import RPO_CFG, RPO_LINKS
 from robolab.sensors import get_link_prim_targets
 from robolab.tasks.manager_based.parkour.parkour_env_cfg import ROUGH_TERRAINS_CFG, ParkourEnvCfg
@@ -78,9 +79,7 @@ class RPOParkourRoughEnvCfg(ParkourEnvCfg):
         self.scene.camera.offset.pos = (0.0875, 0.01, 0.20568)
         self.scene.camera.offset.rot = (0.0, 0.5, 0.0, 0.866)
         self.scene.camera.mesh_prim_paths.extend(get_link_prim_targets(RPO_LINKS))
-        self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rpo"
-        )
+        self.motion_data.motion_dataset.motion_data_dir = motion_data_dir("rpo")
         self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights = {
             "36_01": 1,

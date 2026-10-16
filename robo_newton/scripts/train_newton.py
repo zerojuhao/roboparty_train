@@ -18,6 +18,15 @@ _project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_project_root))
 sys.path.insert(0, str(_project_root.parent / "rsl_rl"))
 
+# Keep the unified entrypoint portable while allowing cluster launchers to
+# override these locations explicitly.
+_local_data = _project_root / "robolab" / "data"
+if _local_data.is_dir():
+    import os
+
+    os.environ.setdefault("ROBO_TRAIN_DATA_ROOT", str(_local_data))
+os.environ.setdefault("ROBO_TRAIN_LOG_ROOT", str(_project_root.parent / "logs" / "rsl_rl"))
+
 import robolab.tasks  # noqa: F401, E402
 from isaaclab_rl.entrypoints import run_train_cli  # noqa: E402
 

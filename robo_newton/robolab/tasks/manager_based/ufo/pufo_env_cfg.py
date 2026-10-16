@@ -28,7 +28,7 @@ from isaaclab_newton.sensors.ray_caster.legacy_ray_caster import LegacyRayCaster
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from robolab.assets import ISAAC_DATA_DIR
+from robolab.utils.data_paths import motion_file
 from robolab.assets.robots.roboparty import PR1_LINKS, RP1_UFO_CFG
 from robolab.sensors import NoisyGroupedRayCasterCameraCfg, get_link_prim_targets
 from robolab.utils.noise import (
@@ -54,7 +54,7 @@ from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg as FiledTer
 
 MOTION_MANIFEST = os.environ.get(
     "UFO_MOTION_MANIFEST",
-    os.path.join(ISAAC_DATA_DIR, "motions", "newton", "rp1_lafan", "manifest.json"),
+    motion_file("rp1_lafan", "manifest.json"),
 )
 
 

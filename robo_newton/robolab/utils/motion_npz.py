@@ -13,9 +13,12 @@ import warnings
 
 import numpy as np
 
+from .data_paths import motion_file
+
 FORMAT = "roboparty_motion_v1"
 FULL_BODY_FIELDS = ("body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w")
-ROBO_NEWTON_ROOT = Path(__file__).resolve().parents[2]
+# ``robolab`` is the package root; its data directory is a sibling of assets.
+ROBO_NEWTON_ROOT = Path(__file__).resolve().parents[1]
 
 
 def resolve_motion_manifest(path):
@@ -24,6 +27,8 @@ def resolve_motion_manifest(path):
     if manifest.is_dir() or manifest.name == "rp1_lafan":
         manifest = manifest / "manifest.json"
     canonical = ROBO_NEWTON_ROOT / "data/motions/newton/rp1_lafan/manifest.json"
+    if not canonical.is_file():
+        canonical = Path(motion_file("rp1_lafan", "manifest.json"))
     old = [
         ROBO_NEWTON_ROOT / "data/motions/rp1_lafan/manifest.json",
         ROBO_NEWTON_ROOT.parent / "data/motions/rp1_lafan/manifest.json",
