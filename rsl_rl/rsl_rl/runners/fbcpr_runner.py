@@ -252,6 +252,9 @@ class FbCprRunner:
             raise ValueError("checkpoint_interval_steps must be positive.")
         if int(getattr(self.cfg, "eval_num_envs", 64)) <= 0:
             raise ValueError("eval_num_envs must be positive.")
+        self.eval_reference_chunk = int(getattr(self.cfg, "eval_reference_chunk", 128))
+        if self.eval_reference_chunk <= 0:
+            raise ValueError("eval_reference_chunk must be positive.")
         eval_timeout = float(getattr(self.cfg, "eval_timeout_s", 1800))
         if not math.isfinite(eval_timeout) or eval_timeout <= 0:
             raise ValueError("eval_timeout_s must be finite and positive.")
@@ -1110,7 +1113,8 @@ class FbCprRunner:
 
         ref_obs_cache = {}
         # Keep reference construction bounded while sharing the GPU with training.
-        for reference_ids in motion_ids.split(min(self.num_envs, 64)):
+        reference_chunk = min(self.num_envs, self.eval_reference_chunk)
+        for reference_ids in motion_ids.split(reference_chunk):
             clip_lengths = [
                 max(4, int(motion_lib._motion_lengths[m].item() / self.control_dt))
                 for m in reference_ids.tolist()
@@ -1168,16 +1172,22 @@ class FbCprRunner:
             root_states = robot.data.default_root_state.clone()
             joint_pos = robot.data.default_joint_pos.clone()
             joint_vel = robot.data.default_joint_vel.clone()
-            for env_i in range(self.num_envs):
-                ref = ref_obs_cache[chunk[int(assign[env_i])]]
-                root_states[env_i, 0:3] = (
-                    ref["root_pos"].to(root_states.device) + mgr.scene.env_origins[env_i]
-                )
-                root_states[env_i, 3:7] = ref["root_quat"].to(root_states.device)
-                root_states[env_i, 7:10] = ref["root_lin_vel"].to(root_states.device)
-                root_states[env_i, 10:13] = ref["root_ang_vel"].to(root_states.device)
-                joint_pos[env_i] = ref["dof_pos"][0].to(joint_pos.device)
-                joint_vel[env_i] = ref["dof_vel"].to(joint_vel.device)
+            chunk_refs = [ref_obs_cache[w] for w in chunk]
+            root_states[:, 0:3] = (
+                torch.stack([ref["root_pos"] for ref in chunk_refs]).to(root_states.device)[assign]
+                + mgr.scene.env_origins
+            )
+            root_states[:, 3:7] = torch.stack(
+                [ref["root_quat"] for ref in chunk_refs]
+            ).to(root_states.device)[assign]
+            root_states[:, 7:10] = torch.stack(
+                [ref["root_lin_vel"] for ref in chunk_refs]
+            ).to(root_states.device)[assign]
+            root_states[:, 10:13] = torch.stack(
+                [ref["root_ang_vel"] for ref in chunk_refs]
+            ).to(root_states.device)[assign]
+            joint_pos[:] = torch.stack([ref["dof_pos"][0] for ref in chunk_refs]).to(joint_pos.device)[assign]
+            joint_vel[:] = torch.stack([ref["dof_vel"] for ref in chunk_refs]).to(joint_vel.device)[assign]
             robot.write_root_pose_to_sim_index(root_pose=root_states[:, :7])
             robot.write_root_velocity_to_sim_index(root_velocity=root_states[:, 7:13])
             robot.write_joint_position_to_sim_index(position=joint_pos)
@@ -1203,19 +1213,29 @@ class FbCprRunner:
                 ctx = ref_obs_cache[w]["ctx"]
                 ctx_padded[c_i, : ctx.shape[0]] = ctx
                 ctx_padded[c_i, ctx.shape[0] :] = ctx[-1]
-            for env_i in range(self.num_envs):
-                ref = ref_obs_cache[chunk[int(assign[env_i])]]
+            for c_i, w in enumerate(chunk):
+                ref = ref_obs_cache[w]
                 length = ref["ctx"].shape[0]
                 heading = ref["heading_world"][:length].to(self.device)
                 velocity = ref["velocity_world"][:length].to(self.device)
-                reference_anchor = heading[:1].expand_as(heading)
-                rollout_anchor = initial_heading[env_i : env_i + 1].expand_as(heading)
-                heading = align_world_vector(heading, reference_anchor, rollout_anchor)
-                velocity = align_world_vector(velocity, reference_anchor, rollout_anchor)
-                heading_padded[env_i, :length] = heading
-                heading_padded[env_i, length:] = heading[-1]
-                velocity_padded[env_i, :length] = velocity
-                velocity_padded[env_i, length:] = velocity[-1]
+                env_ids = (assign == c_i).nonzero(as_tuple=False).flatten()
+                reference_anchor = heading[0].expand(len(env_ids), -1).unsqueeze(1)
+                rollout_anchor = initial_heading[env_ids].unsqueeze(1)
+                heading = align_world_vector(
+                    heading.unsqueeze(0).expand(len(env_ids), -1, -1),
+                    reference_anchor,
+                    rollout_anchor,
+                )
+                velocity = align_world_vector(
+                    velocity.unsqueeze(0).expand(len(env_ids), -1, -1),
+                    reference_anchor,
+                    rollout_anchor,
+                )
+                heading_padded[env_ids, :length] = heading
+                velocity_padded[env_ids, :length] = velocity
+                if length < max_ctx_chunk:
+                    heading_padded[env_ids, length:] = heading[:, -1:]
+                    velocity_padded[env_ids, length:] = velocity[:, -1:]
 
             initial_state = self._obs_dict(obs_buf, with_history=False)["state"]
             initial_joint = robot.data.joint_pos
@@ -1229,15 +1249,11 @@ class FbCprRunner:
             measure_velocity = bool(getattr(self.agent._actor, "estimate_velocity", False))
             buf_velocity_error = (torch.empty(max_ctx_chunk, len_chunk, 3, device=self.device)
                                   if measure_velocity else None)
-            init_state_cpu = [_joint_state_observation(initial_state[c_i], num_dofs).cpu() for c_i in range(len_chunk)]
-            init_joint_cpu = [initial_joint[c_i].cpu() for c_i in range(len_chunk)]
+            init_state_cpu = _joint_state_observation(initial_state[:len_chunk], num_dofs).cpu()
+            init_joint_cpu = initial_joint[:len_chunk].cpu()
             chunk_series: dict[int, dict] = {}
             for c_i, w in enumerate(chunk):
-                ref = ref_obs_cache[w]
-                chunk_series[w] = {
-                    "target_state": [_joint_state_observation(ref["state"][0], num_dofs)],
-                    "target_joint": [ref["dof_pos"][0]],
-                }
+                chunk_series[w] = {}
             for step in range(max_ctx_chunk):
                 obs_dict = self._obs_dict(obs_buf)
                 current_values = self._current_obs_values(obs_buf)
@@ -1269,18 +1285,14 @@ class FbCprRunner:
                 state_now = self._obs_dict(obs_buf, with_history=False)["state"]
                 buf_state[step].copy_(_joint_state_observation(state_now[:len_chunk], num_dofs))
                 buf_joint[step].copy_(robot.data.joint_pos[:len_chunk])
-                for c_i, w in enumerate(chunk):
-                    ref = ref_obs_cache[w]
-                    ref_t = step + 1
-                    if ref_t < ref["length"]:
-                        chunk_series[w]["target_state"].append(_joint_state_observation(ref["state"][ref_t], num_dofs))
-                        chunk_series[w]["target_joint"].append(ref["dof_pos"][ref_t])
             buf_state_cpu = buf_state.cpu()
             buf_joint_cpu = buf_joint.cpu()
             velocity_error_cpu = buf_velocity_error.cpu() if measure_velocity else None
             for c_i, w in enumerate(chunk):
                 ref = ref_obs_cache[w]
                 n = min(ref["length"], max_ctx_chunk + 1)
+                chunk_series[w]["target_state"] = _joint_state_observation(ref["state"][:n], num_dofs)
+                chunk_series[w]["target_joint"] = ref["dof_pos"][:n]
                 chunk_series[w]["state"] = torch.cat(
                     [init_state_cpu[c_i].unsqueeze(0), buf_state_cpu[: n - 1, c_i]], dim=0
                 )
@@ -1307,8 +1319,8 @@ class FbCprRunner:
                 continue
             state = values["state"]
             joint = values["joint"]
-            target_state = torch.stack(values["target_state"])
-            target_joint = torch.stack(values["target_joint"])
+            target_state = values["target_state"]
+            target_joint = values["target_joint"]
             local = _distance_proximity(state, target_state, prefix="obs_state_")
             local.update(_joint_pos_metrics(joint, target_joint, self.control_dt))
             if "velocity_error" in values:

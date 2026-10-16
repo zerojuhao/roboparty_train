@@ -210,6 +210,7 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     profile_update_rank: int = 0
     eval_num_motions: int = 0
     eval_num_envs: int = 256
+    eval_reference_chunk: int = 128
     eval_timeout_s: float = 1800.0
     prioritization: bool = True
     # Absolute PD targets are now clipped; old transition replay is not compatible.

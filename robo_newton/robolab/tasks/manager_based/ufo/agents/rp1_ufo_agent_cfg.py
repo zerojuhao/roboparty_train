@@ -193,6 +193,7 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     eval_interval_steps: int = 3_200_000
     log_interval_steps: int = 384_000
     eval_num_envs: int = 256
+    eval_reference_chunk: int = 128
     eval_timeout_s: float = 1800.0
     eval_num_motions: int = 0
 
