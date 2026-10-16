@@ -289,15 +289,26 @@ def resolve_obs_groups(
 
 def check_nan(obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor) -> None:
     """Raise ``ValueError`` if any environment output contains NaN."""
-    def check_observations(group: TensorDict, prefix: str = "") -> None:
+    observations = []
+
+    def collect_observations(group: TensorDict, prefix: str = "") -> None:
         for key, value in group.items():
             name = f"{prefix}.{key}" if prefix else key
             if isinstance(value, TensorDict):
-                check_observations(value, name)
-            elif not torch.isfinite(value).all():
-                raise ValueError(f"The observation group '{name}' returned by the environment contains non-finite values.")
+                collect_observations(value, name)
+            else:
+                observations.append((name, value))
 
-    check_observations(obs)
+    collect_observations(obs)
+    flags = [(~torch.isfinite(value).all()).to(rewards.device) for _, value in observations]
+    flags.extend((torch.isnan(rewards).any(), torch.isnan(dones).any().to(rewards.device)))
+    if not torch.stack(flags).any().item():
+        return
+
+    # Only inspect individual outputs after the aggregate check fails.
+    for name, value in observations:
+        if not torch.isfinite(value).all():
+            raise ValueError(f"The observation group '{name}' returned by the environment contains non-finite values.")
     if torch.isnan(rewards).any():
         raise ValueError(
             "The rewards returned by the environment contain NaN values. This usually indicates a bug in the"

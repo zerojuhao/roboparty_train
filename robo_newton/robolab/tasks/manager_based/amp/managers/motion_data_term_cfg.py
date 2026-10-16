@@ -47,9 +47,11 @@ class MotionDataTermCfg:
     motion_data_dir: str = MISSING
     """Directory containing motion data files.
     
-    Only supports reading .pkl files from this directory.
+    Reads validated roboparty_motion_v1 .npz files (XYZW, named joints).
     """
     
     motion_data_weights: dict[str, float] = MISSING
     """Weights for the motion data in this term."""
-    
+
+    key_body_names: list[str] | None = None
+    """Requested key-body order; None preserves the order declared in each file."""

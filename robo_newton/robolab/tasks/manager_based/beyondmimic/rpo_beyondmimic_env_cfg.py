@@ -56,7 +56,7 @@ class RPOBeyondMimicEnvCfg(BeyondMimicEnvCfg):
 
         self.scene.robot = RPO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.commands.motion.motion_file = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "rpo_bm", "yundong1.npz"
+            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rpo", "yundong1.npz"
         )
         self.commands.motion.anchor_body_name = "torso_link"
         self.commands.motion.body_names = [

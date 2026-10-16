@@ -26,6 +26,8 @@ class UFOMotionCommand(CommandTerm):
                 "clip_seconds": cfg.clip_seconds,
                 "min_clip_seconds": cfg.min_clip_seconds,
                 "motion_names": getattr(cfg, "motion_names", None),
+                "joint_names": list(env.scene[cfg.asset_name].joint_names),
+                "body_names": list(env.scene[cfg.asset_name].body_names),
             }
         )
         self._motion_lib = MotionLibNPZ(motion_cfg, num_envs=self.num_envs, device=self.device)

@@ -1,4 +1,4 @@
-"""Record reference / flat / H200-training-terrain PUFO tracking in a synchronized MuJoCo video.
+"""Record reference / flat / RP1 simple-terrain PUFO tracking in a synchronized MuJoCo video.
 
 Uses the RP1 MJCF and ray-camera approach of sim2sim_rp1_parkour.py, but
 loads PUFO networks and observation/control contracts from the training run.
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+import hashlib
 import json
 import math
 import os
@@ -33,6 +34,10 @@ import torch
 import torch.nn.functional as F
 import yaml
 
+from robolab.utils.mujoco_physics import NewtonPhysicsAsset
+from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
+from robolab.utils.motion_npz import FULL_BODY_FIELDS, load_motion
+
 from rsl_rl.algorithms.fb_networks import BackwardMap, ObsNormalizer, VisualResidualActor
 from rsl_rl.runners.fbcpr_runner import make_ufo_history
 from robolab.tasks.manager_based.ufo.mdp.motion_observations import compute_humanoid_observations_max
@@ -43,9 +48,25 @@ from robolab.tasks.manager_based.ufo.motion.torch_utils import quat_rotate_inver
 
 LOG_ROOT = Path("/data/zym/roboparty_train/logs/rsl_rl/rp1_pufo")
 MJCF = ROOT / "robo_newton/data/robots/roboparty/rp1.3/mjcf/rp1_flat.xml"
-TERRAIN_DIR = Path(__file__).with_name("pufo_h200_rp1_simple")
-TERRAIN_XML = TERRAIN_DIR / "terrain.xml"
-TERRAIN_META = json.loads(TERRAIN_XML.with_name("meta.json").read_text())
+NATIVE_PHYSICS = NewtonPhysicsAsset(MJCF.with_name("robot_24dof_newton_physics.json"),
+                                    data_root=ROOT / "robo_newton/data")
+TERRAIN_DIR = MJCF.parent / "rp1_simple_terrain"
+TERRAIN_XML = TERRAIN_DIR / "rp1_simple_terrain.xml"
+
+
+def terrain_metadata():
+    return json.loads(TERRAIN_XML.with_name("meta.json").read_text())
+
+
+def default_motion_manifest():
+    return ROOT / "robo_newton/data/motions/newton/rp1_lafan/manifest.json"
+
+
+def read_motion(path, joint_names, body_names):
+    data = load_motion(path, joint_names=joint_names, body_names=body_names)
+    # Metadata describes the clip; it must not be sliced or passed to the policy.
+    return {key: data[key] for key in ("fps", "joint_pos", "joint_vel", *FULL_BODY_FIELDS)}
+
 
 class ConfigLoader(yaml.SafeLoader):
     pass
@@ -241,11 +262,16 @@ class Policy:
         normalized["depth_image"] = observations["depth_image"]
         return self.actor(normalized, context, self.cfg["actor_std"]).mean
 
-def make_model(stairs):
+def make_model(stairs, physics_profile="native", *, physics_asset=None):
+    physics_asset = physics_asset or NATIVE_PHYSICS
+    if physics_profile not in {"native", "legacy"}:
+        raise ValueError(f"Unknown PUFO physics profile: {physics_profile}")
     xml = ET.parse(MJCF).getroot()
     xml.remove(xml.find("include"))
     robot = ET.parse(MJCF.parent / "robot_24dof.xml").getroot()
     robot.find("compiler").set("meshdir", str(MJCF.parent.parent))
+    if physics_profile == "native":
+        physics_asset.align_robot_xml(robot)
     visual = xml.find("visual")
     visual.find("global").set("offwidth", "640")
     visual.find("global").set("offheight", "640")
@@ -255,8 +281,8 @@ def make_model(stairs):
     if stairs:
         if not TERRAIN_XML.is_file():
             raise FileNotFoundError(
-                f"Missing full H200 terrain asset {TERRAIN_XML}; regenerate with "
-                "robo_newton/scripts/tools/export_pufo_h200_terrain.py"
+                f"Missing RP1 simple terrain asset {TERRAIN_XML}; install {TERRAIN_XML.name} and meta.json "
+                f"from the robot asset bundle into {TERRAIN_DIR}"
             )
         xml.find("worldbody").remove(ground)
     xml.extend(list(robot))
@@ -272,10 +298,12 @@ def make_model(stairs):
     model.opt.iterations = 600
     model.opt.ls_iterations = 80
     model.opt.tolerance = .01
+    physics_asset.align_compiled_model(model)
     return model
 
 class Simulation:
-    def __init__(self, model, names, env_cfg, *, clip_joint_targets=True):
+    def __init__(self, model, names, env_cfg, *, clip_joint_targets=True, physics_asset=None):
+        physics_asset = physics_asset or NATIVE_PHYSICS
         self.model, self.data = model, mujoco.MjData(model)
         self.jids = np.array([model.joint(name).id for name in names])
         self.clip_joint_targets = clip_joint_targets
@@ -289,16 +317,14 @@ class Simulation:
         robot = env_cfg["scene"]["robot"]
         actuator = robot["actuators"]["all_joints"]
         self.default = joint_values(robot["init_state"]["joint_pos"], names, 0.)
-        self.kp = joint_values(actuator["stiffness"], names)
-        self.kd = joint_values(actuator["damping"], names)
-        self.limit = joint_values(actuator["effort_limit_sim"], names)
-        self.speed = joint_values(actuator["velocity_limit_sim"], names)
-        self.keep = joint_values(actuator["keep_velocity"], names)
-        model.dof_armature[self.vids] = joint_values(actuator["armature"], names)
-        model.dof_damping[self.vids] = joint_values(actuator["viscous_friction"], names)
-        model.dof_frictionloss[self.vids] = joint_values(actuator["friction"], names)
-        model.actuator_ctrllimited[self.aids] = 0
-        model.actuator_forcelimited[self.aids] = 0
+        self.motor = RoboPartyMujocoActuator(MJCF.parent.parent / "urdf/rp1_24dof.urdf", names, actuator)
+        self.limit = self.motor.effort_limit
+        self.speed = self.motor.velocity_limit
+        self.keep = self.motor.keep_velocity
+        self.physics_profile = "native" if physics_asset.is_native_model(model) else "legacy"
+        if self.physics_profile == "native":
+            physics_asset.align_compiled_model(model)
+        self.aids = self.motor.bind(model)
         self.action_scale = float(env_cfg["actions"]["joint_pos"]["scale"])
         self.base_ang_vel_scale = base_ang_vel_obs_scale(env_cfg)
         self.base = model.body("base_link").id
@@ -393,11 +419,7 @@ class Simulation:
     def advance(self, action, rescale):
         target = self.prepare_action_target(action, rescale)
         for _ in range(4):
-            vel = self.data.qvel[self.vids]
-            torque = self.kp * (target - self.data.qpos[self.qids]) - self.kd * vel
-            drive = self.limit * np.clip((self.speed - abs(vel)) / (self.speed - self.keep), 0, 1)
-            torque = np.clip(torque, np.where(vel <= 0, -drive, -self.limit),
-                             np.where(vel >= 0, drive, self.limit))
+            torque = self.motor.compute(target, self.data.qpos[self.qids], self.data.qvel[self.vids])
             self.data.ctrl[self.aids] = torque
             mujoco.mj_step(self.model, self.data, nstep=2)
         mujoco.mj_forward(self.model, self.data)
@@ -423,8 +445,8 @@ class Simulation:
             self.renderer.close()
 
 def place_on_stairs(environment):
-    """Move onto the H200 low_stairs_down level-5 origin; never correct pose after reset."""
-    origin = np.asarray(TERRAIN_META["stairs_reset"]["origin"], dtype=np.float64)
+    """Move onto the low_stairs_down level-5 origin; never correct pose after reset."""
+    origin = np.asarray(terrain_metadata()["stairs_reset"]["origin"], dtype=np.float64)
     environment.data.qpos[0] = origin[0]
     environment.data.qpos[1] = origin[1]
     mujoco.mj_forward(environment.model, environment.data)
@@ -458,11 +480,15 @@ def compose(simulations, seconds, total, errors, checkpoint_step, motion_name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--physics-profile", choices=("native", "legacy"), default="native",
+                        help="Native Newton collision/limit asset, or legacy MJCF geometry; both use the training actuator")
+    parser.add_argument("--physics-asset", type=Path, default=NATIVE_PHYSICS.path,
+                        help="Robot physics asset exported from a nominal Newton model; independent of policy weights")
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=ROOT / "robo_newton/data/motions/rp1_lafan/manifest.json",
+        default=default_motion_manifest(),
     )
     parser.add_argument("--motion", default="dance1_subject2")
     parser.add_argument("--start", type=float, default=0.)
@@ -510,7 +536,7 @@ def main():
     cv2.setNumThreads(1)
     checkpoint = (args.checkpoint or latest_checkpoint(args.run_dir)).resolve()
     mode_suffix = f"_HOLD_frame{args.hold_frame}" if args.hold_frame is not None else ""
-    output = args.output or checkpoint.parent / "videos" / f"{args.motion}_{checkpoint.stem}{mode_suffix}_sim2sim_linkframe_h200stairs.mp4"
+    output = args.output or checkpoint.parent / "videos" / f"{args.motion}_{checkpoint.stem}{mode_suffix}_sim2sim_linkframe_rp1terrain.mp4"
     output = output.resolve()
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite an existing recording: {output}")
@@ -520,8 +546,7 @@ def main():
     record = next(c for c in metadata["clips"] if c["name"] == args.motion)
     source = Path(record["npz"])
     source = source if source.is_absolute() else args.manifest.parent / source
-    with np.load(source, allow_pickle=False) as archive:
-        full_motion = {k: archive[k] for k in archive.files}
+    full_motion = read_motion(source, metadata["npz"]["joint_order"], metadata["npz"]["body_order"])
     if float(full_motion["fps"].item()) != 50 or metadata["npz"]["body_quaternion_order"] != "xyzw":
         raise ValueError("Expected 50 Hz motion with XYZW quaternions")
     if args.hold_frame is not None:
@@ -544,8 +569,10 @@ def main():
         motion = {k: v[start:end].copy() if k != "fps" else v for k, v in full_motion.items()}
     motion["body_pos_w"][..., :2] -= motion["body_pos_w"][0, 0, :2].copy()
     names = metadata["npz"]["joint_order"]
-    terrain = TERRAIN_META
-    sims = [Simulation(make_model(stairs), names, env_cfg)
+    terrain = terrain_metadata()
+    physics_asset = NewtonPhysicsAsset(args.physics_asset, data_root=ROOT / "robo_newton/data")
+    sims = [Simulation(make_model(stairs, args.physics_profile, physics_asset=physics_asset), names, env_cfg,
+                       physics_asset=physics_asset)
             for stairs in (False, False, True)]
     process = None
     temporary_video = None
@@ -641,6 +668,13 @@ def main():
         np.savez_compressed(output.with_suffix(".npz"), joint_pos=trajectory, root_pos=root_positions,
                             actions=actions, reference_joint_pos=motion["joint_pos"], fps=50)
         report = dict(checkpoint=str(checkpoint), model_step=policy.step, source_motion=str(source.resolve()),
+                      physics_profile=args.physics_profile,
+                      physics_asset=str(physics_asset.path),
+                      physics_profile_sha256=(hashlib.sha256(physics_asset.path.read_bytes()).hexdigest()
+                                              if args.physics_profile == "native" else None),
+                      motor_effort_limits_nm=sims[0].limit.tolist(),
+                      motor_velocity_limits_rad_s=sims[0].speed.tolist(),
+                      joint_order=names,
                       motion=args.motion, start_s=args.start, hold_frame=args.hold_frame,
                       start_default=args.start_default,
                       context_source=context_source,
@@ -656,7 +690,7 @@ def main():
                       terrain_outer_extent_m=terrain["outer_extent_m"],
                       terrain_ngeom=terrain["ngeom"], terrain_nhfield=terrain["nhfield"],
                       stairs_reset_origin_m=terrain["stairs_reset"]["origin"],
-                      terrain_surroundings="full H200-2 mjlab rp1_simple training map",
+                      terrain_surroundings="full mjlab rp1_simple terrain map",
                       stairs_reset_height_m=stairs_reset_height,
                       control_hz=50, actuator_hz=200, physics_hz=400, inference_device="cpu",
                       observation_noise=False, actuator_delay_ticks=0, depth_delay_frames=1,

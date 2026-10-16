@@ -45,7 +45,7 @@ from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
 
 __file_dir__ = os.path.dirname(os.path.realpath(__file__))
 
-# NOTE: KEY_BODY_NAMES must match lab_key_body_names in robolab/scripts/tools/retarget/config/xxx.yaml
+# The motion loader selects and reorders NPZ key-body tracks by these names.
 KEY_BODY_NAMES = [
     "left_ankle_roll_link",
     "right_ankle_roll_link",

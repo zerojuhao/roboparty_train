@@ -32,10 +32,7 @@
 from __future__ import annotations
 
 import os
-import numpy as np
 import enum
-import pickle
-import joblib
 import torch
 from prettytable import PrettyTable
 from typing import TYPE_CHECKING
@@ -51,6 +48,7 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 from robolab.utils.math import vel_forward_diff, ang_vel_from_quat_diff, quat_slerp, linear_interpolate, calc_frame_blend
+from robolab.utils.motion_npz import load_motion
 
 
 class LoopMode(enum.Enum):
@@ -73,9 +71,10 @@ class MotionDataTerm(ManagerTermBase):
         
     def _load_motion_data(self):
         # list the motion data files in the directory
-        motion_files = [f for f in os.listdir(self.cfg.motion_data_dir) if f.endswith('.pkl')]
+        motion_files = [f for f in os.listdir(self.cfg.motion_data_dir) if f.endswith('.npz')]
         if not motion_files:
-            raise ValueError(f"No motion data files with .pkl extension found in {self.cfg.motion_data_dir}.")
+            raise ValueError(f"No unified .npz motion files found in {self.cfg.motion_data_dir}.")
+        self.joint_names = list(self._env.scene["robot"].joint_names)
         
         self.motion_weights_dict = self.cfg.motion_data_weights
 
@@ -97,29 +96,29 @@ class MotionDataTerm(ManagerTermBase):
         # only load the motion data files that are in the motion weights dict
         for motion_name, motion_weight in self.motion_weights_dict.items():
             # check if the motion file name is valid
-            motion_file = f"{motion_name}.pkl"
+            motion_file = f"{motion_name}.npz"
             if motion_file not in motion_files:
                 raise ValueError(f"Motion name {motion_name} defined in motion weights not found in motion data directory {self.cfg.motion_data_dir}. Available files: {motion_files}")
 
             # load the motion data file
             motion_path = os.path.join(self.cfg.motion_data_dir, motion_file)
             print(f"[Motion Data Manager] Loading motion data from {motion_path}...")
-            try:
-                with open(motion_path, "rb") as f:
-                    motion_raw_data = pickle.load(f)
-            except (pickle.UnpicklingError, EOFError, AttributeError, ImportError, IndexError):
-                motion_raw_data = joblib.load(motion_path)
-            if not isinstance(motion_raw_data, dict):
-                raise ValueError(f"Motion data file {motion_file} does not contain a valid dictionary.")
+            motion_raw_data = load_motion(
+                motion_path, joint_names=self.joint_names, key_body_names=self.cfg.key_body_names
+            )
+            if not self.key_body_pos_w:
+                self.key_body_names = motion_raw_data["key_body_names"].tolist()
+            elif self.key_body_names != motion_raw_data["key_body_names"].tolist():
+                raise ValueError(f"Inconsistent key-body order in {motion_file}.")
             
             # Some info about the motion
-            fps = motion_raw_data["fps"]
+            fps = float(motion_raw_data["fps"].reshape(-1)[0])
             dt = 1.0 / fps
-            num_frames = len(motion_raw_data["root_pos"])
+            num_frames = len(motion_raw_data["root_pos_w"])
             if num_frames < 2:
                 raise ValueError(f"[MotionLoader] Motion has only {num_frames} frames, cannot compute velocity.")
             duration = dt * (num_frames - 1)
-            loop_mode = motion_raw_data["loop_mode"]
+            loop_mode = int(motion_raw_data["loop_mode"].item())
             
             self.motion_durations.append(duration)
             self.motion_fps.append(fps)
@@ -131,10 +130,10 @@ class MotionDataTerm(ManagerTermBase):
             # Get the motion data
             
             # root position in world frame, shape (num_frames, 3)
-            root_pos_w = torch.from_numpy(motion_raw_data["root_pos"]).to(self.device).float()
+            root_pos_w = torch.from_numpy(motion_raw_data["root_pos_w"]).to(self.device).float()
             root_pos_w.requires_grad_(False)
-            # Stored motion files use wxyz; Isaac Lab 3.0 math and state use xyzw.
-            root_quat = torch.from_numpy(motion_raw_data["root_rot"]).to(self.device).float()[..., [1, 2, 3, 0]]
+            # Unified files and Isaac Lab 3.0 both use XYZW.
+            root_quat = torch.from_numpy(motion_raw_data["root_quat_w"]).to(self.device).float()
             root_quat.requires_grad_(False)
             
             # root velocity in world frame, shape (num_frames, 3)
@@ -146,7 +145,7 @@ class MotionDataTerm(ManagerTermBase):
             root_ang_vel_w.requires_grad_(False)
             
             # dof position, shape (num_frames, num_dofs)
-            dof_pos = torch.from_numpy(motion_raw_data["dof_pos"]).to(self.device).float()
+            dof_pos = torch.from_numpy(motion_raw_data["joint_pos"]).to(self.device).float()
             dof_pos.requires_grad_(False)
             
             # dof velocity, shape (num_frames, num_dofs)
@@ -154,7 +153,7 @@ class MotionDataTerm(ManagerTermBase):
             dof_vel.requires_grad_(False)
             
             # key body position in world frame, shape (num_frames, num_key_bodies, 3)
-            key_body_pos_w = torch.from_numpy(motion_raw_data["key_body_pos"]).to(self.device).float()
+            key_body_pos_w = torch.from_numpy(motion_raw_data["key_body_pos_w"]).to(self.device).float()
             key_body_pos_w.requires_grad_(False)
             
             self.root_pos_w.append(root_pos_w)

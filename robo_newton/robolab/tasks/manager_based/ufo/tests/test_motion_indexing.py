@@ -12,6 +12,7 @@ import unittest
 
 import numpy as np
 import torch
+from robolab.utils.motion_npz import FORMAT
 
 
 def load_motion_module(motion_dir: Path, package_name: str):
@@ -47,14 +48,16 @@ class TestMotionIndexing(unittest.TestCase):
                 if field == "body_quat_w":
                     arrays[field] /= np.linalg.norm(arrays[field], axis=-1, keepdims=True)
             path = self.root / f"source_{source_id}.npz"
-            np.savez(path, fps=np.float32(10), **arrays)
+            np.savez(path, fps=np.float32(10), format=FORMAT, quaternion_order="xyzw", joint_order="urdf",
+                     joint_names=["j0", "j1"], body_names=["base_link", "b1", "b2"], **arrays)
             records.append({"name": f"source_{source_id}", "npz": path.name})
             # Match the loader's one-time quaternion normalization.
             arrays["body_quat_w"] /= np.linalg.norm(arrays["body_quat_w"], axis=-1, keepdims=True)
             self.sources.append({key: torch.from_numpy(value) for key, value in arrays.items()})
         self.manifest = self.root / "manifest.json"
         self.manifest.write_text(
-            json.dumps({"clips": records, "npz": {"joint_order": ["j0", "j1"], "output_fps": 10}}),
+            json.dumps({"format": FORMAT, "clips": records, "npz": {
+                "joint_order": ["j0", "j1"], "body_order": ["base_link", "b1", "b2"], "output_fps": 10}}),
             encoding="utf-8",
         )
 
@@ -141,6 +144,26 @@ class TestMotionIndexing(unittest.TestCase):
             for with_offset in (False, True):
                 with self.subTest(input_kind=input_kind, with_offset=with_offset):
                     self.assert_reference(library, True, input_kind, with_offset)
+
+    def test_named_reordering_preserves_motion_queries(self):
+        original = self.make_library(False)
+        reordered = motion.MotionLibNPZ({
+            "motion_file": str(self.manifest), "joint_names": ["j1", "j0"],
+            "body_names": ["base_link", "b2", "b1"],
+        }, num_envs=8, device="cpu")
+        ids, times = torch.tensor([0, 1, 2]), torch.tensor([.125, .213, .023])
+        before, after = original.get_motion_state(ids, times), reordered.get_motion_state(ids, times)
+        for field in ("dof_pos", "dof_vel"):
+            torch.testing.assert_close(after[field], before[field][:, [1, 0]], rtol=0, atol=0)
+        for field in ("rg_pos", "rb_rot", "body_vel", "body_ang_vel"):
+            torch.testing.assert_close(after[field], before[field][:, [0, 2, 1]], rtol=0, atol=0)
+
+    def test_manifest_names_must_match_each_clip(self):
+        manifest = json.loads(self.manifest.read_text())
+        manifest["npz"]["joint_order"] = ["j1", "j0"]
+        self.manifest.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "disagree with the manifest"):
+            self.make_library(False)
 
 
 if __name__ == "__main__":

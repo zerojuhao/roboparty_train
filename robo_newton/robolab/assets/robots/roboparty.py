@@ -36,8 +36,14 @@ from isaaclab.assets.articulation import ArticulationCfg
 
 from robolab.assets import ISAAC_DATA_DIR
 from robolab.assets.robots.roboparty_actuators import RoboPartyActuatorCfg
+from robolab.utils.motion_npz import urdf_names
+
+RPO_JOINT_NAMES, RPO_BODY_NAMES = urdf_names(f"{ISAAC_DATA_DIR}/robots/roboparty/rpo/urdf/rpo.urdf")
+RP1_JOINT_NAMES, RP1_BODY_NAMES = urdf_names(f"{ISAAC_DATA_DIR}/robots/roboparty/rp1.3/urdf/rp1_24dof.urdf")
 
 RPO_CFG = ArticulationCfg(
+    joint_ordering=RPO_JOINT_NAMES,
+    body_ordering=RPO_BODY_NAMES,
     spawn=sim_utils.UrdfFileCfg(
         asset_path=f"{ISAAC_DATA_DIR}/robots/roboparty/rpo/urdf/rpo.urdf",
         fix_base=False,
@@ -157,6 +163,8 @@ RPO_CFG = ArticulationCfg(
 
 
 RP1_24DOF_CFG = ArticulationCfg(
+    joint_ordering=RP1_JOINT_NAMES,
+    body_ordering=RP1_BODY_NAMES,
     spawn=sim_utils.UrdfFileCfg(
         asset_path=f"{ISAAC_DATA_DIR}/robots/roboparty/rp1.3/urdf/rp1_24dof.urdf",
         fix_base=False,

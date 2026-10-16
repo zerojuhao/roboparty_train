@@ -54,7 +54,7 @@ from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg as FiledTer
 
 MOTION_MANIFEST = os.environ.get(
     "UFO_MOTION_MANIFEST",
-    os.path.join(ISAAC_DATA_DIR, "motions", "rp1_lafan", "manifest.json"),
+    os.path.join(ISAAC_DATA_DIR, "motions", "newton", "rp1_lafan", "manifest.json"),
 )
 
 
@@ -321,12 +321,12 @@ class PUFOEventCfg:
         interval_range_s=(1.0, 3.0),
         params={
             "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
+                "x": (-1.0, 1.0),
+                "y": (-1.0, 1.0),
                 "z": (0.0, 0.0),
-                "roll": (-0.5, 0.5),
-                "pitch": (-0.5, 0.5),
-                "yaw": (-0.5, 0.5),
+                "roll": (-1.0, 1.0),
+                "pitch": (-1.0, 1.0),
+                "yaw": (-1.0, 1.0),
             },
         },
     )

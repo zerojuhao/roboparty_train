@@ -173,6 +173,16 @@ class Logger:
                     second.append(right)
                 pending.clear()
 
+    def _episode_extras_means(self) -> dict[str, float]:
+        keys = list(dict.fromkeys(key for info in self.ep_extras for key in info))
+        means = []
+        for key in keys:
+            values = [torch.as_tensor(info[key], device=self.device).reshape(-1)
+                      for info in self.ep_extras if key in info]
+            # The empty float tensor preserves the previous integer/half promotion.
+            means.append(torch.cat([torch.empty(0, device=self.device), *values]).mean())
+        return dict(zip(keys, torch.stack(means).tolist())) if means else {}
+
     @staticmethod
     def _format_amp_console_metrics(loss_dict: dict, pad: int) -> str:
         """Return a compact AMP summary while full metrics remain in the log writer."""
@@ -242,27 +252,13 @@ class Logger:
 
             # Log episode extras
             extras_string = ""
-            if self.ep_extras:
-                # Iterate over all keys in the episode info dictionary
-                for key in dict.fromkeys(k for ep_info in self.ep_extras for k in ep_info):
-                    infotensor = torch.tensor([], device=self.device)
-                    # Iterate over all steps
-                    for ep_info in self.ep_extras:
-                        # Handle missing, scalar, and zero dimensional tensors
-                        if key not in ep_info:
-                            continue
-                        if not isinstance(ep_info[key], torch.Tensor):
-                            ep_info[key] = torch.Tensor([ep_info[key]])
-                        if len(ep_info[key].shape) == 0:
-                            ep_info[key] = ep_info[key].unsqueeze(0)
-                        infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
-                    value = torch.mean(infotensor)
-                    if "/" in key:
-                        self.writer.add_scalar(key, value, it)  # type: ignore
-                        extras_string += f"""{f"{key}:":>{pad}} {value:.4f}\n"""
-                    else:
-                        self.writer.add_scalar("Episode/" + key, value, it)  # type: ignore
-                        extras_string += f"""{f"Mean episode {key}:":>{pad}} {value:.4f}\n"""
+            for key, value in self._episode_extras_means().items():
+                if "/" in key:
+                    self.writer.add_scalar(key, value, it)  # type: ignore
+                    extras_string += f"""{f"{key}:":>{pad}} {value:.4f}\n"""
+                else:
+                    self.writer.add_scalar("Episode/" + key, value, it)  # type: ignore
+                    extras_string += f"""{f"Mean episode {key}:":>{pad}} {value:.4f}\n"""
 
             # Log losses
             for key, value in loss_dict.items():
@@ -271,7 +267,8 @@ class Logger:
             self.writer.add_scalar("Loss/learning_rate", learning_rate, it)
 
             # Log std
-            self.writer.add_scalar("Policy/mean_std", action_std.mean().item(), it)
+            mean_action_std = action_std.mean().item()
+            self.writer.add_scalar("Policy/mean_std", mean_action_std, it)
 
             # Log performance
             fps = int(collection_size / (collect_time + learn_time))
@@ -321,7 +318,7 @@ class Logger:
                 log_string += f"""{"Mean episode length:":>{pad}} {statistics.mean(self.lenbuffer):.2f}\n"""
 
             # Print std
-            log_string += f"""{"Mean action std:":>{pad}} {action_std.mean().item():.2f}\n"""
+            log_string += f"""{"Mean action std:":>{pad}} {mean_action_std:.2f}\n"""
 
             # Print episode extras
             if not print_minimal:

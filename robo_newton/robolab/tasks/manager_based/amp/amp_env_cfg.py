@@ -659,6 +659,8 @@ class PhysicsPresetCfg(PresetCfg):
 class AmpEnvCfg(AnimationEnvCfg):
     """Configuration for the AMP locomotion environment."""
 
+    motion_dataset_contract: str = "roboparty_motion_v1_urdf"
+
     # scene
     scene: AmpSceneCfg = AmpSceneCfg(num_envs=8192, env_spacing=2.5)
     # Basic settings

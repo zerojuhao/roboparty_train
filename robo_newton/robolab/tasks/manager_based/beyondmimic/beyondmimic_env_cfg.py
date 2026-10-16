@@ -393,6 +393,8 @@ class PhysicsPresetCfg(PresetCfg):
 class BeyondMimicEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
+    motion_dataset_contract: str = "roboparty_motion_v1_urdf"
+
     # Scene settings
     scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=2.5)
     # Basic settings

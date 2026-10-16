@@ -22,9 +22,13 @@ class TestResetContract(unittest.TestCase):
         library.sample_motions.side_effect = lambda n: torch.full((n,), 3, dtype=torch.long)
         library.sample_time.side_effect = lambda ids, **kwargs: torch.full(ids.shape, 1.25)
         cfg = UFOMotionCommandCfg(asset_name="robot", manifest_path="unused")
-        env = SimpleNamespace(num_envs=4, device="cpu", step_dt=0.02)
-        with patch("robolab.tasks.manager_based.ufo.mdp.commands.MotionLibNPZ", return_value=library):
-            return UFOMotionCommand(cfg, env), library
+        robot = SimpleNamespace(joint_names=["joint_a", "joint_b"], body_names=["base_link", "body_a"])
+        env = SimpleNamespace(num_envs=4, device="cpu", step_dt=0.02, scene={"robot": robot})
+        with patch("robolab.tasks.manager_based.ufo.mdp.commands.MotionLibNPZ", return_value=library) as constructor:
+            command = UFOMotionCommand(cfg, env)
+            self.assertEqual(list(constructor.call_args.args[0].joint_names), robot.joint_names)
+            self.assertEqual(list(constructor.call_args.args[0].body_names), robot.body_names)
+            return command, library
 
     def test_pose_event_prepares_new_frame_and_manager_reset_does_not_resample(self):
         command, library = self.make_command()

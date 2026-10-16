@@ -12,7 +12,7 @@ from robolab.tasks.manager_based.parkour.parkour_env_cfg import (
     ParkourEnvCfg,
 )
 
-# Must match lab_key_body_names in robolab/scripts/tools/retarget/config/rp1.yaml
+# The motion loader selects and reorders NPZ key-body tracks by these names.
 KEY_BODY_NAMES = [
     "left_ankle_roll_link",
     "right_ankle_roll_link",
@@ -152,8 +152,9 @@ class RP1ParkourEnvCfg(ParkourEnvCfg):
         self.scene.camera.offset.rot = (0.0, 0.5, 0.0, 0.866)
         self.scene.camera.mesh_prim_paths.extend(get_link_prim_targets(PR1_LINKS))
         self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "v0"
+            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rp1"
         )
+        self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights = dict(RP1_GENERAL_MOTION_DATA_WEIGHTS)
         self.animation.animation.num_steps_to_use = AMP_NUM_STEPS
         self.observations.disc.history_length = AMP_NUM_STEPS

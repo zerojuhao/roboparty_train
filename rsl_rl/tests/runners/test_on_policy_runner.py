@@ -186,6 +186,26 @@ class TestLearnLoop:
 class TestSaveLoad:
     """Tests for checkpoint save and load."""
 
+    def test_motion_contract_roundtrip_and_legacy_rejection(self, tmp_path) -> None:
+        from types import SimpleNamespace
+        import pytest
+
+        runner = _build_runner()
+        runner.env.cfg = SimpleNamespace(motion_dataset_contract="roboparty_motion_v1_urdf")
+        path = str(tmp_path / "model.pt")
+        runner.save(path)
+        runner.load(path)
+        checkpoint = torch.load(path, weights_only=False)
+        assert checkpoint["motion_dataset_contract"] == "roboparty_motion_v1_urdf"
+        del checkpoint["motion_dataset_contract"]
+        torch.save(checkpoint, path)
+        with pytest.raises(ValueError, match="joint-order contract"):
+            runner.load(path)
+        checkpoint["motion_dataset_contract"] = "different_order"
+        torch.save(checkpoint, path)
+        with pytest.raises(ValueError, match="joint-order contract"):
+            runner.load(path)
+
     def test_save_creates_file(self) -> None:
         """save() should create a checkpoint file at the given path."""
         runner = _build_runner()

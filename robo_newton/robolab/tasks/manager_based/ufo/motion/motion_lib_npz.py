@@ -21,6 +21,7 @@ import numpy as np
 import torch
 
 from .torch_utils import slerp
+from robolab.utils.motion_npz import FORMAT, load_motion, name_indices, resolve_motion_manifest
 
 MOTION_FIELDS = (
     "joint_pos",
@@ -33,21 +34,21 @@ MOTION_FIELDS = (
 
 
 class MotionLibNPZ:
-    """Serves the UFO motion API from a BeyondMimic-format NPZ dataset."""
+    """Serves the UFO motion API from unified XYZW / named NPZ clips."""
 
     def __init__(self, motion_lib_cfg, num_envs, device):
         self.device = torch.device(device)
         self.num_envs = num_envs
 
-        manifest_path = Path(str(motion_lib_cfg["motion_file"])).expanduser()
-        if manifest_path.is_dir():
-            manifest_path = manifest_path / "manifest.json"
+        manifest_path = resolve_motion_manifest(motion_lib_cfg["motion_file"])
         if not manifest_path.is_file():
             raise FileNotFoundError(f"Motion manifest does not exist: {manifest_path}")
         self.manifest_path = manifest_path
 
         with manifest_path.open("r", encoding="utf-8") as stream:
             manifest = json.load(stream)
+        if manifest.get("format") != FORMAT:
+            raise ValueError(f"Convert the motion dataset to {FORMAT} first: {manifest_path}")
         records = manifest.get("clips")
         if not isinstance(records, list) or not records:
             raise ValueError(f"Manifest must contain a non-empty 'clips' list: {manifest_path}")
@@ -65,6 +66,13 @@ class MotionLibNPZ:
         joint_order = npz_meta.get("joint_order")
         if joint_order is None:
             raise ValueError("Manifest 'npz.joint_order' is required to map motions to the robot.")
+        body_order = npz_meta["body_order"]
+        target_joints = list(motion_lib_cfg.get("joint_names", joint_order))
+        target_bodies = list(motion_lib_cfg.get("body_names", body_order))
+        joint_indices = name_indices(joint_order, target_joints)
+        body_indices = name_indices(body_order, target_bodies)
+        if target_bodies[0] != "base_link":
+            raise ValueError("UFO requires base_link at body index zero.")
         expected_fps = npz_meta.get("output_fps")
 
         names: list[str] = []
@@ -81,28 +89,24 @@ class MotionLibNPZ:
             if not path.is_file():
                 raise FileNotFoundError(f"NPZ for clip {name!r} does not exist: {path}")
 
-            with np.load(path, allow_pickle=False) as loaded:
-                missing = [field for field in MOTION_FIELDS + ("fps",) if field not in loaded]
-                if missing:
-                    raise ValueError(f"Clip {name!r} is missing NPZ keys: {missing}")
-                fps_array = np.asarray(loaded["fps"]).reshape(-1)
-                if fps_array.size != 1 or not np.isfinite(fps_array[0]):
-                    raise ValueError(f"Clip {name!r} has invalid fps metadata.")
-                fps = float(fps_array[0])
-                if expected_fps is not None and abs(fps - float(expected_fps)) > 1e-3:
-                    raise ValueError(
-                        f"Clip {name!r} fps={fps} does not match manifest output_fps={expected_fps}."
-                    )
-                for field in MOTION_FIELDS:
-                    value = np.asarray(loaded[field], dtype=np.float32)
-                    if not np.isfinite(value).all():
-                        raise ValueError(f"Clip {name!r}: {field} contains NaN/Inf.")
-                    if field == "body_quat_w":
-                        norms = np.linalg.norm(value, axis=-1, keepdims=True)
-                        if np.abs(norms - 1.0).max() > 1e-2:
-                            raise ValueError(f"Clip {name!r}: body_quat_w is not close to unit norm.")
-                        value = value / np.clip(norms, 1e-8, None)
-                    arrays[field].append(torch.from_numpy(value).to(device=self.device))
+            loaded = load_motion(path)
+            if loaded["joint_names"].tolist() != joint_order or loaded["body_names"].tolist() != body_order:
+                raise ValueError(f"Clip {name!r}: joint/body names disagree with the manifest.")
+            missing = [field for field in MOTION_FIELDS + ("fps",) if field not in loaded]
+            if missing:
+                raise ValueError(f"Clip {name!r} is missing NPZ keys: {missing}")
+            fps = float(np.asarray(loaded["fps"]).reshape(-1)[0])
+            if expected_fps is not None and abs(fps - float(expected_fps)) > 1e-3:
+                raise ValueError(f"Clip {name!r} fps={fps} does not match manifest output_fps={expected_fps}.")
+            for field in MOTION_FIELDS:
+                value = np.asarray(loaded[field], dtype=np.float32)
+                indices = joint_indices if field.startswith("joint") else body_indices
+                if indices != list(range(value.shape[1])):
+                    value = value[:, indices]
+                if field == "body_quat_w":
+                    norms = np.linalg.norm(value, axis=-1, keepdims=True)
+                    value = value / np.clip(norms, 1e-8, None)
+                arrays[field].append(torch.from_numpy(value).to(device=self.device))
             names.append(name)
             fps_values.append(fps)
 
@@ -117,7 +121,8 @@ class MotionLibNPZ:
 
         self._num_unique_motions = len(names)
         self._motion_data_keys = np.array(names)
-        self._motion_joints = tuple(str(name) for name in joint_order)
+        self._motion_joints = tuple(target_joints)
+        self._motion_bodies = tuple(target_bodies)
         self._motion_num_frames = torch.tensor(num_frames, dtype=torch.long, device=self.device)
         self._motion_lengths = (self._motion_num_frames - 1).float() / self._fps
         self._motion_dt = torch.full((self._num_unique_motions,), 1.0 / self._fps, device=self.device)

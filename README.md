@@ -1,140 +1,164 @@
 # roboparty_train
 
-[![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
-[![Isaac Lab](https://img.shields.io/badge/IsaacLab-main-silver)](https://isaac-sim.github.io/IsaacLab)
-[![RSL_RL](https://img.shields.io/badge/RSL_RL-3.3.0-silver)](https://github.com/leggedrobotics/rsl_rl)
-[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://docs.python.org/3/whatsnew/3.11.html)
-[![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/22.04/)
-[![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
-[![License](https://img.shields.io/badge/license-BSD--3-yellow.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
-
 [English](README.md) | [中文](README_CN.md)
 
-## Overview
+RP1 and RPO policy training with Isaac Lab 3.0, Newton/MJWarp, and a locally modified RSL-RL. Tasks include AMP, Parkour/SSR, UFO/PUFO, and BeyondMimic.
 
-`roboparty_train` is the Roboparty training workspace for RPO locomotion policies. It keeps Roboparty task definitions, motion-retargeting tools, MuJoCo Sim2Sim scripts, and RSL-RL training entry points outside the upstream Isaac Lab tree.
+## Repository
 
-The repository is organized as a thin workspace with two Git submodules:
+```text
+robo_newton/robolab/       Robot definitions, tasks, sensors, and utilities
+robo_newton/scripts/       Training, evaluation, export, and diagnostic tools
+rsl_rl/rsl_rl/             Modified algorithms and runners
+rsl_rl/tests/              Training-library tests
+robo_newton/data/          Local robot assets and motion data (not tracked)
+```
 
-- `robolab`: Roboparty Isaac Lab extension, environments, scripts, and robot assets.
-- `rsl_rl`: Roboparty-compatible RSL-RL dependency snapshot.
+Source directories are ordinary tracked directories, not Git submodules. Isaac Lab is installed separately. `IsaacLab/`, `IsaacLab-3.0/`, `project_ops/`, logs, checkpoints, and local runtime data are excluded from Git. Motion-data publication is not yet included in this repository.
 
-**Maintainer**: RoboParty
-**Support**: GitHub Issues
+## Installation
 
-## Features
+The current environment uses Linux, NVIDIA GPUs, Python 3.12, and a Newton-capable Isaac Lab 3.0 checkout. Follow the [SDK installation guide](https://isaac-sim.github.io/IsaacLab/v3.0.0-EA/source/setup/installation/index.html). This repository does not pin or distribute the SDK checkout; arbitrary newer upstream revisions are not guaranteed compatible.
 
-- RPO training environments built on Isaac Lab.
-- RSL-RL training, evaluation, and policy export entry points.
-- AMP, BeyondMimic, and Parkour workflows.
-- MuJoCo Sim2Sim scripts for policy transfer checks.
-- Motion retargeting utilities for datasets prepared with [GMR](https://github.com/Roboparty/GMR).
+[requirements-physics.txt](robo_newton/requirements-physics.txt) pins MuJoCo 3.12.0, mujoco-warp 3.12.0, Warp 1.17.0, and Newton 1.6.0. Do not upgrade without collision regressions. Use this repository's RSL-RL fork.
 
-## Requirements
-
-- Python 3.11.
-- Isaac Sim 5.1.0 and Isaac Lab main.
-- Ubuntu 22.04 x64 or Windows x64.
-
-Install Isaac Lab by following the [official installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html). Run the commands below in the Python environment used by Isaac Lab.
-
-## Clone
-
-Clone this repository outside the Isaac Lab source tree. Use `--recursive` so that `robolab` and `rsl_rl` are populated immediately:
+In the activated Isaac Lab Python environment:
 
 ```bash
-git clone --recursive https://github.com/Roboparty/roboparty_train.git
+git clone https://github.com/zerojuhao/roboparty_train.git
 cd roboparty_train
+python -m pip install -r robo_newton/requirements-physics.txt
+python -m pip install -e ./robo_newton -e ./rsl_rl
+export PYTHONPATH="$PWD/rsl_rl:$PWD/robo_newton${PYTHONPATH:+:$PYTHONPATH}"
+export ROBO_TRAIN_LOG_ROOT="$PWD/logs/rsl_rl"
 ```
 
-If you already cloned the repository and `robolab` or `rsl_rl` is empty, initialize the submodules manually:
+Private repositories require GitHub access. Provision the following robot assets and datasets before importing task configurations or starting training.
+
+## Motion Data
+
+`robo_newton/data` may be a symlink to a local data disk:
+
+```text
+robo_newton/data/
+  robots/roboparty/rp1.3/  RP1 URDF, MJCF, and meshes
+  robots/roboparty/rpo/    RPO URDF, MJCF, and meshes
+  motions/newton/
+    rp1/                  RP1 AMP, Parkour, and SSR
+    rp1_upper_run_bounded/ RP1 AMP upper-body reference
+    rpo/                  RPO AMP, Parkour, and BeyondMimic
+    rp1_lafan/            UFO/PUFO manifest.json and npz/
+    conversion_report.json
+```
+
+All training clips use `roboparty_motion_v1` NPZ with `allow_pickle=False`. Metadata includes `format`, `fps`, `quaternion_order="xyzw"`, `joint_order="urdf"`, and `joint_names`. Identity rotation is `[0, 0, 0, 1]`. Joint columns follow non-fixed URDF declaration order; robot configurations explicitly select this order. Loaders validate names and map columns once at startup.
+
+| Track | Arrays |
+| --- | --- |
+| Common | `joint_pos` |
+| AMP | `root_pos_w`, `root_quat_w`, `key_body_pos_w`, `key_body_names`, `loop_mode` |
+| Full-body | `joint_vel`, `body_names`, `body_pos_w`, `body_quat_w`, `body_lin_vel_w`, `body_ang_vel_w` |
+
+Positions are metres, joint angles radians, and world-space velocities retain source semantics. Full-body tracks put `base_link` first. AMP retains its forward-difference velocity calculation and key-body measurements. Conversion does not invent missing body tracks, retarget, resample, or smooth motions. Compression is lossless; the conversion report records source/output hashes.
+
+UFO/PUFO defaults to `motions/newton/rp1_lafan/manifest.json`; override with `UFO_MOTION_MANIFEST`. A `.npz` extension alone does not establish compatible conventions.
+
+Retarget motions with external tools and prepare NPZ files that follow the schema above before training. Legacy retargeting, CSV/PKL preparation, and one-time migration scripts have been removed. Runtime validation and name-based mapping remain in [motion_npz.py](robo_newton/robolab/utils/motion_npz.py); this module does not retarget motions or infer missing tracks or source conventions.
+
+The current slimmed dataset contains 125 clips, approximately 752 MiB in total:
+
+| Directory | Clips | NPZ Size |
+| --- | ---: | ---: |
+| `rp1` | 36 | 2.1 MiB |
+| `rpo` | 33 | 6.0 MiB |
+| `rp1_upper_run_bounded` | 1 | Less than 0.1 MiB |
+| `rp1_lafan/npz` | 55 | 743.5 MiB |
+
+These counts describe the local training bundle, not files bundled with the source checkout. Original motions, intermediate PKLs, and duplicate backups are not needed. Keep the LAFAN manifest and relevant provenance records alongside the NPZs. Robot assets must be provisioned separately.
+
+Motion data does not inherit the source-code license. [Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) is released under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Retargeting does not remove upstream restrictions; confirm redistribution rights before publishing modified motion data. This also applies to LAFAN-derived clips stored in other folders.
+
+## Training
+
+Run from the repository root, using `robo_newton/scripts/rsl_rl/train.py` as the primary training entry point. Common task IDs: `RP1-AMP`, `RP1-AMP-Path`, `RP1-Parkour`, `RP1-SSR`, `RP1-UFO`, `RP1-PUFO`, `RPO-AMP`, `RPO-Parkour`.
 
 ```bash
-cd roboparty_train
-git submodule update --init --recursive
+python robo_newton/scripts/rsl_rl/train.py \
+  --task RP1-AMP-Path --num_envs 1024 --device cuda:0 \
+  --visualizer none --logger tensorboard
 ```
 
-## Install
+Multi-GPU example (`num_envs` per worker):
 
 ```bash
-pip install -e ./robolab
-pip install -e ./rsl_rl
+python -m torch.distributed.run --standalone --nproc_per_node=8 \
+  robo_newton/scripts/rsl_rl/train.py --task RP1-PUFO \
+  --num_envs 1024 --device cuda --distributed --visualizer none --logger tensorboard
 ```
 
-Verify that the extension is installed by listing the available environments:
+Resume compatible runs with `--resume --load_run RUN --checkpoint model_N.pt`. The URDF migration changes AMP discriminator inputs, including upper-body inputs. Legacy AMP/Parkour/SSR/BeyondMimic checkpoints are rejected until explicitly migrated; equal tensor dimensions do not imply compatible joint semantics. Start a new run for the new convention. Running processes are not migrated automatically.
+
+## Evaluation and Export
+
+Use absolute checkpoint paths to avoid ambiguity between log roots:
 
 ```bash
-python robolab/scripts/tools/list_envs.py
+python robo_newton/scripts/rsl_rl/play_amp.py \
+  --task RP1-AMP-Path-Play --num_envs 1 \
+  --checkpoint /path/to/run/model_N.pt --visualizer none
+
+python robo_newton/scripts/rsl_rl/play_parkour.py \
+  --task RP1-Parkour-Play --num_envs 1 \
+  --checkpoint /path/to/run/model_N.pt --exportonnx --visualizer none
+
+python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
+  --load_run /path/to/pufo_run --checkpoint model_N.pt --motion dance1_subject2
 ```
 
-## Usage
+PUFO export also needs saved run configuration and motion data. MuJoCo checks live under `robo_newton/scripts/mujoco/`; select the entry point and deployment contract matching the policy.
 
-### Train
+PUFO sim2sim assets live in `robo_newton/data/robots/roboparty/rp1.3/mjcf/`: `rp1_simple_terrain/` contains the terrain, and `robot_24dof_newton_physics.json` contains nominal compiled collision/contact/solver data. The shared `robolab.utils.mujoco_physics` utility applies these assets without loading a checkpoint; motor limits are resolved from the URDF and supplied actuator configuration. Other tasks can use their own assets through the same utility, not inherit PUFO parameters implicitly. `sim2sim_rp1_pufo.py --physics-asset PATH` selects an alternative asset. Regenerate assets with `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` from a nonrandomized, single-robot Newton model with a ground plane. These files are local data and must be distributed alongside the robot assets.
+
+The terrain assets `rp1_simple_terrain/rp1_simple_terrain.xml` and `rp1_simple_terrain/meta.json` are pre-generated; the old machine-specific terrain exporter has been removed. The metadata supplies reset positions and terrain descriptions, while `robot_24dof_newton_physics.json` supplies Newton collision, contact, and solver parameters. Both JSON files are required by PUFO sim2sim and use indented formatting. The physics exporter above regenerates only the physics JSON, not the terrain. Install both terrain files from the robot asset bundle; an external UFO checkout is not needed to run sim2sim.
+
+With Isaac Lab 3, `effort_limit_sim` is a solver-joint limit alias, not the explicit actuator's internal torque limit. Set `actuator_effort_limit` explicitly when that is intended. Sim2sim preserves this distinction for saved configurations; this asset reorganization does not change training motor settings.
+
+All RP1 sim2sim entry points (AMP, Parkour, PUFO) use `robolab.utils.mujoco_actuators.RoboPartyMujocoActuator`, which instantiates the actual training `RoboPartyActuator` for PD, torque-speed rolloff and braking. No motor torque values are embedded in these scripts or physics assets. AMP/PUFO use the run's saved robot configuration; Parkour accepts `--env-config params/env.yaml`, otherwise uses `--checkpoint`'s run configuration or the current `roboparty.py` defaults. Nominal evaluation disables actuator delay and random feed-forward torque.
+
+## Script Guide
+
+Paths below are relative to `robo_newton/scripts/`. Standalone diagnostic tools need not be imported by training to remain useful. This inventory documents their roles, not a claim that every legacy GUI entry point has been validated on the current Newton stack.
+
+| Entry | Purpose and Status |
+| --- | --- |
+| `rsl_rl/train.py`, `rsl_rl/play*.py`, `rsl_rl/export_pufo_deploy.py` | Main training, task-specific evaluation, and policy export. Keep. |
+| `smoke_newton_env.py` | Creates, resets, and steps an environment without PPO; checks finite outputs and optional Parkour colliders, PUFO contacts, and compact depth replay. Keep for regressions. |
+| `tools/export_mujoco_physics.py` | Regenerates collision/contact/solver JSON from a nominal compiled model. Not required on each run, but needed after physics-asset changes. Keep. |
+| `tools/list_envs.py` | Lists registered task IDs. Useful, though currently starts AppLauncher. |
+| `tools/visualize_robot.py`, `tools/visualize_terrain.py`, `tools/visualize_depth_domain_randomization.py` | Inspect robot joint/link order, terrain, and camera noise. Keep as optional diagnostics; these use AppLauncher-based scenes. |
+| `bind_gpu_local_rank.py` | Optional torchrun wrapper binding each worker to CPUs local to its GPU. Requires explicit `CUDA_VISIBLE_DEVICES` and Linux NUMA topology. |
+| `train_newton.py`, `play_newton.py` | Thin Isaac Lab CLI wrappers, not equivalents of all custom runner features. `smoke_newton_env.py` imports `train_newton.py` for kitless initialization; do not remove it in isolation. |
+| `tools/export_terrain.py` | Exports a hard-coded example terrain to meshes, convex parts, or a height field. It does not reproduce the RP1 PUFO terrain bundle. Legacy utility to generalize or retire. |
+| `tools/preview_terrain.py` | Specialized screenshot/height-profile script for `HIGH_PLATFORM_45x60_CFG`, not a general XML viewer. Candidate for consolidation. |
+| `tools/rename_template.py` | Leftover `ext_template` project scaffolding. The expected template directory is absent; not a training tool and a removal candidate. Do not run it on this repository. |
+| `mujoco/sim2sim_*.py` | Deployment checks with task-specific observation/action contracts. Keep the entry matching the policy; older RPO variants need a separate compatibility audit before consolidation. |
+
+CPU regression tests for motion loading and RP1 sim2sim:
 
 ```bash
-python robolab/scripts/rsl_rl/train.py --task=<ENV_NAME> --headless --logger=tensorboard --num_envs=8192
+MUJOCO_GL=egl python -m pytest -q robo_newton/robolab/utils/tests
 ```
 
-### Play
+The sim2sim integration tests require local robot assets; some motion checks skip if the data bundle is absent. A GPU environment smoke test is separate from these unit tests:
 
 ```bash
-python robolab/scripts/rsl_rl/play.py --task=<ENV_NAME> --num_envs=1
+python robo_newton/scripts/smoke_newton_env.py \
+  --task RP1-AMP --num_envs 2 --steps 4 --device cuda:0
 ```
 
-### Play AMP
+## References
 
-```bash
-python robolab/scripts/rsl_rl/play_amp.py --task=RPO-AMP-Play --num_envs=1
-```
-
-### Play BeyondMimic
-
-```bash
-python robolab/scripts/rsl_rl/play_bm.py --task=RPO-BeyondMimic --num_envs=1
-```
-
-### Play Parkour
-
-```bash
-python robolab/scripts/rsl_rl/play_parkour.py --task=RPO-Parkour-Play --num_envs=1
-```
-
-To export an ONNX model, set `num_envs=1` and add `--exportonnx`:
-
-```bash
-python robolab/scripts/rsl_rl/play_parkour.py --task=RPO-Parkour-Play --num_envs=1 --exportonnx
-```
-
-### Sim2Sim
-
-```bash
-python robolab/scripts/mujoco/sim2sim_rpo.py --load_model "{exported/policy.pt model full path here}"
-```
-
-### Prepare Motion Data
-
-To prepare datasets for AMP and BeyondMimic, see [GMR](https://github.com/Roboparty/GMR).
-
-The joint order in datasets produced by GMR follows the robot URDF/XML order, which differs from the order used by Isaac Lab. Prepare a joint mapping file such as `robolab/scripts/tools/retarget/config/rpo.yaml`, then reorder the joint sequence before training:
-
-```bash
-python robolab/scripts/tools/retarget/dataset_retarget.py
-```
-
-## Troubleshooting
-
-- Empty `robolab` or `rsl_rl` directory: run `git submodule update --init --recursive`.
-- Missing Isaac Lab imports: activate the Python environment used by Isaac Lab before installing or running scripts.
-- Missing RPO task name: run `python robolab/scripts/tools/list_envs.py` and copy the exact task id.
-
-## References and Thanks
-
-This project builds on the following open-source projects:
-
-- [IsaacLab](https://github.com/isaac-sim/IsaacLab)
-- [rsl_rl](https://github.com/leggedrobotics/rsl_rl)
-- [legged_gym](https://github.com/leggedrobotics/legged_gym)
-- [legged_lab](https://github.com/zitongbai/legged_lab)
-- [robot_lab](https://github.com/fan-ziqi/robot_lab)
-- [InstinctLab](https://github.com/project-instinct/InstinctLab)
+- [Isaac Lab](https://github.com/isaac-sim/IsaacLab)
+- [Newton](https://github.com/newton-physics/newton)
+- [RSL-RL](https://github.com/leggedrobotics/rsl_rl)
+- [MuJoCo](https://github.com/google-deepmind/mujoco)

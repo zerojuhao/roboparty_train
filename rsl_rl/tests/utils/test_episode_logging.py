@@ -87,3 +87,56 @@ def test_log_flushes_partial_rollout_and_disabled_logging_does_not_allocate(caps
     logger.writer = None
     logger.process_env_step(torch.ones(2), torch.ones(2), {})
     assert not logger._pending_episode_stats
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_extras_preserve_sample_weighting_missing_keys_and_input_values(device):
+    logger = make_logger(device)
+    first = {"Episode_Reward/test": torch.tensor(2., device=device),
+             "Braking/conditional": torch.tensor([1., 3., 5.], device=device),
+             "integer": torch.tensor([1, 2], device=device), "python": 3.0,
+             "empty": torch.empty(0, device=device),
+             "half": torch.tensor([1., 3.], device=device, dtype=torch.float16)}
+    second = {"Episode_Reward/test": torch.tensor([4., 6.], device=device),
+              "Braking/conditional": torch.tensor([9.], device=device),
+              "integer": torch.tensor(3, device=device), "python": 7.0}
+    logger.ep_extras = [first, second]
+    result = logger._episode_extras_means()
+    assert list(result) == list(first)
+    assert result["Episode_Reward/test"] == 4.0
+    assert result["Braking/conditional"] == 4.5
+    assert result["integer"] == 2.0
+    assert result["python"] == 5.0
+    assert result["half"] == 2.0
+    assert torch.isnan(torch.tensor(result["empty"]))
+    assert first["Episode_Reward/test"].ndim == 0
+    assert second["integer"].ndim == 0
+    assert isinstance(first["python"], float)
+    assert make_logger(device)._episode_extras_means() == {}
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_extras_batch_host_reads_and_concatenate_once_per_metric(device):
+    logger = make_logger(device)
+    logger.ep_extras = [{f"metric/{i}": torch.ones(3, device=device) * step for i in range(8)}
+                        for step in range(24)]
+    logger._episode_extras_means()
+    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as prof:
+        result = logger._episode_extras_means()
+    assert set(result.values()) == {11.5}
+    counts = {event.key: event.count for event in prof.key_averages()}
+    assert counts.get("aten::_local_scalar_dense", 0) == 0
+    # stack itself is implemented as one cat, in addition to one cat per metric.
+    assert counts.get("aten::cat", 0) == 9
+
+
+def test_log_keeps_all_episode_tags_and_console_values(capsys):
+    logger = make_logger("cpu")
+    logger.ep_extras = [{"Episode_Reward/custom": torch.tensor([2., 4.]), "other": 7.}]
+    logger.log(0, 0, 1, .1, .1, {}, .001, torch.ones(2), None)
+    logger.writer.add_scalar.assert_any_call("Episode_Reward/custom", 3.0, 0)
+    logger.writer.add_scalar.assert_any_call("Episode/other", 7.0, 0)
+    output = capsys.readouterr().out
+    assert "Episode_Reward/custom:" in output and "3.0000" in output
+    assert "Mean episode other:" in output and "7.0000" in output
+    assert logger.ep_extras == []

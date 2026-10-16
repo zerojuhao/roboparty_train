@@ -51,7 +51,7 @@ class RPOGetupMimicEnvCfg(BeyondMimicEnvCfg):
 
         self.scene.robot = RPO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.commands.motion.motion_file = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "rpo_bm", "getup_supin2prone.npz"
+            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rpo", "getup_supin2prone.npz"
         )
         self.commands.motion.anchor_body_name = "base_link"
         self.commands.motion.body_names = [

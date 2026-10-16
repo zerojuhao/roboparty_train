@@ -11,7 +11,7 @@ from robolab.tasks.manager_based.parkour.parkour_env_cfg import ROUGH_TERRAINS_C
 from robolab.sensors import Grid3dPointsGeneratorCfg, NoisyGroupedRayCasterCameraCfg, VolumePointsCfg
 from isaaclab.sensors import patterns
 
-# NOTE: KEY_BODY_NAMES must match lab_key_body_names in robolab/scripts/tools/retarget/config/rpo.yaml
+# The motion loader selects and reorders NPZ key-body tracks by these names.
 KEY_BODY_NAMES = [
     "left_ankle_roll_link", 
     "right_ankle_roll_link",
@@ -79,8 +79,9 @@ class RPOParkourRoughEnvCfg(ParkourEnvCfg):
         self.scene.camera.offset.rot = (0.0, 0.5, 0.0, 0.866)
         self.scene.camera.mesh_prim_paths.extend(get_link_prim_targets(RPO_LINKS))
         self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "rpo_lab"
+            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rpo"
         )
+        self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights = {
             "36_01": 1,
             "36_11": 1,

@@ -37,7 +37,7 @@ from . import mdp
 # LAFAN motions shared with the RP1 WBC tracking task.
 MOTION_MANIFEST = os.environ.get(
     "UFO_MOTION_MANIFEST",
-    os.path.join(ISAAC_DATA_DIR, "motions", "rp1_lafan", "manifest.json"),
+    os.path.join(ISAAC_DATA_DIR, "motions", "newton", "rp1_lafan", "manifest.json"),
 )
 
 

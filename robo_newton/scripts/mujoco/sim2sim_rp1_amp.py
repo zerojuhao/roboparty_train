@@ -32,6 +32,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "robo_newton"))
 from robolab.utils.command_path import command_path_features
+from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
 
 DEFAULT_RUN = Path(
     "/data/zym/roboparty_train/logs/rsl_rl/rp1_amp/"
@@ -256,20 +257,12 @@ class Simulation:
         robot = env_config["scene"]["robot"]
         actuator = robot["actuators"]["all_joints"]
         self.default = values_by_regex(robot["init_state"]["joint_pos"], MJ_JOINT_NAMES, 0.0)
-        self.kp = values_by_regex(actuator["stiffness"], MJ_JOINT_NAMES)
-        self.kd = values_by_regex(actuator["damping"], MJ_JOINT_NAMES)
-        self.effort_limit = values_by_regex(actuator["effort_limit_sim"], MJ_JOINT_NAMES)
-        self.speed_limit = values_by_regex(actuator["velocity_limit_sim"], MJ_JOINT_NAMES)
-        self.keep_velocity = values_by_regex(actuator["keep_velocity"], MJ_JOINT_NAMES)
-        self.model.dof_armature[self.vids] = values_by_regex(actuator["armature"], MJ_JOINT_NAMES)
-        self.model.dof_damping[self.vids] = values_by_regex(
-            actuator["viscous_friction"], MJ_JOINT_NAMES
-        )
-        self.model.dof_frictionloss[self.vids] = values_by_regex(
-            actuator["friction"], MJ_JOINT_NAMES
-        )
-        self.model.actuator_ctrllimited[self.aids] = 0
-        self.model.actuator_forcelimited[self.aids] = 0
+        self.motor = RoboPartyMujocoActuator(
+            DEFAULT_MJCF.parent.parent / "urdf/rp1_24dof.urdf", MJ_JOINT_NAMES, actuator)
+        self.effort_limit = self.motor.effort_limit
+        self.speed_limit = self.motor.velocity_limit
+        self.keep_velocity = self.motor.keep_velocity
+        self.aids = self.motor.bind(self.model)
         self.action_scale = float(env_config["actions"]["joint_pos"]["scale"])
 
         self.initial_root_height = robot["init_state"]["pos"][2] if initial_height is None else initial_height
@@ -343,13 +336,7 @@ class Simulation:
 
     def advance(self) -> None:
         velocity = self.data.qvel[self.vids]
-        torque = self.kp * (self.target - self.data.qpos[self.qids]) - self.kd * velocity
-        drive = self.effort_limit * np.clip(
-            (self.speed_limit - np.abs(velocity)) / (self.speed_limit - self.keep_velocity), 0.0, 1.0
-        )
-        lower = np.where(velocity <= 0.0, -drive, -self.effort_limit)
-        upper = np.where(velocity >= 0.0, drive, self.effort_limit)
-        applied_torque = np.clip(torque, lower, upper)
+        applied_torque = self.motor.compute(self.target, self.data.qpos[self.qids], velocity)
         if self._previous_applied_torque is not None:
             delta = float(np.max(np.abs(applied_torque - self._previous_applied_torque) / self.effort_limit))
             self.step_torque_delta_ratio_peak = max(self.step_torque_delta_ratio_peak, delta)

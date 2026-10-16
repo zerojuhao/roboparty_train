@@ -147,6 +147,7 @@ class OnPolicyRunner:
         saved_dict["iter"] = self.current_learning_iteration
         saved_dict["infos"] = infos
         saved_dict["curriculum_state"] = self._get_curriculum_checkpoint_state()
+        saved_dict["motion_dataset_contract"] = getattr(self.env.cfg, "motion_dataset_contract", None)
         torch.save(saved_dict, path)
         # Upload model to external logging services
         self.logger.save_model(path, self.current_learning_iteration)
@@ -164,6 +165,13 @@ class OnPolicyRunner:
             map_location (str | None): Device mapping for loading the model.
         """
         loaded_dict = torch.load(path, weights_only=False, map_location=map_location)
+        contract = getattr(self.env.cfg, "motion_dataset_contract", None)
+        if contract is not None and loaded_dict.get("motion_dataset_contract") != contract:
+            raise ValueError(
+                "Checkpoint motion/joint-order contract does not match this environment. "
+                "Legacy AMP/BeyondMimic checkpoints require an explicit weight/normalizer migration; "
+                "start a new run instead of silently resuming with reordered observations."
+            )
         load_iteration = self.alg.load(loaded_dict, load_cfg, strict)
         if load_iteration:
             self.current_learning_iteration = loaded_dict["iter"]

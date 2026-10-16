@@ -11,9 +11,9 @@ from tensordict import TensorDict
 
 from rsl_rl.algorithms.ppo import PPO
 from rsl_rl.env import VecEnv
-from rsl_rl.models.amp_model import resolve_velocity_target_indices
+from rsl_rl.models.amp_model import AMPModel, resolve_velocity_target_indices
 from rsl_rl.modules import EmpiricalNormalization
-from rsl_rl.utils import reduce_gradients_in_buckets, resolve_nn_activation
+from rsl_rl.utils import reduce_gradients_in_buckets, resolve_callable, resolve_nn_activation
 
 
 class AMPDiscriminator(nn.Module):
@@ -181,6 +181,28 @@ class PPOAMP(PPO):
             self._record_rollout_distribution("combined", style)
             return style, scores
 
+        if not route_group or all(route.get("all_envs", False) for route in self.routes.values()):
+            weight_sum = sum(float(route.get("style_reward_weight", 1.0)) for route in self.routes.values())
+            if weight_sum == 0.0:
+                raise RuntimeError("AMP routes do not cover every environment")
+            style = torch.zeros(self.storage.num_envs, device=self.device)
+            scores = torch.zeros_like(style)
+            for name, route in self.routes.items():
+                policy_obs = self._group_obs(obs, self.amp_obs_groups[route["policy_obs_set"]])
+                demo_obs = self._group_obs(obs, self.amp_obs_groups[route["demonstration_obs_set"]])
+                reward, score = self.discriminators[name].style_reward(policy_obs, self.amp_cfg["step_dt"])
+                self._record_rollout_distribution(name, reward)
+                weight = float(route.get("style_reward_weight", 1.0))
+                style += weight * reward
+                scores += weight * score
+                self.disc_buffers[name][0].append(policy_obs.detach())
+                self.disc_buffers[name][1].append(demo_obs.detach())
+            style = style / weight_sum
+            if self.amp_cfg.get("turn_style_reward_multiplier", 1.0) != 1.0:
+                style = self._scale_turn_style_reward(style, obs)
+            self._record_rollout_distribution("combined", style)
+            return style, scores / weight_sum
+
         route_values = None
         if route_group:
             route_values = obs[route_group].reshape(-1).long()
@@ -322,7 +344,7 @@ class PPOAMP(PPO):
     @staticmethod
     def construct_algorithm(obs: TensorDict, env: VecEnv, cfg: dict, device: str) -> PPOAMP:
         if (
-            cfg["actor"].get("class_name") == "AMPModel"
+            issubclass(resolve_callable(cfg["actor"]["class_name"]), AMPModel)
             and cfg["actor"].get("enable_velocity_estimation", False)
         ):
             manager = env.unwrapped.observation_manager

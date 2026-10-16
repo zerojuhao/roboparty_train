@@ -37,7 +37,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 from robolab import ROBOLAB_ROOT_DIR
-from robolab.assets.robots.roboparty import RP1_24DOF_CFG
+from robolab.assets.robots.roboparty import RP1_24DOF_CFG, RP1_JOINT_NAMES
 import robolab.tasks.manager_based.amp.mdp as mdp
 
 from .amp_env_cfg import AmpEnvCfg, CommandsCfg, RewardsCfg
@@ -45,20 +45,8 @@ from .mdp.commands import SingleAxisVelocityCommandCfg
 from .mdp.curriculums import VelocityTrackingCurriculum
 from .managers import MotionDataTermCfg
 
-# Match lab_dof_names and lab_key_body_names in retarget/config/rp1_24dof.yaml.
-MOTION_JOINT_NAMES = [
-    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_roll_joint",
-    "left_hip_roll_joint", "right_hip_roll_joint", "waist_yaw_joint",
-    "left_hip_yaw_joint", "right_hip_yaw_joint",
-    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
-    "left_knee_joint", "right_knee_joint",
-    "left_shoulder_roll_joint", "right_shoulder_roll_joint",
-    "left_ankle_pitch_joint", "right_ankle_pitch_joint",
-    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
-    "left_ankle_roll_joint", "right_ankle_roll_joint",
-    "left_elbow_joint", "right_elbow_joint",
-    "left_wrist_joint", "right_wrist_joint",
-]
+# Demonstrations and discriminator observations share the explicit URDF order.
+MOTION_JOINT_NAMES = RP1_JOINT_NAMES
 KEY_BODY_NAMES = [
     "left_ankle_roll_link", "right_ankle_roll_link",
     "left_knee_link", "right_knee_link",
@@ -128,8 +116,9 @@ class RP1AmpEnvCfg(AmpEnvCfg):
         }
 
         self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            ROBOLAB_ROOT_DIR, "data", "motions", "v0"
+            ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rp1"
         )
+        self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights = {
             "stand_still": 1.0,
             # Keep the low-speed walking reference for commands around 1 m/s.
@@ -175,8 +164,9 @@ class RP1AmpEnvCfg(AmpEnvCfg):
         self.observations.upper_disc_demo.ref_joint_vel.params["joint_indices"] = upper_joint_indices
         self.observations.upper_disc_demo.ref_key_body_pos_b.params["body_indices"] = [4, 5]
         self.motion_data.motion_dataset_upper = MotionDataTermCfg(
-            motion_data_dir=os.path.join(ROBOLAB_ROOT_DIR, "data", "motions", "rp1_upper_run_bounded"),
+            motion_data_dir=os.path.join(ROBOLAB_ROOT_DIR, "data", "motions", "newton", "rp1_upper_run_bounded"),
             motion_data_weights={"run_loop_180_R_003__A326": 1.0},
+            key_body_names=KEY_BODY_NAMES,
         )
         self.animation.animation_upper = self.animation.animation.replace(
             motion_data_term="motion_dataset_upper", enable_visualization=False,

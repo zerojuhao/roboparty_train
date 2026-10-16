@@ -12,18 +12,27 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
+import re
 import subprocess
 import sys
 import time
 from collections import deque
 from typing import Any, ClassVar
 
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "robo_newton"))
+
 import cv2
 import glfw
 import matplotlib.pyplot as plt
 import mujoco
-import mujoco_viewer
+try:
+    import mujoco_viewer
+except ImportError:
+    mujoco_viewer = None
 import numpy as np
+import yaml
 from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
@@ -36,6 +45,30 @@ else:
     _ORT_IMPORT_ERROR = None
 
 from robolab.assets import ISAAC_DATA_DIR
+from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
+
+
+def load_robot_config(env_config=None):
+    if env_config is None:
+        from robolab.assets.robots.roboparty import RP1_24DOF_CFG
+        return RP1_24DOF_CFG.to_dict()
+
+    class ConfigLoader(yaml.SafeLoader):
+        pass
+
+    for tag in ("python/tuple", "python/object/apply:builtins.slice"):
+        ConfigLoader.add_constructor("tag:yaml.org,2002:" + tag,
+                                     lambda loader, node: loader.construct_sequence(node))
+    return yaml.load(Path(env_config).read_text(), Loader=ConfigLoader)["scene"]["robot"]
+
+
+def make_motor(model, robot_config):
+    names = [model.joint(j).name for j in range(model.njnt) if model.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE]
+    motor = RoboPartyMujocoActuator(
+        Path(ISAAC_DATA_DIR) / "robots/roboparty/rp1.3/urdf/rp1_24dof.urdf",
+        names, robot_config["actuators"]["all_joints"],
+    )
+    return motor, motor.bind(model)
 
 # Depth pipeline (encoder input aligned with ``noise_model.crop_and_resize``):
 #   ⑴ MuJoCo offscreen depth at native **64×36** (same 16:9 as Isaac ray grid).
@@ -103,10 +136,12 @@ _CLIP_CMD_Y = (-0.6, 0.6)
 _CLIP_CMD_Z = (-1.5, 1.5)
 
 
-class CompactOverlayMujocoViewer(mujoco_viewer.MujocoViewer):
+class CompactOverlayMujocoViewer(mujoco_viewer.MujocoViewer if mujoco_viewer is not None else object):
     """MujocoViewer with compact overlay and MuJoCo 3.3+ double-click select fix."""
 
     def __init__(self, *args, **kwargs):
+        if mujoco_viewer is None:
+            raise RuntimeError("The fallback GUI requires mujoco-python-viewer; headless recording does not")
         super().__init__(*args, **kwargs)
         self.ctx = mujoco.MjrContext(self.model, mujoco.mjtFontScale.mjFONTSCALE_200.value)
         self._velocity_table = None
@@ -595,10 +630,6 @@ def get_obs(data, model):
     return (q, dq, quat, v, omega, gvec)
 
 
-def pd_control(target_q, q, target_dq, dq, kp, kd):
-    return (target_q - q) * kp + (target_dq - dq) * kd
-
-
 def _rot_mat_wxyz(quat_wxyz: np.ndarray) -> np.ndarray:
     """Isaac Lab stores quaternions as (w, x, y, z) on cfg; scipy ``from_quat`` expects (x, y, z, w)."""
     w, x, y, z = quat_wxyz
@@ -1013,6 +1044,7 @@ def run_mujoco_onnx(
     print_controls_guide()
 
     model = mujoco.MjModel.from_xml_path(cfg.sim_config.mujoco_model_path)
+    motor, motor_ids = make_motor(model, cfg.robot_config.robot)
     configure_depth_rendering(model)
     xml_dt = float(model.opt.timestep)
     macro_dt = float(cfg.sim_config.dt)
@@ -1141,6 +1173,7 @@ def run_mujoco_onnx(
             data.qvel[:] = initial_qvel
             cmd.reset()
             data.ctrl[:] = 0.0
+            motor.reset()
             mujoco.mj_forward(model, data)
             action[:] = 0.0
             tau[:] = 0.0
@@ -1263,10 +1296,8 @@ def run_mujoco_onnx(
 
             policy_step_idx += 1
 
-        target_vel = np.zeros((cfg.robot_config.num_actions,), dtype=np.double)
-        tau = pd_control(target_pos, q, target_vel, dq, cfg.robot_config.kps, cfg.robot_config.kds)
-        tau = np.clip(tau, -cfg.robot_config.tau_limit, cfg.robot_config.tau_limit)
-        data.ctrl = tau
+        tau = motor.compute(target_pos, q, dq)
+        data.ctrl[motor_ids] = tau
         mj_macro_step(model, data, n_sub=phys_substeps)
 
         if not headless and show_depth_vis:
@@ -1492,6 +1523,10 @@ def _record_behavior_grid(args: argparse.Namespace) -> None:
         common.extend(["--mujoco_xml", args.mujoco_xml])
     if args.chase_camera:
         common.append("--chase_camera")
+    if args.env_config:
+        common.extend(["--env-config", args.env_config])
+    if args.checkpoint:
+        common.extend(["--checkpoint", args.checkpoint])
     clip_paths = []
     log_paths = []
     jobs: list[tuple[str, subprocess.Popen, object]] = []
@@ -1642,6 +1677,7 @@ if __name__ == "__main__":
         default=None,
         help="Training .pt path. With --behavior_grid and no --video_path, output is <run>/videos/<iter>.mp4 (e.g. model_41000.pt -> 41000.mp4).",
     )
+    parser.add_argument("--env-config", help="Saved params/env.yaml; defaults to the checkpoint's run or current roboparty.py")
     parser.add_argument(
         "--behavior_grid",
         action="store_true",
@@ -1703,6 +1739,12 @@ if __name__ == "__main__":
     else:
         xml_path = scene_xml[args.scene]
 
+    env_config = args.env_config
+    if env_config is None and args.checkpoint:
+        env_config = Path(args.checkpoint).resolve().parent / "params/env.yaml"
+    robot_config = load_robot_config(env_config)
+    from robolab.assets.robots.roboparty import RP1_JOINT_NAMES
+
     class Sim2simCfg:
         class sim_config:
             mujoco_model_path = xml_path
@@ -1712,46 +1754,6 @@ if __name__ == "__main__":
             depth_camera_body = "waist_yaw_link"
 
         class robot_config:
-            # PD gains / default pos in URDF order (gmr_dof_names).
-            kps = np.array(
-                [
-                    120.0, 120.0, 90.0, 150.0, 40.0, 40.0,
-                    120.0, 120.0, 90.0, 150.0, 40.0, 40.0,
-                    300.0, 250.0,
-                    40.0, 40.0, 20.0, 30.0, 20.0,
-                    40.0, 40.0, 20.0, 30.0, 20.0,
-                ],
-                dtype=np.double,
-            )
-            kds = np.array(
-                [
-                    8.0, 8.0, 6.0, 10.0, 2.0, 2.0,
-                    8.0, 8.0, 6.0, 10.0, 2.0, 2.0,
-                    25.0, 20.0,
-                    3.0, 3.0, 1.0, 1.5, 1.0,
-                    3.0, 3.0, 1.0, 1.5, 1.0,
-                ],
-                dtype=np.double,
-            )
-            default_pos = np.array(
-                [
-                    -0.1, 0.0, 0.0, -0.3, -0.2, 0.0,
-                    0.1, 0.0, 0.0, 0.3, -0.2, 0.0,
-                    0.0, 0.0,
-                    0.2, 0.2, 0.0, -1.2, 0.0,
-                    -0.2, -0.2, 0.0, 1.2, 0.0,
-                ],
-                dtype=np.double,
-            )
-            # effort_limit_sim (hip/knee/waist 145.53, ankle 56, arm 28).
-            tau_limit = np.array(
-                [145.53, 145.53, 145.53, 145.53, 56.0, 56.0]
-                + [145.53, 145.53, 145.53, 145.53, 56.0, 56.0]
-                + [145.53, 145.53]
-                + [28.0] * 5
-                + [28.0] * 5,
-                dtype=np.double,
-            )
             frame_stack = 8  # obs history length
             depth_encoder_frames = 8  # encoder depth frames (subsampled from 37-frame buffer)
 
@@ -1759,6 +1761,14 @@ if __name__ == "__main__":
             action_scale = 0.25
             # lab_dof_names[i] -> gmr/URDF index (deployment usd2urdf).
             usd2urdf = [0, 6, 12, 1, 7, 13, 2, 8, 14, 19, 3, 9, 15, 20, 4, 10, 16, 21, 5, 11, 17, 22, 18, 23]
+
+    Sim2simCfg.robot_config.robot = robot_config
+    Sim2simCfg.robot_config.default_pos = np.array([
+        next((value for pattern, value in robot_config["init_state"]["joint_pos"].items()
+              if re.fullmatch(pattern, name)), 0.0) for name in RP1_JOINT_NAMES
+    ])
+    if robot_config.get("joint_ordering"):
+        Sim2simCfg.robot_config.usd2urdf = [RP1_JOINT_NAMES.index(name) for name in robot_config["joint_ordering"]]
 
     if args.duration is not None:
         Sim2simCfg.sim_config.sim_duration = float(args.duration)
