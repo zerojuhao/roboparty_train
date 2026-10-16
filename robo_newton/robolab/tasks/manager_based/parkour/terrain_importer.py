@@ -3,7 +3,7 @@
 import isaaclab.sim as sim_utils
 
 from robolab.terrains.terrain_generator import FiledTerrainGenerator
-from robolab.terrains.native_importer import NativeTerrainImporter, collision_kind, merge_box_strips
+from robolab.terrains.native_importer import NewtonTerrainImporter, collision_kind, merge_box_strips
 
 
 class ParkourTerrainGenerator(FiledTerrainGenerator):
@@ -40,7 +40,7 @@ class ParkourTerrainGenerator(FiledTerrainGenerator):
             })
 
 
-class ParkourTerrainImporter(NativeTerrainImporter):
+class ParkourTerrainImporter(NewtonTerrainImporter):
     def __init__(self, cfg):
         from isaaclab_newton.physics import NewtonCfg
 

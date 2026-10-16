@@ -11,7 +11,7 @@ import trimesh
 from pxr import Usd, UsdGeom
 
 from robolab.terrains.native_collision import HEIGHT_DATA, author_heightfield, inject_heightfields, terrace_meshes
-from robolab.terrains.native_importer import NativeTerrainImporter, box_bounds, validate_terrain_colliders
+from robolab.terrains.native_importer import NewtonTerrainImporter, box_bounds, validate_terrain_colliders
 from robolab.tasks.manager_based.parkour.stair_validation import stair_edge_probe_points, validate_stair_edges
 from robolab.tasks.manager_based.parkour.terrain_importer import ParkourTerrainGenerator, ParkourTerrainImporter
 from robolab.tasks.manager_based.parkour.terrain_generator_cfg import ROUGH_TERRAINS_CFG
@@ -131,7 +131,7 @@ class TestStairValidation(unittest.TestCase):
         terrain.device = "cpu"
         env = SimpleNamespace(scene=SimpleNamespace(terrain=terrain))
         with patch.object(NewtonManager, "_solver", SimpleNamespace(mj_model=object())), \
-             patch.object(NativeTerrainImporter, "validate_solver_geometry", return_value={}) as shared, \
+             patch.object(NewtonTerrainImporter, "validate_solver_geometry", return_value={}) as shared, \
              patch("robolab.tasks.manager_based.parkour.stair_validation.validate_stair_edges", return_value={}) as stairs:
             validate_terrain_colliders(env)
             validate_terrain_colliders(env)

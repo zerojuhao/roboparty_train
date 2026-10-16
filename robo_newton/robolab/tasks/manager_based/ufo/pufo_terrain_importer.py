@@ -3,10 +3,10 @@
 import numpy as np
 
 from isaaclab.terrains import TerrainImporter as BaseTerrainImporter
-from robolab.terrains.native_importer import NativeTerrainImporter, box_bounds
+from robolab.terrains.native_importer import NewtonTerrainImporter, box_bounds
 
 
-class PUFOTerrainImporter(NativeTerrainImporter):
+class PUFOTerrainImporter(NewtonTerrainImporter):
     def __init__(self, cfg):
         super().__init__(cfg)
 

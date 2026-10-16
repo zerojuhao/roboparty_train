@@ -108,10 +108,10 @@ def collision_kind(mesh, authored_heightfield=False):
     return "heightfield"
 
 
-class NativeTerrainImporter(TerrainImporter):
+class NewtonTerrainImporter(TerrainImporter):
     @staticmethod
-    def _prepare_native_cfg(cfg, enabled: bool):
-        """Copy native terrain settings without mutating shared task configs."""
+    def _prepare_newton_cfg(cfg, enabled: bool):
+        """Copy Newton terrain settings without mutating shared task configs."""
         cfg = cfg.copy()
         generator_cfg = cfg.terrain_generator
         if enabled and generator_cfg is not None:
@@ -130,7 +130,7 @@ class NativeTerrainImporter(TerrainImporter):
             isinstance(sim_utils.SimulationContext.instance().cfg.physics, NewtonCfg)
             and cfg.terrain_type == "generator"
         )
-        cfg = self._prepare_native_cfg(cfg, self._native_collision)
+        cfg = self._prepare_newton_cfg(cfg, self._native_collision)
         super().__init__(cfg)
 
     def _import_observation_mesh(self, name, mesh):

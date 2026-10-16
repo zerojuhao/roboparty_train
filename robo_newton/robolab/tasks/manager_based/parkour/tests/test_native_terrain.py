@@ -92,12 +92,12 @@ class TestNativeTerrain(unittest.TestCase):
             validate_surface_heights(model, trimesh.util.concatenate(boxes), np.array([[-1., 0.]]))
 
     def test_shared_importer_and_probe_coverage(self):
-        from robolab.terrains.native_importer import NativeTerrainImporter
+        from robolab.terrains.native_importer import NewtonTerrainImporter
         from robolab.terrains.collision_validation import terrain_probe_points
         from robolab.tasks.manager_based.parkour.terrain_importer import ParkourTerrainImporter
         from robolab.tasks.manager_based.ufo.pufo_terrain_importer import PUFOTerrainImporter
-        self.assertTrue(issubclass(ParkourTerrainImporter, NativeTerrainImporter))
-        self.assertTrue(issubclass(PUFOTerrainImporter, NativeTerrainImporter))
+        self.assertTrue(issubclass(ParkourTerrainImporter, NewtonTerrainImporter))
+        self.assertTrue(issubclass(PUFOTerrainImporter, NewtonTerrainImporter))
         origins = np.array([[[0., 0., 0.], [10., 0., 0.]]])
         generator = SimpleNamespace(cfg=SimpleNamespace(size=(10., 10.)), terrain_origins=origins,
                                     collision_components=[])
@@ -107,14 +107,14 @@ class TestNativeTerrain(unittest.TestCase):
             self.assertLess(np.linalg.norm(points - origin[:2], axis=1).min(), 1e-3)
 
     def test_native_cfg_copies_and_disables_legacy_cache(self):
-        from robolab.terrains.native_importer import NativeTerrainImporter
+        from robolab.terrains.native_importer import NewtonTerrainImporter
         from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg
 
         source_generator = ROUGH_TERRAINS_CFG.copy()
         source_generator.use_cache = True
         source_generator.native_collision = False
         cfg = TerrainImporterCfg(terrain_type="generator", terrain_generator=source_generator)
-        prepared = NativeTerrainImporter._prepare_native_cfg(cfg, enabled=True)
+        prepared = NewtonTerrainImporter._prepare_newton_cfg(cfg, enabled=True)
 
         self.assertIsNot(prepared, cfg)
         self.assertIsNot(prepared.terrain_generator, source_generator)
