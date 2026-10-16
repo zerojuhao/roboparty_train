@@ -1,0 +1,2063 @@
+{
+  "format": "beyondmimic_npz_v1",
+  "dataset": "rp1_lafan_v7",
+  "robot": "rp1_source / rp1_24dof",
+  "clips": [
+    {
+      "name": "dance1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance1_subject1.bvh",
+      "source_frames": 3945,
+      "csv": "csv/dance1_subject1.csv",
+      "csv_frames": 3945,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance1_subject1.npz",
+      "npz_frames": 6573,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.0004,
+        0.000285
+      ],
+      "root_z_range_m": [
+        0.255322,
+        0.88766
+      ],
+      "published_root_z_range_m": [
+        0.25662654638290405,
+        0.88755202293396
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.07992777591050562,
+        "max_dof_step_rad": 0.426871,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "2d8ed86645545e8a6f24e7809f469240bf6375df0fa780251a2d0dab45340b98",
+      "npz_sha256": "eaba0cfa6c5322194580032567f9c6ac39a250980092f2377aff9dc8be6f1a20"
+    },
+    {
+      "name": "dance1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance1_subject2.bvh",
+      "source_frames": 3945,
+      "csv": "csv/dance1_subject2.csv",
+      "csv_frames": 3945,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance1_subject2.npz",
+      "npz_frames": 6573,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000452,
+        0.000295
+      ],
+      "root_z_range_m": [
+        0.39613,
+        0.909232
+      ],
+      "published_root_z_range_m": [
+        0.3961947560310364,
+        0.9087521433830261
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.054584806164353156,
+        "max_dof_step_rad": 0.44391100000000006,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "ef3e5291f11cca80245265b214796dbc6a04e1872722bdb9ce310bf87f31c5e8",
+      "npz_sha256": "36dfc82ecdad708ab65027c3b232c4fce94a993d1cc6365ef730d35251fbaed7"
+    },
+    {
+      "name": "dance1_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance1_subject3.bvh",
+      "source_frames": 3945,
+      "csv": "csv/dance1_subject3.csv",
+      "csv_frames": 3945,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance1_subject3.npz",
+      "npz_frames": 6573,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000499,
+        0.000359
+      ],
+      "root_z_range_m": [
+        0.526491,
+        0.866808
+      ],
+      "published_root_z_range_m": [
+        0.5282295346260071,
+        0.8665276765823364
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.0516957047442048,
+        "max_dof_step_rad": 0.445198,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "a890de9bb219d9feec3e6992b6ff14f48ed430117b311b2956c15da89997ab0f",
+      "npz_sha256": "a1b08fbfea26689532084563d77ec75a201d00d4d594a8cdd2c78551216787cc"
+    },
+    {
+      "name": "dance2_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance2_subject1.bvh",
+      "source_frames": 6771,
+      "csv": "csv/dance2_subject1.csv",
+      "csv_frames": 6771,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance2_subject1.npz",
+      "npz_frames": 11283,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.00042,
+        0.000325
+      ],
+      "root_z_range_m": [
+        0.349039,
+        1.069554
+      ],
+      "published_root_z_range_m": [
+        0.34970220923423767,
+        1.069281816482544
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.08223134119665079,
+        "max_dof_step_rad": 0.451474,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "feb2a2227dbeb95f7bf5e7b797cfb616652bcd1c69e20cdfeb0913f971c3c5bc",
+      "npz_sha256": "266967b05383d9f7e8f9d98deeae621fbdef24f400ff6566270e215d0f80ac11"
+    },
+    {
+      "name": "dance2_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance2_subject2.bvh",
+      "source_frames": 6771,
+      "csv": "csv/dance2_subject2.csv",
+      "csv_frames": 6771,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance2_subject2.npz",
+      "npz_frames": 11283,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000491,
+        0.000325
+      ],
+      "root_z_range_m": [
+        0.49304,
+        0.898064
+      ],
+      "published_root_z_range_m": [
+        0.4930990934371948,
+        0.8978962898254395
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.06842805510169053,
+        "max_dof_step_rad": 0.429513,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "f5f64e5c145792710ec40493281bb8cc4ed7de66d75d02c544d9e3ca81302457",
+      "npz_sha256": "5a75003a21f3fc63309878f320f77275886b003b25fbe67ee6977aedf5dc4d00"
+    },
+    {
+      "name": "dance2_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance2_subject3.bvh",
+      "source_frames": 6771,
+      "csv": "csv/dance2_subject3.csv",
+      "csv_frames": 6771,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance2_subject3.npz",
+      "npz_frames": 11283,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000434,
+        0.000549
+      ],
+      "root_z_range_m": [
+        0.592654,
+        1.024593
+      ],
+      "published_root_z_range_m": [
+        0.5935643911361694,
+        1.0235602855682373
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.06355378551274496,
+        "max_dof_step_rad": 0.403613,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "ecdcc76a0d4df4d61024cd84c06f33a24079388eb7b9243274bfaadef75b4a5c",
+      "npz_sha256": "07cb21053504b7c45036583976592ab9c7aec86ef02f512c595727fec1b80bda"
+    },
+    {
+      "name": "dance2_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance2_subject4.bvh",
+      "source_frames": 6771,
+      "csv": "csv/dance2_subject4.csv",
+      "csv_frames": 6771,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance2_subject4.npz",
+      "npz_frames": 11283,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.00049,
+        0.000197
+      ],
+      "root_z_range_m": [
+        0.147438,
+        0.921074
+      ],
+      "published_root_z_range_m": [
+        0.1476014256477356,
+        0.9209700226783752
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.058357857919906574,
+        "max_dof_step_rad": 0.437747,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "b35113903a148617e1dbb86e41d477bc607cdddc08c6bafdbda8c884a9d63b74",
+      "npz_sha256": "723d6ca06054f5f8e4d8dd164db0bce68cab694a691f5a2d0d436b05c0044188"
+    },
+    {
+      "name": "dance2_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/dance2_subject5.bvh",
+      "source_frames": 6771,
+      "csv": "csv/dance2_subject5.csv",
+      "csv_frames": 6771,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/dance2_subject5.npz",
+      "npz_frames": 11283,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000507,
+        0.00016
+      ],
+      "root_z_range_m": [
+        0.590055,
+        0.891773
+      ],
+      "published_root_z_range_m": [
+        0.590090811252594,
+        0.8912456035614014
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.07616202687691548,
+        "max_dof_step_rad": 0.40806000000000003,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "f42da73717ef675c9f6bfed251e396ef78fe84ca689145b46e9714124768e7cd",
+      "npz_sha256": "4a5b7aca15249155e852a5651fb8487c8b252e8a1424ab38615a1b3036f7100a"
+    },
+    {
+      "name": "fallAndGetUp1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fallAndGetUp1_subject1.bvh",
+      "source_frames": 5047,
+      "csv": "csv/fallAndGetUp1_subject1.csv",
+      "csv_frames": 5047,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fallAndGetUp1_subject1.npz",
+      "npz_frames": 8410,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000491,
+        0.000387
+      ],
+      "root_z_range_m": [
+        0.152943,
+        0.799546
+      ],
+      "published_root_z_range_m": [
+        0.1529453992843628,
+        0.7994934320449829
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.09459915774466486,
+        "max_dof_step_rad": 0.509255,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "1c445ce4d76d1d83ae2df40d76f916e7b3407c19f7ecc8f0afbffe02b6f64f6a",
+      "npz_sha256": "6072f35cbd2df1fa02e4330acaca1c8990ef0ac61754579e9b4b7497b1db68fe"
+    },
+    {
+      "name": "fallAndGetUp1_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fallAndGetUp1_subject4.bvh",
+      "source_frames": 5047,
+      "csv": "csv/fallAndGetUp1_subject4.csv",
+      "csv_frames": 5047,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fallAndGetUp1_subject4.npz",
+      "npz_frames": 8410,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000538,
+        0.000189
+      ],
+      "root_z_range_m": [
+        0.088827,
+        0.797374
+      ],
+      "published_root_z_range_m": [
+        0.08938157558441162,
+        0.796610951423645
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.14572020384970638,
+        "max_dof_step_rad": 0.44634799999999997,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "25e77548b566a549378347f6551252fbdffcadd487d48c3ee52a1d7e97e71cee",
+      "npz_sha256": "bba81b17c1b1af0859d311a3d815b2aa0791715142dbe956f9b5fa6d77e1f80e"
+    },
+    {
+      "name": "fallAndGetUp1_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fallAndGetUp1_subject5.bvh",
+      "source_frames": 5047,
+      "csv": "csv/fallAndGetUp1_subject5.csv",
+      "csv_frames": 5047,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fallAndGetUp1_subject5.npz",
+      "npz_frames": 8410,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000541,
+        0.000189
+      ],
+      "root_z_range_m": [
+        0.130344,
+        0.822621
+      ],
+      "published_root_z_range_m": [
+        0.13039033114910126,
+        0.8221387267112732
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.13007161328283745,
+        "max_dof_step_rad": 0.41758399999999996,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "a52b717db8b3d0034ac5d4c30e7ecc155f56ba86cb28b8ebd521156f02b13340",
+      "npz_sha256": "27a4b8b1290b3484c4aa7519ac22917a50425bedc1a94fb3f2613dd6aec50692"
+    },
+    {
+      "name": "fallAndGetUp2_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fallAndGetUp2_subject2.bvh",
+      "source_frames": 4918,
+      "csv": "csv/fallAndGetUp2_subject2.csv",
+      "csv_frames": 4918,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fallAndGetUp2_subject2.npz",
+      "npz_frames": 8195,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000398,
+        0.000373
+      ],
+      "root_z_range_m": [
+        0.155121,
+        0.789173
+      ],
+      "published_root_z_range_m": [
+        0.155130535364151,
+        0.7891721129417419
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.15222088788993432,
+        "max_dof_step_rad": 0.45629200000000014,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 4,
+        "max_frozen_while_source_moves_run": 1
+      },
+      "csv_sha256": "46ad9cce40bd5eb252ad961f593259265773acb19b0540de472aee6cc08fb51b",
+      "npz_sha256": "9a8bb8d84322b3b089aef448507904fc5487a91bed44cf9cea84c5c5a76dfdc4"
+    },
+    {
+      "name": "fallAndGetUp2_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fallAndGetUp2_subject3.bvh",
+      "source_frames": 4918,
+      "csv": "csv/fallAndGetUp2_subject3.csv",
+      "csv_frames": 4918,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fallAndGetUp2_subject3.npz",
+      "npz_frames": 8195,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000535,
+        0.000248
+      ],
+      "root_z_range_m": [
+        0.130319,
+        0.901143
+      ],
+      "published_root_z_range_m": [
+        0.13057884573936462,
+        0.9009368419647217
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.06307705241210945,
+        "max_dof_step_rad": 0.39259,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 3,
+        "max_frozen_while_source_moves_run": 2
+      },
+      "csv_sha256": "e1087cef565e52a4539da64f4805bd2d9fe3e98d5db86292c6cc7a1ab076fc7e",
+      "npz_sha256": "e96d22ec1f130b9b29c2dfc7b58b8cc4cf74899321f7683ff7f888a4a5e110c1"
+    },
+    {
+      "name": "fallAndGetUp3_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fallAndGetUp3_subject1.bvh",
+      "source_frames": 3066,
+      "csv": "csv/fallAndGetUp3_subject1.csv",
+      "csv_frames": 3066,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fallAndGetUp3_subject1.npz",
+      "npz_frames": 5108,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000518,
+        0.000268
+      ],
+      "root_z_range_m": [
+        0.168151,
+        0.797596
+      ],
+      "published_root_z_range_m": [
+        0.16822470724582672,
+        0.7973803877830505
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.07774954045523358,
+        "max_dof_step_rad": 0.40195500000000006,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "04cee779209c0436b98e100412c5c1f776c2e158f169701d588480baa0f50616",
+      "npz_sha256": "57df4c64caef38d0af39ae27f6d133ba7a341b432a9cfeb7eab4f958cdf2814d"
+    },
+    {
+      "name": "fight1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fight1_subject2.bvh",
+      "source_frames": 7347,
+      "csv": "csv/fight1_subject2.csv",
+      "csv_frames": 7347,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fight1_subject2.npz",
+      "npz_frames": 12243,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000521,
+        0.000309
+      ],
+      "root_z_range_m": [
+        0.402694,
+        1.116276
+      ],
+      "published_root_z_range_m": [
+        0.4030124843120575,
+        1.1159683465957642
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.12497271701055387,
+        "max_dof_step_rad": 0.444218,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "32cf87b6d7d0c190332fa484eb94f442899e53893117e6ed27f759f674676209",
+      "npz_sha256": "4eb6311af45f2a38d510650963774c162124fe9e4da64d8650fba3928457eefc"
+    },
+    {
+      "name": "fight1_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fight1_subject3.bvh",
+      "source_frames": 7347,
+      "csv": "csv/fight1_subject3.csv",
+      "csv_frames": 7347,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fight1_subject3.npz",
+      "npz_frames": 12243,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000606,
+        0.000387
+      ],
+      "root_z_range_m": [
+        0.235855,
+        1.112119
+      ],
+      "published_root_z_range_m": [
+        0.2372412234544754,
+        1.1106770038604736
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.13875182463665123,
+        "max_dof_step_rad": 0.44616199999999995,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "bcc023f13a8abb5119c5e183e3696b2f4d8d4da8a740e43c3cedaba0133bfcb7",
+      "npz_sha256": "b13a875d4fd7cb22dd81bf6d6187f0a53d0c8063a35d2f73e4c3f45a9e8af302"
+    },
+    {
+      "name": "fight1_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fight1_subject5.bvh",
+      "source_frames": 7347,
+      "csv": "csv/fight1_subject5.csv",
+      "csv_frames": 7347,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fight1_subject5.npz",
+      "npz_frames": 12243,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000494,
+        9.3e-05
+      ],
+      "root_z_range_m": [
+        0.522163,
+        1.091851
+      ],
+      "published_root_z_range_m": [
+        0.5223361849784851,
+        1.0916645526885986
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.10652564899591088,
+        "max_dof_step_rad": 0.40101600000000004,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "0577af472c1374c369e89853c1ec06eaf4438927f8871a6fed9973df3e7c18f5",
+      "npz_sha256": "8ae9ccf4c6a1fcb258a6a91cf911f89e8ebf2cbb0cc78513ee864df889019ce5"
+    },
+    {
+      "name": "fightAndSports1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fightAndSports1_subject1.bvh",
+      "source_frames": 7355,
+      "csv": "csv/fightAndSports1_subject1.csv",
+      "csv_frames": 7355,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fightAndSports1_subject1.npz",
+      "npz_frames": 12257,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000479,
+        0.000223
+      ],
+      "root_z_range_m": [
+        0.18541,
+        0.975575
+      ],
+      "published_root_z_range_m": [
+        0.1861242651939392,
+        0.9755313992500305
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.0969527388576516,
+        "max_dof_step_rad": 0.4131,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "9ea8297be5c706251b9b5ca57258617ad72b523bd02886c5275a43a50ccf092e",
+      "npz_sha256": "9d9fb3d649575fa277cbe5f2c686c2a74fe26b888732633685f49905786ebc9a"
+    },
+    {
+      "name": "fightAndSports1_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/fightAndSports1_subject4.bvh",
+      "source_frames": 7355,
+      "csv": "csv/fightAndSports1_subject4.csv",
+      "csv_frames": 7355,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/fightAndSports1_subject4.npz",
+      "npz_frames": 12257,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000487,
+        0.00022
+      ],
+      "root_z_range_m": [
+        0.416054,
+        1.216852
+      ],
+      "published_root_z_range_m": [
+        0.41651877760887146,
+        1.216668725013733
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.10170891372441249,
+        "max_dof_step_rad": 0.42933899999999997,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "8c4f9fa66a174fa2538806c9d1feea383fbd1dba34fb30f463a5cf82d7a7b632",
+      "npz_sha256": "48964f94abb473a988bb581f9d3864851f5f04ec588882e2c675935e35d42713"
+    },
+    {
+      "name": "ground1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/ground1_subject1.bvh",
+      "source_frames": 4742,
+      "csv": "csv/ground1_subject1.csv",
+      "csv_frames": 4742,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/ground1_subject1.npz",
+      "npz_frames": 7902,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000456,
+        0.000354
+      ],
+      "root_z_range_m": [
+        0.173976,
+        0.787755
+      ],
+      "published_root_z_range_m": [
+        0.1742890477180481,
+        0.7877206206321716
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.06531571118804418,
+        "max_dof_step_rad": 0.35162299999999996,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 1,
+        "max_frozen_while_source_moves_run": 1
+      },
+      "csv_sha256": "cbf482a55a714349cfd1b14c725ac33f757855ef1c0221d03c770b2d855a8d56",
+      "npz_sha256": "ffe28bc08a7e394fa7b0f0b45782085384847f87bdc9b58b7cc52235691b7f0d"
+    },
+    {
+      "name": "ground1_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/ground1_subject4.bvh",
+      "source_frames": 4742,
+      "csv": "csv/ground1_subject4.csv",
+      "csv_frames": 4742,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/ground1_subject4.npz",
+      "npz_frames": 7902,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000484,
+        0.000222
+      ],
+      "root_z_range_m": [
+        0.17455,
+        0.787221
+      ],
+      "published_root_z_range_m": [
+        0.17456354200839996,
+        0.787216305732727
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.07437435194339492,
+        "max_dof_step_rad": 0.3691249999999999,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "cd33048e2d37e1c8dcb771a974af9a97ef7834d213ed91408e7ebac9b0337511",
+      "npz_sha256": "de9b99cc895560cb0ed4c152ba08cd2d39dd2cb64c6c6b895db7c9a9d490077d"
+    },
+    {
+      "name": "ground1_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/ground1_subject5.bvh",
+      "source_frames": 4742,
+      "csv": "csv/ground1_subject5.csv",
+      "csv_frames": 4742,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/ground1_subject5.npz",
+      "npz_frames": 7902,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000508,
+        0.000145
+      ],
+      "root_z_range_m": [
+        0.1837,
+        0.787502
+      ],
+      "published_root_z_range_m": [
+        0.1837615668773651,
+        0.7874916791915894
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.047885457750761945,
+        "max_dof_step_rad": 0.35249700000000006,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "92d0fbf4e6b4fef90dff3f1c117106895475cdf18802b06ecf4e127bc33ad4d4",
+      "npz_sha256": "7115f87ea1e260f253d40ba78aba3a5bed8a7838004f12513eb3b3b43821a619"
+    },
+    {
+      "name": "ground2_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/ground2_subject2.bvh",
+      "source_frames": 5550,
+      "csv": "csv/ground2_subject2.csv",
+      "csv_frames": 5550,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/ground2_subject2.npz",
+      "npz_frames": 9248,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.00044,
+        0.000444
+      ],
+      "root_z_range_m": [
+        0.134199,
+        0.967762
+      ],
+      "published_root_z_range_m": [
+        0.13432498276233673,
+        0.9672759771347046
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.07233978040469846,
+        "max_dof_step_rad": 0.4019410000000001,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "482fdd0b2331faa67502f78253b4b1857b6516f97b5128bb470cea7ddfa0a1a0",
+      "npz_sha256": "74c045afec6f78758ce741790c2f1e72d67c042ebc2f7b9330a7e2b88f6876a2"
+    },
+    {
+      "name": "ground2_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/ground2_subject3.bvh",
+      "source_frames": 5550,
+      "csv": "csv/ground2_subject3.csv",
+      "csv_frames": 5550,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/ground2_subject3.npz",
+      "npz_frames": 9248,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000517,
+        0.00024
+      ],
+      "root_z_range_m": [
+        0.16779,
+        0.954266
+      ],
+      "published_root_z_range_m": [
+        0.16810832917690277,
+        0.9535336494445801
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.06764869640281326,
+        "max_dof_step_rad": 0.38497900000000007,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "13487396ba468a2097ec22956b407d29a39d3264a12e15d1ca3f3013a4cdf34b",
+      "npz_sha256": "76287004ca5eb9f8cbda5437fe9acc2e60961de41ff37a3e8d96f1992adef140"
+    },
+    {
+      "name": "jumps1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/jumps1_subject1.bvh",
+      "source_frames": 7334,
+      "csv": "csv/jumps1_subject1.csv",
+      "csv_frames": 7334,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/jumps1_subject1.npz",
+      "npz_frames": 12222,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000371,
+        0.0004
+      ],
+      "root_z_range_m": [
+        0.514714,
+        1.017242
+      ],
+      "published_root_z_range_m": [
+        0.5150272846221924,
+        1.0166884660720825
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.09967373263804256,
+        "max_dof_step_rad": 0.41624099999999997,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "5479954500327d0084e2d6a150741d9b748c4ca3ff85767114e3140d3bdc99d9",
+      "npz_sha256": "ab6466a0a6cd1f4ae6e345e20bca956484ceb137fd2bd3a730bca89378d7100c"
+    },
+    {
+      "name": "jumps1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/jumps1_subject2.bvh",
+      "source_frames": 7334,
+      "csv": "csv/jumps1_subject2.csv",
+      "csv_frames": 7334,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/jumps1_subject2.npz",
+      "npz_frames": 12222,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000239,
+        0.000579
+      ],
+      "root_z_range_m": [
+        0.157148,
+        0.894092
+      ],
+      "published_root_z_range_m": [
+        0.1571735292673111,
+        0.8932763934135437
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.09871371131712153,
+        "max_dof_step_rad": 0.403313,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "acf627a0b970603587d9009adbc2a8a2ab0866bd430160f7b4180417bb17666d",
+      "npz_sha256": "150cdccda7ba25b397d2220eb539d9a68af991c172f05409933b206532221dcd"
+    },
+    {
+      "name": "jumps1_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/jumps1_subject5.bvh",
+      "source_frames": 7334,
+      "csv": "csv/jumps1_subject5.csv",
+      "csv_frames": 7334,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/jumps1_subject5.npz",
+      "npz_frames": 12222,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000472,
+        0.000288
+      ],
+      "root_z_range_m": [
+        0.571815,
+        0.901088
+      ],
+      "published_root_z_range_m": [
+        0.572129487991333,
+        0.9003303050994873
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.10209155917116755,
+        "max_dof_step_rad": 0.41053100000000003,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "e6053557391853739178fadf4527fc960188dbca108ac9c47abeb9bc7012d37e",
+      "npz_sha256": "2cf60d45c9c6d80df2f22a9a2a80f3e7b16c880efe7868f4f44b6966f54b5c18"
+    },
+    {
+      "name": "multipleActions1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/multipleActions1_subject1.bvh",
+      "source_frames": 4587,
+      "csv": "csv/multipleActions1_subject1.csv",
+      "csv_frames": 4587,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/multipleActions1_subject1.npz",
+      "npz_frames": 7643,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000393,
+        0.000378
+      ],
+      "root_z_range_m": [
+        0.132903,
+        1.097229
+      ],
+      "published_root_z_range_m": [
+        0.13297566771507263,
+        1.0969988107681274
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.12866874152644842,
+        "max_dof_step_rad": 0.40948,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "56f636223d2588f1efba431f531df357c6b42c48297c2a68ac5b03b48dcb0a0e",
+      "npz_sha256": "77ddecb2c40db9ba9b3c24c24192420facd5a29a0c9d023236414a92a86f1504"
+    },
+    {
+      "name": "multipleActions1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/multipleActions1_subject2.bvh",
+      "source_frames": 4587,
+      "csv": "csv/multipleActions1_subject2.csv",
+      "csv_frames": 4587,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/multipleActions1_subject2.npz",
+      "npz_frames": 7643,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.00037,
+        0.000336
+      ],
+      "root_z_range_m": [
+        0.111111,
+        0.814219
+      ],
+      "published_root_z_range_m": [
+        0.11111265420913696,
+        0.8134466409683228
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.10558576386521058,
+        "max_dof_step_rad": 0.42279100000000014,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "12aa5394e3624a9423c4f38fa316536395a204c21e0cb616cd08c5d9faa1f22f",
+      "npz_sha256": "6ee937ab2542c884b19aabd2547e353add496fd5742083299ec99fb30a3190ed"
+    },
+    {
+      "name": "multipleActions1_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/multipleActions1_subject3.bvh",
+      "source_frames": 4587,
+      "csv": "csv/multipleActions1_subject3.csv",
+      "csv_frames": 4587,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/multipleActions1_subject3.npz",
+      "npz_frames": 7643,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000493,
+        0.000385
+      ],
+      "root_z_range_m": [
+        0.112418,
+        0.866414
+      ],
+      "published_root_z_range_m": [
+        0.11242038756608963,
+        0.8662849068641663
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.12729434718006924,
+        "max_dof_step_rad": 0.42852,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "029a48725ae1385da975447a4244289b8a5f3fde7310058513dd2effe80ca738",
+      "npz_sha256": "a89280648bc724f13ea17a5e86f5e17bed083cafb708ab9ce5890f94f5a8997d"
+    },
+    {
+      "name": "multipleActions1_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/multipleActions1_subject4.bvh",
+      "source_frames": 4587,
+      "csv": "csv/multipleActions1_subject4.csv",
+      "csv_frames": 4587,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/multipleActions1_subject4.npz",
+      "npz_frames": 7643,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000491,
+        0.000171
+      ],
+      "root_z_range_m": [
+        0.138846,
+        0.9164
+      ],
+      "published_root_z_range_m": [
+        0.13917145133018494,
+        0.916233479976654
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.09992613952815352,
+        "max_dof_step_rad": 0.395582,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "62da21430505ef3562c22507b1eae096654b4ec9d5f4fcb6fcfef7bd09953dc4",
+      "npz_sha256": "c5ea2b1d088e04fb7d18b1742c3372c3744472c7d633035126881f9ac48102c0"
+    },
+    {
+      "name": "push1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/push1_subject2.bvh",
+      "source_frames": 3066,
+      "csv": "csv/push1_subject2.csv",
+      "csv_frames": 3066,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/push1_subject2.npz",
+      "npz_frames": 5108,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000418,
+        9.5e-05
+      ],
+      "root_z_range_m": [
+        0.31781,
+        0.793217
+      ],
+      "published_root_z_range_m": [
+        0.31804928183555603,
+        0.7932164072990417
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.04134519886274585,
+        "max_dof_step_rad": 0.351729,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "fdd6bc1631dd0c59475b634952f1208534a39ad12047e0eb542a40944d1f0bed",
+      "npz_sha256": "370ba2879918af9b702b146edcb8247c027c8a23fb1827b5a25c5b3253d75948"
+    },
+    {
+      "name": "pushAndFall1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/pushAndFall1_subject1.bvh",
+      "source_frames": 4959,
+      "csv": "csv/pushAndFall1_subject1.csv",
+      "csv_frames": 4959,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/pushAndFall1_subject1.npz",
+      "npz_frames": 8263,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000484,
+        0.000305
+      ],
+      "root_z_range_m": [
+        0.189633,
+        0.794719
+      ],
+      "published_root_z_range_m": [
+        0.18968819081783295,
+        0.7947118878364563
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.063697605214011,
+        "max_dof_step_rad": 0.41409999999999997,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "7efdeb8a6875eeccd557d00cacee61240afc117aa1531fbcecefab60ecd37263",
+      "npz_sha256": "6b95a86f8dd9e74bad650ba8fe2d51118bd6d1bdcfda467ed77e08c33e7e44cf"
+    },
+    {
+      "name": "pushAndFall1_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/pushAndFall1_subject4.bvh",
+      "source_frames": 4959,
+      "csv": "csv/pushAndFall1_subject4.csv",
+      "csv_frames": 4959,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/pushAndFall1_subject4.npz",
+      "npz_frames": 8263,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000467,
+        0.000225
+      ],
+      "root_z_range_m": [
+        0.142223,
+        0.887876
+      ],
+      "published_root_z_range_m": [
+        0.1423361450433731,
+        0.8877633810043335
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.08176661066107602,
+        "max_dof_step_rad": 0.500037,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "99ba1b1cbdea5e2be7f0855f4fcc896cec203ac86822c4079e09e001b088ca6b",
+      "npz_sha256": "80794c5725ceadc68ec5a873a96d0ac312b7e6d860e226798f0db188d82d4f49"
+    },
+    {
+      "name": "pushAndStumble1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/pushAndStumble1_subject2.bvh",
+      "source_frames": 6801,
+      "csv": "csv/pushAndStumble1_subject2.csv",
+      "csv_frames": 6801,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/pushAndStumble1_subject2.npz",
+      "npz_frames": 11333,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000239,
+        0.000597
+      ],
+      "root_z_range_m": [
+        0.186661,
+        0.865325
+      ],
+      "published_root_z_range_m": [
+        0.18673744797706604,
+        0.8650368452072144
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.12917831119038523,
+        "max_dof_step_rad": 0.44419799999999987,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "96e4023326019b5af1c9a5498232dadf8d1a7a06bbb7a9c7e03dbe0a561509f9",
+      "npz_sha256": "8b0386bde966944982f7c7d08c341b525df33e446b7a658ca0a7a0ebe6465a2f"
+    },
+    {
+      "name": "pushAndStumble1_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/pushAndStumble1_subject3.bvh",
+      "source_frames": 6801,
+      "csv": "csv/pushAndStumble1_subject3.csv",
+      "csv_frames": 6801,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/pushAndStumble1_subject3.npz",
+      "npz_frames": 11333,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000519,
+        0.000206
+      ],
+      "root_z_range_m": [
+        0.163273,
+        0.945553
+      ],
+      "published_root_z_range_m": [
+        0.16362278163433075,
+        0.9454985857009888
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.13781924455604885,
+        "max_dof_step_rad": 0.4074770000000001,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "bf3bc72f5240f918b7aa029b234921778f8fd14cf7e06efac0f5f540a73394f4",
+      "npz_sha256": "311de5ebcb8a2bf53487bc5d331296f37f2d83d3023edc6d85a87072ae0ddffd"
+    },
+    {
+      "name": "pushAndStumble1_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/pushAndStumble1_subject5.bvh",
+      "source_frames": 6801,
+      "csv": "csv/pushAndStumble1_subject5.csv",
+      "csv_frames": 6801,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/pushAndStumble1_subject5.npz",
+      "npz_frames": 11333,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000499,
+        0.000248
+      ],
+      "root_z_range_m": [
+        0.509671,
+        0.84264
+      ],
+      "published_root_z_range_m": [
+        0.5099179744720459,
+        0.8421555161476135
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.12130965607073493,
+        "max_dof_step_rad": 0.440859,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "ad9a6556282b3c95ff919b66c7ed183cb4291d3950c6380b8625d7138cc9227d",
+      "npz_sha256": "b7e02746b41a736b68fe6a4ad40070ddd194e5db39fd7c05473379be1fcc2f77"
+    },
+    {
+      "name": "run1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/run1_subject2.bvh",
+      "source_frames": 7135,
+      "csv": "csv/run1_subject2.csv",
+      "csv_frames": 7135,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/run1_subject2.npz",
+      "npz_frames": 11890,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000494,
+        0.000525
+      ],
+      "root_z_range_m": [
+        0.499306,
+        0.878982
+      ],
+      "published_root_z_range_m": [
+        0.49961909651756287,
+        0.8778409361839294
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.13790031440863373,
+        "max_dof_step_rad": 0.4417169999999999,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "93c42c8996a300e0790784b3935cc42e7156ff6ad0c3b7667361cf4692f86a03",
+      "npz_sha256": "859011174e8a036dfb7fa6c8f49261975db42e8bc22dc62c030f2c86e0d32e82"
+    },
+    {
+      "name": "run1_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/run1_subject5.bvh",
+      "source_frames": 7135,
+      "csv": "csv/run1_subject5.csv",
+      "csv_frames": 7135,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/run1_subject5.npz",
+      "npz_frames": 11890,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000519,
+        7.1e-05
+      ],
+      "root_z_range_m": [
+        0.506373,
+        0.869994
+      ],
+      "published_root_z_range_m": [
+        0.5070340633392334,
+        0.8697571158409119
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.1439950437654019,
+        "max_dof_step_rad": 0.422998,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "f4c05a05d803d61a4ca716d12fc678a87c9a309f3059ab618096598f0b0cf1da",
+      "npz_sha256": "2b87523ab688d1367eb02e5c60d45488aabcabf691441df1c96f0af4ced89b45"
+    },
+    {
+      "name": "run2_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/run2_subject1.bvh",
+      "source_frames": 7345,
+      "csv": "csv/run2_subject1.csv",
+      "csv_frames": 7345,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/run2_subject1.npz",
+      "npz_frames": 12240,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000461,
+        0.000346
+      ],
+      "root_z_range_m": [
+        0.470882,
+        0.795424
+      ],
+      "published_root_z_range_m": [
+        0.4708942770957947,
+        0.7944605946540833
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.1462517118053667,
+        "max_dof_step_rad": 0.4175070000000001,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "b86c815dcb49d9552d38a894aca811431843a7020c12acbd30a8a1cb683e98de",
+      "npz_sha256": "b797cf31503b217a97f341ee678e84026ef0e237c61b975724cfb40f12dde16d"
+    },
+    {
+      "name": "run2_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/run2_subject4.bvh",
+      "source_frames": 7345,
+      "csv": "csv/run2_subject4.csv",
+      "csv_frames": 7345,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/run2_subject4.npz",
+      "npz_frames": 12240,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000503,
+        0.000244
+      ],
+      "root_z_range_m": [
+        0.434471,
+        0.816374
+      ],
+      "published_root_z_range_m": [
+        0.4350312054157257,
+        0.8158872127532959
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.1671997358640257,
+        "max_dof_step_rad": 0.444712,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "30269a17ea839628f7d3d137d858540a6252df993efac36168b0249675661be4",
+      "npz_sha256": "6541bf9be26a8118a74e8049daf71eff8fc450c44bc5910a7eea638489463ef0"
+    },
+    {
+      "name": "sprint1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/sprint1_subject2.bvh",
+      "source_frames": 8194,
+      "csv": "csv/sprint1_subject2.csv",
+      "csv_frames": 8194,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/sprint1_subject2.npz",
+      "npz_frames": 13655,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000473,
+        0.000301
+      ],
+      "root_z_range_m": [
+        0.521628,
+        0.811125
+      ],
+      "published_root_z_range_m": [
+        0.5218089818954468,
+        0.8099290132522583
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.17733125001815098,
+        "max_dof_step_rad": 0.45420799999999995,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "6f2c1feb4b3d6260799a9a532770395a34a0d7c3a9fb00a0aeee8e618474eb3d",
+      "npz_sha256": "0465e3fb0f4609d878069d44660ebd40bcfb128129ee2bb7866aad73747a5c63"
+    },
+    {
+      "name": "sprint1_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/sprint1_subject4.bvh",
+      "source_frames": 8194,
+      "csv": "csv/sprint1_subject4.csv",
+      "csv_frames": 8194,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/sprint1_subject4.npz",
+      "npz_frames": 13655,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000532,
+        0.000267
+      ],
+      "root_z_range_m": [
+        0.463976,
+        0.801302
+      ],
+      "published_root_z_range_m": [
+        0.4640675485134125,
+        0.8012096881866455
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.18786114925923353,
+        "max_dof_step_rad": 0.46027399999999985,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 1,
+        "max_frozen_while_source_moves_run": 1
+      },
+      "csv_sha256": "eee4f000608f8ced92d8cbff614eaddf98a533bd9b6707aaac0ed6253e609681",
+      "npz_sha256": "91b43199948b3226f4447a3f1e7d2bbd17b4175e1b3bc1f3598623c9191577f2"
+    },
+    {
+      "name": "walk1_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk1_subject1.bvh",
+      "source_frames": 7840,
+      "csv": "csv/walk1_subject1.csv",
+      "csv_frames": 7840,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk1_subject1.npz",
+      "npz_frames": 13065,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000467,
+        0.000244
+      ],
+      "root_z_range_m": [
+        0.612245,
+        0.821031
+      ],
+      "published_root_z_range_m": [
+        0.6123955249786377,
+        0.8210304975509644
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.058082885078135985,
+        "max_dof_step_rad": 0.3391599999999999,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "a786d585e344897557c78518a80dd1035eecd32eaab55e043728f4347b9870b3",
+      "npz_sha256": "3df48a8737397ae5eedfc819bf42cb3cd8b6a7fef1769d46096069327d803a83"
+    },
+    {
+      "name": "walk1_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk1_subject2.bvh",
+      "source_frames": 7840,
+      "csv": "csv/walk1_subject2.csv",
+      "csv_frames": 7840,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk1_subject2.npz",
+      "npz_frames": 13065,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.00023,
+        0.000456
+      ],
+      "root_z_range_m": [
+        0.658527,
+        0.803093
+      ],
+      "published_root_z_range_m": [
+        0.6595725417137146,
+        0.8028818964958191
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.06818558068242854,
+        "max_dof_step_rad": 0.370323,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "0272468bb38159b1814faba23d7dd3720ab5e4506d1ce1867938e5712c31fa35",
+      "npz_sha256": "99e14bf4a6c4e77bbf8068347b0fcbecf7fa81858ff566017b6bd054a252315c"
+    },
+    {
+      "name": "walk1_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk1_subject5.bvh",
+      "source_frames": 7840,
+      "csv": "csv/walk1_subject5.csv",
+      "csv_frames": 7840,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk1_subject5.npz",
+      "npz_frames": 13065,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000472,
+        0.000177
+      ],
+      "root_z_range_m": [
+        0.582087,
+        0.789468
+      ],
+      "published_root_z_range_m": [
+        0.5823035836219788,
+        0.7894558310508728
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.056835331502508475,
+        "max_dof_step_rad": 0.36618,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "e114b20abd514882ba2ae8cb8550f865e021a576ecb3d2ee914d9545aa6dda08",
+      "npz_sha256": "d1580e67d13efc588c906fac9c64bfb98bce57ebd9788db313cd65798586060d"
+    },
+    {
+      "name": "walk2_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk2_subject1.bvh",
+      "source_frames": 7146,
+      "csv": "csv/walk2_subject1.csv",
+      "csv_frames": 7146,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk2_subject1.npz",
+      "npz_frames": 11908,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000493,
+        0.000266
+      ],
+      "root_z_range_m": [
+        0.354391,
+        0.900513
+      ],
+      "published_root_z_range_m": [
+        0.354398638010025,
+        0.9001650214195251
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.0966709018733144,
+        "max_dof_step_rad": 0.46031299999999997,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "851fd88aab623a6acd59720809d3fc637d9c11371cf9dbaa17eff965de5f459d",
+      "npz_sha256": "464559e04cc54e3a5a7272017f25f261567e7eeffa67edb038fd3a1fb7d89b5a"
+    },
+    {
+      "name": "walk2_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk2_subject3.bvh",
+      "source_frames": 7146,
+      "csv": "csv/walk2_subject3.csv",
+      "csv_frames": 7146,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk2_subject3.npz",
+      "npz_frames": 11908,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000497,
+        0.000157
+      ],
+      "root_z_range_m": [
+        0.287177,
+        0.893648
+      ],
+      "published_root_z_range_m": [
+        0.28720954060554504,
+        0.8935062885284424
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.10118841662957279,
+        "max_dof_step_rad": 0.391988,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "4d014a829610a53c8ff83791d937009d6be7db92b7ec50609928b3a5acc4f13a",
+      "npz_sha256": "74c6ef6add74b1a8be7e3fb4c9ecd8e916bbcabd89aac7d36018bcf26984926a"
+    },
+    {
+      "name": "walk2_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk2_subject4.bvh",
+      "source_frames": 7146,
+      "csv": "csv/walk2_subject4.csv",
+      "csv_frames": 7146,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk2_subject4.npz",
+      "npz_frames": 11908,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000518,
+        0.000257
+      ],
+      "root_z_range_m": [
+        0.486696,
+        0.875364
+      ],
+      "published_root_z_range_m": [
+        0.4869915843009949,
+        0.8751541376113892
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.09002283743028737,
+        "max_dof_step_rad": 0.39301699999999995,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "fe1d017254b51165cced1b79c3657153ccc8a0c452b29961f76021f9ea7921b6",
+      "npz_sha256": "3f55ccbe0244e90e9bfa51bc768448c7ee4a5a059d3cdac213b2518a6e3309bf"
+    },
+    {
+      "name": "walk3_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk3_subject1.bvh",
+      "source_frames": 7399,
+      "csv": "csv/walk3_subject1.csv",
+      "csv_frames": 7399,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk3_subject1.npz",
+      "npz_frames": 12330,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000491,
+        0.000347
+      ],
+      "root_z_range_m": [
+        0.161782,
+        0.81126
+      ],
+      "published_root_z_range_m": [
+        0.1619337946176529,
+        0.8112336993217468
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.038960515769173316,
+        "max_dof_step_rad": 0.39258600000000005,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "938cd446828fa73c14ed42cf5fa787931a9aeecde1f3427d68ef8a824b58eca1",
+      "npz_sha256": "d8a35ce17f0c7fba74ec16449189159a8a5161fe5efc2447c6408f85681d7f57"
+    },
+    {
+      "name": "walk3_subject2",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk3_subject2.bvh",
+      "source_frames": 7399,
+      "csv": "csv/walk3_subject2.csv",
+      "csv_frames": 7399,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk3_subject2.npz",
+      "npz_frames": 12330,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000357,
+        0.000238
+      ],
+      "root_z_range_m": [
+        0.623859,
+        0.810186
+      ],
+      "published_root_z_range_m": [
+        0.6241711974143982,
+        0.8091133236885071
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.08997865285721945,
+        "max_dof_step_rad": 0.40952299999999997,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "b64fbcee9c75228ade0e0513d6a4fb439b6c529052bebc7a6f29cae8918641db",
+      "npz_sha256": "87d3a0d747f6f3ee50ec2237bcc380844d7d7bc9bd6cd6ecd27fb7effe0bca9e"
+    },
+    {
+      "name": "walk3_subject3",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk3_subject3.bvh",
+      "source_frames": 7399,
+      "csv": "csv/walk3_subject3.csv",
+      "csv_frames": 7399,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk3_subject3.npz",
+      "npz_frames": 12330,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000464,
+        0.000292
+      ],
+      "root_z_range_m": [
+        0.324382,
+        0.852726
+      ],
+      "published_root_z_range_m": [
+        0.32440081238746643,
+        0.852686882019043
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.038935886287588206,
+        "max_dof_step_rad": 0.32341200000000003,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "249d376c707c2e142901eada3025824c9663291bb57289af655d3ab322d3ba87",
+      "npz_sha256": "ccbbec8351b9b76c0db72cef3e365eb859414f3beec88f0ad46d2b5425d3848f"
+    },
+    {
+      "name": "walk3_subject4",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk3_subject4.bvh",
+      "source_frames": 7399,
+      "csv": "csv/walk3_subject4.csv",
+      "csv_frames": 7399,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk3_subject4.npz",
+      "npz_frames": 12330,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        0.000459,
+        0.000312
+      ],
+      "root_z_range_m": [
+        0.099186,
+        0.806721
+      ],
+      "published_root_z_range_m": [
+        0.09923544526100159,
+        0.8061120510101318
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.12667185393369762,
+        "max_dof_step_rad": 0.40794600000000003,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "e05279c0826d31320333dfb58d2a4af56ea77186f5f853661cb649b673450236",
+      "npz_sha256": "dc621fbcc875682fe69484fda19afbb5aea954bf6d7022d5af10701b939e61b2"
+    },
+    {
+      "name": "walk3_subject5",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk3_subject5.bvh",
+      "source_frames": 7399,
+      "csv": "csv/walk3_subject5.csv",
+      "csv_frames": 7399,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk3_subject5.npz",
+      "npz_frames": 12330,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000508,
+        0.000154
+      ],
+      "root_z_range_m": [
+        0.526676,
+        0.78735
+      ],
+      "published_root_z_range_m": [
+        0.5268205404281616,
+        0.7873094081878662
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.062216488497824754,
+        "max_dof_step_rad": 0.3735170000000001,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "b4fed379e752fd7f7a4bf5d089e2682b5bf0b49991d2dac90d7f957e3097c9c2",
+      "npz_sha256": "a93d37ccb33e65e9d81a1b1a81df3b1567bb106b2dd676b18fe58b4bf2e1b5dc"
+    },
+    {
+      "name": "walk4_subject1",
+      "source_bvh": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/walk4_subject1.bvh",
+      "source_frames": 4918,
+      "csv": "csv/walk4_subject1.csv",
+      "csv_frames": 4918,
+      "csv_sample_rate_hz": 30.0003,
+      "npz": "npz/walk4_subject1.npz",
+      "npz_frames": 8195,
+      "playback_mesh_z_lift_m": 0.0,
+      "ground_export": "none",
+      "root_xy_first_m": [
+        -0.000506,
+        0.000237
+      ],
+      "root_z_range_m": [
+        0.557997,
+        0.787465
+      ],
+      "published_root_z_range_m": [
+        0.5580227971076965,
+        0.7874616980552673
+      ],
+      "retarget_quality": {
+        "max_root_step_m": 0.03196377604414143,
+        "max_dof_step_rad": 0.39438000000000006,
+        "frozen_transition_count": 0,
+        "frozen_while_source_moves_count": 0,
+        "max_frozen_while_source_moves_run": 0
+      },
+      "csv_sha256": "85b93698ddd46cb0f8d83795f8004f4318b5d054cbe512e0f5b6015e62f2560b",
+      "npz_sha256": "a0cddcc3c160cb0399805437282e61838c616e2fd1ef634a970ff948fce4ee07"
+    }
+  ],
+  "clip_count": 55,
+  "selection": {
+    "clip_list": "clip_allowlist.txt",
+    "clip_list_sha256": "408b8487bee00e6c3e4fa9b89cc8adfceb7864580fe8643db1eb1d9f51cf0ff6",
+    "selected_clip_count": 55,
+    "available_source_clip_count": 55,
+    "unselected_source_clips": [],
+    "ignored_existing_csv_clips": [],
+    "ignored_existing_npz_clips": [],
+    "ignored_stale_retarget_manifests": 0,
+    "ignored_stale_converter_manifests": 0,
+    "retarget_manifest_selection": "explicit",
+    "retarget_manifest_inputs": [
+      {
+        "path": "provenance/pipeline_retarget_manifest.json",
+        "sha256": "f18686515fec0362d881fcb2fe1e3270c6e65264aec962debed01ebbb141f8c8"
+      }
+    ],
+    "converter_manifest_selection": "explicit",
+    "converter_manifest_inputs": [
+      {
+        "path": "provenance/pipeline_mjwarp_summary.json",
+        "sha256": "96572c316370662802cc55f857730b43367fc3a3a8ecc804cb68aa739b6001b6"
+      }
+    ]
+  },
+  "raw": {
+    "reference": "LAFAN1 official BVH",
+    "source_url": "https://github.com/ubisoft/ubisoft-laforge-animation-dataset/blob/master/lafan1/lafan1.zip",
+    "source_dir": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw",
+    "archive": "/home/amdin/Luo1imasi/demo/datasets/lafan1_raw/lafan1.zip",
+    "archive_sha256": "ea918082b500a5d158e9d3aa39039df04cd42e25f5c02fe8f7e88e8e9365a977",
+    "clip_count": 55,
+    "available_clip_count": 55,
+    "native_total_frames": 341766,
+    "native_sample_rate_hz": 30.000300003000028,
+    "license": "CC BY-NC-ND 4.0 (see LAFAN1 repository)"
+  },
+  "retarget": {
+    "backend": "hhtools_newton_gpu",
+    "profile": "hhtools_web_single_v1",
+    "reference": "lafan_bvh",
+    "preset_config": {
+      "apply_feet_stabilizer": true,
+      "feet_stabilizer": {
+        "body_ground_lift_max_rate": 0.008,
+        "body_ground_snap_on_penetration": false,
+        "enable_body_ground_clearance": false,
+        "ground_contact_z": 0.045,
+        "max_ground_correction": 0.015,
+        "min_foot_clearance": 0.0
+      },
+      "foot_clamp_anti_float": false,
+      "foot_clamp_anti_penetration": false,
+      "foot_clamp_max_lift_rate": 0.008,
+      "ground_collision_dynamic_boost": false,
+      "ground_collision_weight": 2.0,
+      "joint_limit_weight": 20.0,
+      "max_joint_velocity": 10.0,
+      "max_root_angular_velocity": 6.0,
+      "num_initialization_frames": 10,
+      "num_stabilization_frames": 5,
+      "smooth_joint_filter_weight": 5.5
+    },
+    "signature": "8c5959965bb2962b84aa7114385c94cddc229682df64d853dc00b66b70f14b8c",
+    "hhtools_repo": "/home/amdin/Luo1imasi/human-humanoid-tools",
+    "hhtools_commit": "6b140583d91c5b29185d209cff5276ba63107315",
+    "runtime": {
+      "python": "3.12.13",
+      "hhtools_source": "/home/amdin/Luo1imasi/human-humanoid-tools",
+      "hhtools_commit": "6b140583d91c5b29185d209cff5276ba63107315",
+      "hhtools_uv_lock_sha256": "373669f2bc4948836087c0eb03d6ddbcf635613c0e7d44fdafecfe7169d820ee",
+      "newton": "1.1.0",
+      "warp": "1.12.1",
+      "locked_newton": "1.1.0",
+      "locked_warp": "1.12.1",
+      "hhtools_dirty": false,
+      "hhtools_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "cuda_graph": "1"
+    },
+    "solve_mode": "per_clip_fresh_web_pipeline",
+    "ik_iterations": 24,
+    "human_height_m": 1.65,
+    "quality_limits": {
+      "max_root_step_m": 0.2,
+      "max_moving_source_freeze_run": 4
+    },
+    "source_preprocess": {
+      "profile": "normalize_zup_center_root_xy_snap_ground_0",
+      "steps": [
+        "normalize_mocap_bvh_clip",
+        "convert to Z-up when needed",
+        "center frame-0 root XY",
+        "snap the complete motion to ground with margin 0"
+      ],
+      "shared_by_scaler_and_ik": true
+    },
+    "ground_normalization": {
+      "source": "current hhtools Web single-motion preparation",
+      "post_ik_clip_floor_snap": true,
+      "pre_ik_feet_stabilizer": true,
+      "post_ik_foot_polish": false,
+      "csv_export": "Web playback mesh Z lift baked as one constant root-Z offset",
+      "export_profile": "web_constant_playback_mesh_z_bake"
+    },
+    "source_urdf": "/home/amdin/Luo1imasi/rp1_description/urdf/rp1_24dof.urdf",
+    "source_urdf_sha256": "fddf0346ed7833cb76f2b7337323dd2c3ba55e16b1c9414f4ac3576fe603734c",
+    "preset_urdf": "retarget_preset/rp1_source/urdf/rp1_24dof.urdf",
+    "preset_urdf_sha256": "7d044219d315c636793118b37781b5bc66b776364897b16b71f05845cf3072cc",
+    "robot_yaml": "retarget_preset/rp1_source/robot.yaml",
+    "robot_yaml_sha256": "6cb1bed9cfed35e72cf8531ea50739e835bb27cb169d3c128774b1077b842d99",
+    "calibration": "retarget_preset/rp1_source/urdf/retarget_calibration_lafan_bvh.yaml",
+    "calibration_sha256": "87d75223e32cc9e2a3146b25906af926a9c72e2c7d45f70da47daf41842090a1",
+    "preset_meshes": "/home/amdin/Luo1imasi/rp1_description/meshes",
+    "preset_note": "staging URDF is source XML plus a minimal MuJoCo compiler stanza; meshes is a symlink to rp1_description/meshes"
+  },
+  "csv": {
+    "directory": "csv",
+    "clip_count": 55,
+    "format": "hhtools headerful CSV",
+    "columns": [
+      "time",
+      "root_xyz",
+      "root_quaternion_xyzw",
+      "24 RP1 DOFs"
+    ],
+    "column_count": 32,
+    "quaternion_order": "xyzw",
+    "sample_rate_hz": "native LAFAN rate inferred from timestamps (~30 Hz)",
+    "ground_export_modes": [
+      "none"
+    ]
+  },
+  "npz": {
+    "directory": "npz",
+    "clip_count": 55,
+    "backend": "isaaclab_newton_mjwarp_gpu",
+    "conversion_profile": "beyondmimic_mjwarp_kinematic_v5",
+    "converter_script": "/home/amdin/Luo1imasi/demo/codebase/scripts/motion/csv_to_npz_mjwarp.py",
+    "converter_script_sha256": "51909e289fe9bcb48a06b5837c618b362d1d133f98ef5d03d679fed38379577e",
+    "runtime": {
+      "isaaclab": "19.0.1",
+      "isaaclab_commit": "55ac56a5502895df2aa27542f8b963ecc59b51e0",
+      "isaaclab_newton": "5.4.1",
+      "isaaclab_root": "/home/amdin/Luo1imasi/demo/IsaacLab",
+      "isaaclab_source_components": {
+        "isaaclab": "1a6bfc77d8986a30a390a66cfca21aef59c9af923053abbee211bab3cd15c4b8",
+        "isaaclab_newton": "a6678e1e80216e2caf2b0c8e34c1bdc85b8d6b0e8b9edfc699bf71bff11a4c63"
+      },
+      "isaaclab_source_sha256": "f435a85bfc63b950373af5f18c774934031e7cb37861f6f7b4fd3630c46d7716",
+      "newton": "1.5.0",
+      "python": "3.12.13",
+      "torch": "2.11.0+cu128",
+      "warp": "1.16.0"
+    },
+    "asset_bundle": {
+      "robot_config_bundle_sha256": "cca94ee9fa6e813e3753b38d5a54522f227db29168c357352a27520345f68a78",
+      "robot_config_files": [
+        "/home/amdin/Luo1imasi/demo/codebase/assets/robots/roboparty.py",
+        "/home/amdin/Luo1imasi/demo/codebase/assets/robots/roboparty_actuators.py"
+      ],
+      "robot_usd_bundle_sha256": "2653ddd031e6b980a254d761f0759ccf01c5071036eb7e55881a4a8cdf89239b",
+      "robot_usd_root": "/home/amdin/Luo1imasi/demo/codebase/data/robots/roboparty/rp1.3/usd/robot_24dof"
+    },
+    "output_fps": 50,
+    "center_root_xy": true,
+    "resampling": "linear position/DOF interpolation + XYZW SLERP; endpoint-excluded keep_last=false convention",
+    "total_frames": 569512,
+    "keys": [
+      "fps",
+      "joint_pos",
+      "joint_vel",
+      "body_pos_w",
+      "body_quat_w",
+      "body_lin_vel_w",
+      "body_ang_vel_w"
+    ],
+    "joint_order": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint",
+      "waist_roll_joint",
+      "waist_yaw_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_joint"
+    ],
+    "body_order": [
+      "base_link",
+      "left_hip_pitch_link",
+      "left_hip_roll_link",
+      "left_hip_yaw_link",
+      "left_knee_link",
+      "left_ankle_pitch_link",
+      "left_ankle_roll_link",
+      "right_hip_pitch_link",
+      "right_hip_roll_link",
+      "right_hip_yaw_link",
+      "right_knee_link",
+      "right_ankle_pitch_link",
+      "right_ankle_roll_link",
+      "waist_roll_link",
+      "waist_yaw_link",
+      "left_shoulder_pitch_link",
+      "left_shoulder_roll_link",
+      "left_shoulder_yaw_link",
+      "left_elbow_link",
+      "left_wrist_link",
+      "right_shoulder_pitch_link",
+      "right_shoulder_roll_link",
+      "right_shoulder_yaw_link",
+      "right_elbow_link",
+      "right_wrist_link"
+    ],
+    "body_quaternion_order": "xyzw",
+    "body_velocity_semantics": "IsaacLab body COM linear/angular velocities",
+    "ground_frame": "published CSV/NPZ world pose with z=0 simulation ground",
+    "robot_usd": "/home/amdin/Luo1imasi/demo/codebase/data/robots/roboparty/rp1.3/usd/robot_24dof/robot_24dof.usda",
+    "robot_usd_sha256": "f972ad35903b5174f5ef8ed7097ff59b682d09d14dc3a3092f71a11eac312f2b",
+    "robot_mjcf": "/home/amdin/Luo1imasi/demo/codebase/data/robots/roboparty/rp1.3/mjcf/robot_24dof.xml",
+    "robot_mjcf_sha256": "77a7323b247a00e89dc54a9a5b46618b75476ebe7a4f34b3704fdca23cf9b2bf",
+    "kinematic_asset_note": "MJWarp FK uses the codebase RP1.3 USD/MJCF asset; the 24-DOF names/order are checked against the hhtools CSV schema.",
+    "env_batching": "Newton multi-environment FK; final partial batch padded and cropped",
+    "cpu_converter_retained": false
+  }
+}

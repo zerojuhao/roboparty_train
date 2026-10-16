@@ -1,0 +1,1138 @@
+{
+  "format": "roboparty_motion_v1",
+  "datasets": {
+    "rp1": [
+      {
+        "name": "114_09",
+        "npz": "114_09.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/114_09.pkl",
+        "source_sha256": "44f6d58033fb7ed3ef4bd76bb9425762bbb70e9b4d89007f83749ccdbbdb2dd3",
+        "npz_sha256": "d195c193731bc2d6bc2410f5c4327314ba44661baabe6b60927a19770e1d1bdd",
+        "frames": 782,
+        "fps": 50.0
+      },
+      {
+        "name": "36_01",
+        "npz": "36_01.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/36_01.pkl",
+        "source_sha256": "34402790b81d374d71309d617fc5d1271e1ae8eddf1d6780ea2f5543a6679efe",
+        "npz_sha256": "345276f21ea528f8b05877ba20511ec00e1404423c017f835e031e3be024db6e",
+        "frames": 232,
+        "fps": 50.0
+      },
+      {
+        "name": "36_11",
+        "npz": "36_11.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/36_11.pkl",
+        "source_sha256": "73fd3d9c9a8f89f0a8fafa7dd550ba893b23a736aab34e2f4c4c2734c139f2be",
+        "npz_sha256": "fd141dc3bbbb74a91283838fcee49b08379cf6da939252d52da8a38b44f8abc5",
+        "frames": 1737,
+        "fps": 50.0
+      },
+      {
+        "name": "A1-_Stand_stageii",
+        "npz": "A1-_Stand_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/A1-_Stand_stageii.pkl",
+        "source_sha256": "b655b9210cb7110c5f701d26acaf2b360cc73dd611b14116e0c18b6a7899377c",
+        "npz_sha256": "e3be83765bb5bdd7d12acc551219da2fef59cd950fb959cc232b7365390c93fe",
+        "frames": 191,
+        "fps": 50.0
+      },
+      {
+        "name": "B10_-__Walk_turn_left_45_stageii",
+        "npz": "B10_-__Walk_turn_left_45_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/B10_-__Walk_turn_left_45_stageii.pkl",
+        "source_sha256": "db450a1eae1e2810a2cfc442f55cb58ec1a4ee9c0145cdd5497c456d3a37dc72",
+        "npz_sha256": "ae0514c910adbed7797b6e27d91e4a674929ade23c60d2849a24e65f326e0c15",
+        "frames": 299,
+        "fps": 50.0
+      },
+      {
+        "name": "B13_-__Walk_turn_right_90_stageii",
+        "npz": "B13_-__Walk_turn_right_90_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/B13_-__Walk_turn_right_90_stageii.pkl",
+        "source_sha256": "fcb5a6d98463b892904cb891e841e235de1e09ce5706abd02346d101ef204863",
+        "npz_sha256": "3110a8cec43213508ff9021292fc264c351ce843b7b92051ebe9be277d99701c",
+        "frames": 281,
+        "fps": 50.0
+      },
+      {
+        "name": "B14_-__Walk_turn_right_45_t2_stageii",
+        "npz": "B14_-__Walk_turn_right_45_t2_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/B14_-__Walk_turn_right_45_t2_stageii.pkl",
+        "source_sha256": "53e798dc23ea26696650cb358abed7e30772407d77cbb0efeaece456911f566f",
+        "npz_sha256": "e63f62f99f832df0dd034ce7223cfe35ddab094eb337072ebfd19dc9127fa2c6",
+        "frames": 290,
+        "fps": 50.0
+      },
+      {
+        "name": "B15_-__Walk_turn_around_stageii",
+        "npz": "B15_-__Walk_turn_around_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/B15_-__Walk_turn_around_stageii.pkl",
+        "source_sha256": "e627e4b12ac613444eb34fca15a088c4d2058cf975c7caa3427ed6e5f9428cf1",
+        "npz_sha256": "c535071bccfc48a376270fcfd4b36a12dba99d42e347e9f8946c4f59f297d90c",
+        "frames": 376,
+        "fps": 50.0
+      },
+      {
+        "name": "B4_-_Stand_to_Walk_backwards_stageii",
+        "npz": "B4_-_Stand_to_Walk_backwards_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/B4_-_Stand_to_Walk_backwards_stageii.pkl",
+        "source_sha256": "0b254ae128c841b7928425322f3d30401676bdb9a6ae942a5f7921135f1b9b5f",
+        "npz_sha256": "cd61300b2541268395323f188efa40a2d0e5148e705c03d0c3efcd892cbf4ad5",
+        "frames": 231,
+        "fps": 50.0
+      },
+      {
+        "name": "B9_-__Walk_turn_left_90_stageii",
+        "npz": "B9_-__Walk_turn_left_90_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/B9_-__Walk_turn_left_90_stageii.pkl",
+        "source_sha256": "67d2260ea710b24ed73e293310ab8cabf5ed509d362cbc7571ff80574b14fd23",
+        "npz_sha256": "2b2b25f3c9dddd92103515904a3b9ba768dc8980d7aa24cf6e1be83b0ada979c",
+        "frames": 252,
+        "fps": 50.0
+      },
+      {
+        "name": "come_down_50cm_box_R_002__A300",
+        "npz": "come_down_50cm_box_R_002__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/come_down_50cm_box_R_002__A300.pkl",
+        "source_sha256": "942bd610dc81aae7ff7b55992f5bd2ca56a41ef2cfb91892eeb93b279ff393ba",
+        "npz_sha256": "e79b0f51fe5c332875d8198541feecc3d74061682573f0f48da1d41354f609cb",
+        "frames": 246,
+        "fps": 50.0
+      },
+      {
+        "name": "come_up_50cm_box_R_001__A300",
+        "npz": "come_up_50cm_box_R_001__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/come_up_50cm_box_R_001__A300.pkl",
+        "source_sha256": "d1f10d20c8c9718890234df96c62550833b080265f3fef49f1e95780d640dcc3",
+        "npz_sha256": "b703b469b21434d3d80b754082578538af80ef0951de1f3b6e3b766de7edc84b",
+        "frames": 228,
+        "fps": 50.0
+      },
+      {
+        "name": "idle_loop_001__A046",
+        "npz": "idle_loop_001__A046.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/idle_loop_001__A046.pkl",
+        "source_sha256": "429bd0c3c2a80c0c67b705019789f21e23a5ca27a1dfdff61d918a4b8a52a10b",
+        "npz_sha256": "eb342ca9e898b0bef25898a6006e72c23b6a411d5d05680e87321c8bc0bc13be",
+        "frames": 671,
+        "fps": 50.0
+      },
+      {
+        "name": "jog_forward_A021",
+        "npz": "jog_forward_A021.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/jog_forward_A021.pkl",
+        "source_sha256": "713a19957e9f8d66894a6247f71f211c11f54c050deb667dace206afa04382b5",
+        "npz_sha256": "023d55da2fc6f802be27b37d217864d63879aacede57e70a4586f40fa16690c9",
+        "frames": 217,
+        "fps": 50.0
+      },
+      {
+        "name": "jog_forward_A045",
+        "npz": "jog_forward_A045.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/jog_forward_A045.pkl",
+        "source_sha256": "36ba469ab6dd2e10507343308e7854ae5cc21c076da21deb22bbd76119ad1260",
+        "npz_sha256": "ce72ddbc7308980c1d10d7d4a571152e0f5cc1c7ce6754ca34deccfafd1d4489",
+        "frames": 221,
+        "fps": 50.0
+      },
+      {
+        "name": "jog_forward_lafan_run2_subject4_231_235",
+        "npz": "jog_forward_lafan_run2_subject4_231_235.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/jog_forward_lafan_run2_subject4_231_235.pkl",
+        "source_sha256": "61951829c51b6eeb38df5b7974679c5e2f441df3ce33416f278da6e1e6aee26e",
+        "npz_sha256": "9dde4fef0c1b504a46f1d00b32d40400117f05e4d019deb956215b8c1904a48c",
+        "frames": 200,
+        "fps": 50.0
+      },
+      {
+        "name": "move_back",
+        "npz": "move_back.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/move_back.pkl",
+        "source_sha256": "c59dc7695506e946907498a68a216a44fff3a11f4ad105016592f58073c83bc3",
+        "npz_sha256": "8ad94d25d5f8ba98f8d3116ee53becebbf0e8a922d2a7e942f2e199330da104c",
+        "frames": 312,
+        "fps": 50.0
+      },
+      {
+        "name": "move_l",
+        "npz": "move_l.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/move_l.pkl",
+        "source_sha256": "7d54d61438d7b8a0f0d72170f0907bd4734618dffc8f3dfdfdb3b7f0d1dd82c4",
+        "npz_sha256": "28401af993a3b6c949097fe80a9b99f1d0d6b0acea0602c7ff6edfce25bd7a19",
+        "frames": 280,
+        "fps": 50.0
+      },
+      {
+        "name": "move_r",
+        "npz": "move_r.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/move_r.pkl",
+        "source_sha256": "26beaa94a55fcf8be9651eb6f57bd3b2df0f89725e10185e292f5ba70f0cb8fb",
+        "npz_sha256": "3f1a271195e0041d75fe1ae2ce10344ea0636238ec355f3d8d2069a7f8ce398d",
+        "frames": 250,
+        "fps": 50.0
+      },
+      {
+        "name": "run_loop_180_R_003__A326",
+        "npz": "run_loop_180_R_003__A326.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/run_loop_180_R_003__A326.pkl",
+        "source_sha256": "3e50bd6230276fd31abe95d0adae2f6b1e2a9e9b87d13a4ae050a3ad1596f74c",
+        "npz_sha256": "ec641c01a4ebc3723030d3db5df5e66317dd9867e415839bcb1db3a6c9bd4745",
+        "frames": 97,
+        "fps": 50.0
+      },
+      {
+        "name": "run_start_180_R_001__A345",
+        "npz": "run_start_180_R_001__A345.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/run_start_180_R_001__A345.pkl",
+        "source_sha256": "3ff639ec29a7a6c0a68ab136fb7a9e7968bf59e08818e7aef831d93211484179",
+        "npz_sha256": "9a9d52aef09712835c33d3332b451786ce29edeaa751a613b7d5ccf575289812",
+        "frames": 152,
+        "fps": 50.0
+      },
+      {
+        "name": "run_stop_180_R_001__A345",
+        "npz": "run_stop_180_R_001__A345.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/run_stop_180_R_001__A345.pkl",
+        "source_sha256": "50df65a7703549782d8e82d14bc9d83ca0939694074e8b63767be1b579b675b8",
+        "npz_sha256": "465ca5fdc9ab2766e79554c74434b2482ab2a0c033e85efbd364170444eadc4e",
+        "frames": 203,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_down_loop_R_001__A300",
+        "npz": "stairs_climbing_down_loop_R_001__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_down_loop_R_001__A300.pkl",
+        "source_sha256": "f4a7553f9da5724e219d99a0c9dc553ac8fcfe19a5ee23c6aae61f99779b84ac",
+        "npz_sha256": "97924debac3709086e82e7760906a5f819ddf9c33c9e9895ca82df2b596f4add",
+        "frames": 308,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_down_loop_R_102__A301_M",
+        "npz": "stairs_climbing_down_loop_R_102__A301_M.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_down_loop_R_102__A301_M.pkl",
+        "source_sha256": "758fb0d29b9bb6299ba3ebeae21dda3084e9e9810e0de17f56215f02725d505d",
+        "npz_sha256": "efd59a3dccfa3a934ee186a72ca97de4ddba0dfcf37411ef0c14aa59b189ac18",
+        "frames": 247,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_down_stop_R_001__A300",
+        "npz": "stairs_climbing_down_stop_R_001__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_down_stop_R_001__A300.pkl",
+        "source_sha256": "575aa58ec991ba1d29e4b7dae6a5834525243c9d2181d06b0230503f647e5055",
+        "npz_sha256": "94875aa36a644bff2a68abddc7e1e8c1d923143be2e619409da8623996901bd8",
+        "frames": 192,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_down_stop_R_103__A301",
+        "npz": "stairs_climbing_down_stop_R_103__A301.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_down_stop_R_103__A301.pkl",
+        "source_sha256": "820d63d050a134c80313a38e24d3036b751a6f7c286bc14eed114883858325a1",
+        "npz_sha256": "53fde51d2d719a972e86b88b1e7f9b4e58b171f89bea076e770e2d58e608a56e",
+        "frames": 181,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_jog_down_loop_R_001__A300",
+        "npz": "stairs_climbing_jog_down_loop_R_001__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_jog_down_loop_R_001__A300.pkl",
+        "source_sha256": "61d64df271ca9cd61d4ea4176ca1a443d07e0df1b66ad134213eb00ce9a91055",
+        "npz_sha256": "bfb68de034c069a16a8223093876a0eed7367ecbd4d5f326caeaeeb47b0f96e0",
+        "frames": 221,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_jog_down_stop_R_001__A300",
+        "npz": "stairs_climbing_jog_down_stop_R_001__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_jog_down_stop_R_001__A300.pkl",
+        "source_sha256": "333e08d5370260a5f2088b43ad1477dc669d17f85266ded567a29ef5e56c84e6",
+        "npz_sha256": "ccdb5f78b18a4012302e85ba331b339a5cb73e243797406ae7b030321113af80",
+        "frames": 147,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_jog_up_start_R_001__A300",
+        "npz": "stairs_climbing_jog_up_start_R_001__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_jog_up_start_R_001__A300.pkl",
+        "source_sha256": "3787b6e2495a85a1935a06e2f764ff60e9732a8ea1b427f17aa3e1a5d07e5837",
+        "npz_sha256": "ec1bc54b95083b6f657c95895fc43df5a56838bb4b9aab136c852efc789d24af",
+        "frames": 163,
+        "fps": 50.0
+      },
+      {
+        "name": "stairs_climbing_up_start_R_001__A300",
+        "npz": "stairs_climbing_up_start_R_001__A300.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stairs_climbing_up_start_R_001__A300.pkl",
+        "source_sha256": "d67f3adb235aebd5b284e247a6524ed5b4f957a1fd6344f3e2a8ce69af445683",
+        "npz_sha256": "fe9477908031d1ae347529caba076965b1b9ab34ac8bf8c53d4a23f0020f1504",
+        "frames": 299,
+        "fps": 50.0
+      },
+      {
+        "name": "stand_still",
+        "npz": "stand_still.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/stand_still.pkl",
+        "source_sha256": "0f0c0715d459c194bc514dc576906d820a01a72a60096ba1c1a62a62be83b4e4",
+        "npz_sha256": "0b5a5c77d06a234a472f486d0f5315166be70376e8ba849a47da503d467b9348",
+        "frames": 251,
+        "fps": 50.0
+      },
+      {
+        "name": "turn_l",
+        "npz": "turn_l.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/turn_l.pkl",
+        "source_sha256": "3919235cd482c68fdbe12ebaa477f0a6a74f7d85a3556434d6fa90f041ec9344",
+        "npz_sha256": "000c4d334ca4591d230afb8ed4e5c8d2abc85c3798ecf3ef291bfbb211a9cdb7",
+        "frames": 340,
+        "fps": 50.0
+      },
+      {
+        "name": "turn_r",
+        "npz": "turn_r.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/turn_r.pkl",
+        "source_sha256": "dab219c81156362140e7d4d0bbd79045e87db4712cbad4020c38af1da958d621",
+        "npz_sha256": "2280333e2e7eab242492611e97e4be3156f05f5ad1f67b84607b42bb90a7e1c0",
+        "frames": 239,
+        "fps": 50.0
+      },
+      {
+        "name": "walk_arc_cw_loop_001__A048",
+        "npz": "walk_arc_cw_loop_001__A048.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/walk_arc_cw_loop_001__A048.pkl",
+        "source_sha256": "3bae69e8cf17d98c383a0b4c19c9276493ddaaa105502161de51abaa031fd45a",
+        "npz_sha256": "0999d92f1b1b1735525d6d54c05fc3118dcbfd50c6a749646c96317372849112",
+        "frames": 558,
+        "fps": 50.0
+      },
+      {
+        "name": "walk_arc_cw_loop_001__A048_M",
+        "npz": "walk_arc_cw_loop_001__A048_M.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/walk_arc_cw_loop_001__A048_M.pkl",
+        "source_sha256": "6c0b33642182bdb475191bea0098eefc067ff08407adb187686f3682e9563327",
+        "npz_sha256": "75ab5913b9c982a7f3637b23fcca8f2dba2365ef6070d3549e6984366ec9bf1d",
+        "frames": 558,
+        "fps": 50.0
+      },
+      {
+        "name": "walk_ff_loop_180_R_001__A048",
+        "npz": "walk_ff_loop_180_R_001__A048.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/v0/walk_ff_loop_180_R_001__A048.pkl",
+        "source_sha256": "d1d655d8e9bee8dad949ca9829d349ed794243cd8325e8ec8a6d30241e23c392",
+        "npz_sha256": "71dd3d4b64415c7a8a285dc26c80aaf9edcacfaaad23721b76b5f876f3cb3a84",
+        "frames": 401,
+        "fps": 50.0
+      }
+    ],
+    "rp1_upper_run_bounded": [
+      {
+        "name": "run_loop_180_R_003__A326",
+        "npz": "run_loop_180_R_003__A326.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rp1_upper_run_bounded/run_loop_180_R_003__A326.pkl",
+        "source_sha256": "338ca87d69b56b33097d6d56cc519c7013868d732eba40310eae26eb901c285a",
+        "npz_sha256": "a79b22f7c9ac63cf6664efbbe2a28d5c0b12404d5e9aa49e54d0d558d9ddeca1",
+        "frames": 97,
+        "fps": 50.0
+      }
+    ],
+    "rpo": [
+      {
+        "name": "114_08",
+        "npz": "114_08.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/114_08.pkl",
+        "source_sha256": "7986f68d09b04c5c5d895efe1889d0a6e755c57f578a9fb586a2eb80e5c001ea",
+        "npz_sha256": "277334a9bb051f55d41654636f74eb8c3e1f42041e2995f9859cc1ce0a606c93",
+        "frames": 1608,
+        "fps": 120.0
+      },
+      {
+        "name": "114_09",
+        "npz": "114_09.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/114_09.pkl",
+        "source_sha256": "5e9b8e66c7c0b4b033d505bc810f5a384eaacf19b8f17952b0acd28e089620a5",
+        "npz_sha256": "63b397662c6295c60db87d7dea38299e9a40ea13dd0a7f242a1bd29aea0260b5",
+        "frames": 1876,
+        "fps": 120.0
+      },
+      {
+        "name": "127_04",
+        "npz": "127_04.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/127_04.pkl",
+        "source_sha256": "1c477398835706c48b47ff073d6e6370c6d9aa78b6cc07cc35a04f561bfcfd89",
+        "npz_sha256": "44c0864466e8fb83b6e58858cfb05bc1f2fec16fddfa937d07ba16ccc9eefeb1",
+        "frames": 446,
+        "fps": 120.0
+      },
+      {
+        "name": "127_06",
+        "npz": "127_06.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/127_06.pkl",
+        "source_sha256": "81dca307a2bf252d12397b5f48e549f029f878f042088c558e0ab20df5644bfa",
+        "npz_sha256": "327bb14d50baf2c5ec57cb88d60e39515e661b30fdf67de2d4d93d6c27b6c774",
+        "frames": 173,
+        "fps": 120.0
+      },
+      {
+        "name": "36_01",
+        "npz": "36_01.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/36_01.pkl",
+        "source_sha256": "df32bf4cae5366535bb0f70d3cf1adebf4c0144668f157a1836368bdf316ce13",
+        "npz_sha256": "61ecf3379eb151d50efbb1096b6acbcad5fe75957ecc97d1e7f5c9cb89642934",
+        "frames": 557,
+        "fps": 120.0
+      },
+      {
+        "name": "36_11",
+        "npz": "36_11.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/36_11.pkl",
+        "source_sha256": "44d04c28be7ffbe516ffa23875cdbcd3767c04972c9fcdbe04aa345f3b80c4b7",
+        "npz_sha256": "4151c1ad06dbba400acbf0a7ab71704a583703a473d3a7a327428c29627d7001",
+        "frames": 4168,
+        "fps": 120.0
+      },
+      {
+        "name": "A1-_Stand_stageii",
+        "npz": "A1-_Stand_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/A1-_Stand_stageii.pkl",
+        "source_sha256": "189eabf1622f468ed1264c938e8941b2ae181eb295c62e73722e70db40039c5f",
+        "npz_sha256": "b340a11bdd6ab61b23d2f35fe8c954cdb67e8a34efbc20d0fde32e793f91ea67",
+        "frames": 457,
+        "fps": 120.0
+      },
+      {
+        "name": "B10_-__Walk_turn_left_45_stageii",
+        "npz": "B10_-__Walk_turn_left_45_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B10_-__Walk_turn_left_45_stageii.pkl",
+        "source_sha256": "8e86ce084ca8b0370aeb5647cfdfe11b36c2dd1ed2b6569f9ebe89ffc9a5d5b4",
+        "npz_sha256": "c42212caac53a86f7172782b1579471389d68a5b88c528455e475367d4c57bf9",
+        "frames": 718,
+        "fps": 120.0
+      },
+      {
+        "name": "B11_-__Walk_turn_left_135_stageii",
+        "npz": "B11_-__Walk_turn_left_135_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B11_-__Walk_turn_left_135_stageii.pkl",
+        "source_sha256": "dba1495ac330301a3a7e71c4d247dc63715877c9978a4ee6fcd29a41f63f18bd",
+        "npz_sha256": "5a9930ecbec8b57ea88bf735477328a42053186cece304c4e5bee4310084383c",
+        "frames": 779,
+        "fps": 120.0
+      },
+      {
+        "name": "B13_-__Walk_turn_right_90_stageii",
+        "npz": "B13_-__Walk_turn_right_90_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B13_-__Walk_turn_right_90_stageii.pkl",
+        "source_sha256": "89dd6a0620e3909bc036678a9188c4b54361cbe6226e3b9e235159856fa04704",
+        "npz_sha256": "1e2517cdf818b6e32234731c3e71193a41e62bc1d2b27a4a76b01c185beee5db",
+        "frames": 674,
+        "fps": 120.0
+      },
+      {
+        "name": "B14_-__Walk_turn_right_45_t2_stageii",
+        "npz": "B14_-__Walk_turn_right_45_t2_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B14_-__Walk_turn_right_45_t2_stageii.pkl",
+        "source_sha256": "218922b827abaf7a115b8859e755ead8648e6a4e85b519596b7e8dc7731e8f64",
+        "npz_sha256": "b5bb554649214908d7896f745ef6c481c2159bb4d03239151bae9179b617aa0a",
+        "frames": 696,
+        "fps": 120.0
+      },
+      {
+        "name": "B15_-__Walk_turn_around_stageii",
+        "npz": "B15_-__Walk_turn_around_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B15_-__Walk_turn_around_stageii.pkl",
+        "source_sha256": "6872a21a8beb94048e89fe5ec5ed96323133db2b42d31e589106ec87cff23a4e",
+        "npz_sha256": "0f66ada0a429ce5bc0a08eeb535f14912cf32dea43fbdc7da0caa7f6ae56aa55",
+        "frames": 901,
+        "fps": 120.0
+      },
+      {
+        "name": "B4_-_Stand_to_Walk_backwards_stageii",
+        "npz": "B4_-_Stand_to_Walk_backwards_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B4_-_Stand_to_Walk_backwards_stageii.pkl",
+        "source_sha256": "da5fb6cb452be52d83f03910e11092e8e8acddc82084e93df602672e47ebf96a",
+        "npz_sha256": "54e86ed9f830673e53db635fc7789a652620d4a9e0d64d3a525774575a2091c7",
+        "frames": 553,
+        "fps": 120.0
+      },
+      {
+        "name": "B5_-__Walk_backwards_stageii",
+        "npz": "B5_-__Walk_backwards_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B5_-__Walk_backwards_stageii.pkl",
+        "source_sha256": "1eac01ee675dffa620b4f5a7e7c18613d3a85f4d827a4ed7e39a9af5ddc71d67",
+        "npz_sha256": "af8007069a54888084746ea629ee3cf3a7696ecefd8ea67b84468b06a2b88fd5",
+        "frames": 975,
+        "fps": 120.0
+      },
+      {
+        "name": "B9_-__Walk_turn_left_90_stageii",
+        "npz": "B9_-__Walk_turn_left_90_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/B9_-__Walk_turn_left_90_stageii.pkl",
+        "source_sha256": "c603e5e194a3e8a4c95ad48d88140c9980a58ea82b31742553b8f5f09a18e6f6",
+        "npz_sha256": "24a360ec9ce29bbb4a4b8d1555bb582f78c291d2d80ab9db6cb455314fad815d",
+        "frames": 604,
+        "fps": 120.0
+      },
+      {
+        "name": "C12_-_run_turn_left_45_stageii",
+        "npz": "C12_-_run_turn_left_45_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/C12_-_run_turn_left_45_stageii.pkl",
+        "source_sha256": "04b8480116dd78d2fcffd9a4c143e990d7fea04fe91c78aa77251c0ec1d461a1",
+        "npz_sha256": "b102a097813b232bea4a638d19ccfe64bfef1c105879115e2ddb50a0f82121af",
+        "frames": 264,
+        "fps": 120.0
+      },
+      {
+        "name": "C17_-_run_change_direction_stageii",
+        "npz": "C17_-_run_change_direction_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/C17_-_run_change_direction_stageii.pkl",
+        "source_sha256": "f26a6f5289fd6458a7426aecaa7e9cb7b3035b04a1d586a9869a1670659a27ea",
+        "npz_sha256": "7a75691cb69565308c542b9a385555fa88e61965e743630e07735b27cfd8daa2",
+        "frames": 366,
+        "fps": 120.0
+      },
+      {
+        "name": "C1_-_stand_to_run_stageii",
+        "npz": "C1_-_stand_to_run_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/C1_-_stand_to_run_stageii.pkl",
+        "source_sha256": "a6b0e60ae5917fa2097e7afa19fa4b3318af67fa285d3168bf4c5aaba29e6655",
+        "npz_sha256": "d61a5eb0399e05c0e4fc5dfc19d42d92dc2cc9e2a56a59c865f6822e235d7688",
+        "frames": 491,
+        "fps": 120.0
+      },
+      {
+        "name": "C3_-_run_stageii",
+        "npz": "C3_-_run_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/C3_-_run_stageii.pkl",
+        "source_sha256": "794251b1e5ed7e0277f84cecf593cb3a00eb4e984f0a912a321014917c5c80ed",
+        "npz_sha256": "1032f6cedf4cf07530d4aa3e55f38b36b444f50634f3045e541b94930424efe0",
+        "frames": 326,
+        "fps": 120.0
+      },
+      {
+        "name": "C4_-_run_to_walk_a_stageii",
+        "npz": "C4_-_run_to_walk_a_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/C4_-_run_to_walk_a_stageii.pkl",
+        "source_sha256": "7512a3369e62584b74fa71e2d442a31e1fa0aed8863563e2a128c5ec64085dd1",
+        "npz_sha256": "89ff872336f10baf0fccd181e6a901eac62d929f64a43d8817d971d586381170",
+        "frames": 462,
+        "fps": 120.0
+      },
+      {
+        "name": "C5_-_walk_to_run_stageii",
+        "npz": "C5_-_walk_to_run_stageii.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/C5_-_walk_to_run_stageii.pkl",
+        "source_sha256": "3a3f21d8f51c997fe5d398cec3b30723dd1a6caa4e12ffbf73197b02c1380be5",
+        "npz_sha256": "9932edba4e8cfde0644adf47723a1139662b7a73a1ec65b4a5de26ffdf8fd06d",
+        "frames": 428,
+        "fps": 120.0
+      },
+      {
+        "name": "move_back",
+        "npz": "move_back.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/move_back.pkl",
+        "source_sha256": "75441de2bea94e15415e0c0330b52096c6590cacef6864f35380b2636a59e90c",
+        "npz_sha256": "615aa0a5e7326866948a826dd805cd56deea33f6581537507bee88710d712944",
+        "frames": 312,
+        "fps": 50.0
+      },
+      {
+        "name": "move_l",
+        "npz": "move_l.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/move_l.pkl",
+        "source_sha256": "06720d3f04043e0226edec516c0d82f101bad49615fdf7ef57362f442d8790fc",
+        "npz_sha256": "bcba78601aa95ec887acaabd7903150154c17a8c5dadb44b53dc2908ca9609ab",
+        "frames": 280,
+        "fps": 50.0
+      },
+      {
+        "name": "move_r",
+        "npz": "move_r.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/move_r.pkl",
+        "source_sha256": "f3807681d275266523489cc58a76dbcbc083f3fa73b17bf797f28ee3cd672462",
+        "npz_sha256": "dff276283e23e6745cad8786d29e3e81fdacc50508237651fc87b4f88fd07dbd",
+        "frames": 250,
+        "fps": 50.0
+      },
+      {
+        "name": "run_start_180_R_001__A345",
+        "npz": "run_start_180_R_001__A345.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/run_start_180_R_001__A345.pkl",
+        "source_sha256": "0cb73a62754912e326298e74321cecbd3319dc94f9caad3f49af87876613ddf4",
+        "npz_sha256": "8d275fcc97b2199a84b5d6f212aadb180bf8ae31b1d3cf6305cb5cdfa05f5313",
+        "frames": 362,
+        "fps": 120.0
+      },
+      {
+        "name": "run_start_180_R_001__A345_M",
+        "npz": "run_start_180_R_001__A345_M.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/run_start_180_R_001__A345_M.pkl",
+        "source_sha256": "32a07398af1304e94ef3eb8183b72070e46ee80c13014cf857134415180a0964",
+        "npz_sha256": "b80f024413e26ff9a074907920977f079946d22e2eaaa6bef79c08afe741615a",
+        "frames": 362,
+        "fps": 120.0
+      },
+      {
+        "name": "run_stop_180_R_001__A345",
+        "npz": "run_stop_180_R_001__A345.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/run_stop_180_R_001__A345.pkl",
+        "source_sha256": "95a7476bf3660bce500547de1f375a4a3b84258a032358c697942b4046d332e4",
+        "npz_sha256": "94bc353a69402142e2c3553baaf327ef745a737e89e4596c74e8369dae82e1a4",
+        "frames": 484,
+        "fps": 120.0
+      },
+      {
+        "name": "run_stop_180_R_001__A345_M",
+        "npz": "run_stop_180_R_001__A345_M.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/run_stop_180_R_001__A345_M.pkl",
+        "source_sha256": "1570d0c1216dbced51e9d24a70ab5f85763f26c34470025bcb6c1b3f042db0fc",
+        "npz_sha256": "bbf216a7e0dfa4e2d8cf380524944c770a16d295c0a7fa8e4dbc957ec53fe74c",
+        "frames": 484,
+        "fps": 120.0
+      },
+      {
+        "name": "turn_l",
+        "npz": "turn_l.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/turn_l.pkl",
+        "source_sha256": "b8339aa440ff35c64a9d8186b11d4d733935d11e8b94e661b954fc1f556f53e1",
+        "npz_sha256": "14c5e14a738b78c54dbe768f98bce75ec5714089c578f8b89fe26316701ec6be",
+        "frames": 340,
+        "fps": 50.0
+      },
+      {
+        "name": "turn_r",
+        "npz": "turn_r.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_lab/turn_r.pkl",
+        "source_sha256": "bd0f1836298baccea1d65e8388965629d7163a7fbbab9d2c3411fb02e1c216b5",
+        "npz_sha256": "e650cd4e2acba8c9c68995e74843d25865ab227bf1dd69095b4afa5e081d6b79",
+        "frames": 239,
+        "fps": 50.0
+      },
+      {
+        "name": "getup_supin2prone",
+        "npz": "getup_supin2prone.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_bm/getup_supin2prone.npz",
+        "source_sha256": "6aebf40fe2435a7d921485858309b3ade9e80c639d67aa4bc99b3f8da850d6ec",
+        "npz_sha256": "84e076e1a539fa589da2af41a92c5b29eda2657bd22fa5b5a792b0f8254412bd",
+        "frames": 225,
+        "fps": 50.0
+      },
+      {
+        "name": "yundong0",
+        "npz": "yundong0.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_bm/yundong0.npz",
+        "source_sha256": "ba67420cfa39f75811063e9687903a8178ea5c3941595cd107df99d4e5ca00bc",
+        "npz_sha256": "a0b60afaa4383f34f3d4016cbd4743f076301ccc935b761bc60241c1d04eaa86",
+        "frames": 435,
+        "fps": 50.0
+      },
+      {
+        "name": "yundong1",
+        "npz": "yundong1.npz",
+        "source": "/data/zym/roboparty_train/robo_newton_data/motions/rpo_bm/yundong1.npz",
+        "source_sha256": "4f72bc77c25dae3b8c600306bdedefe67feda33f5ed0d73a6a5a96b73979896a",
+        "npz_sha256": "c4e0116e993eb02bd2204153f08c637425613e6dfa90b65e368821e6e878aa9a",
+        "frames": 385,
+        "fps": 50.0
+      }
+    ],
+    "rp1_lafan": [
+      {
+        "name": "dance1_subject1",
+        "npz": "npz/dance1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance1_subject1.npz",
+        "source_sha256": "eaba0cfa6c5322194580032567f9c6ac39a250980092f2377aff9dc8be6f1a20",
+        "npz_sha256": "0a6a1e0e25990a158946c82e918d56c246439f17f1206780a2b73768284a3a06",
+        "frames": 6573,
+        "fps": 50.0
+      },
+      {
+        "name": "dance1_subject2",
+        "npz": "npz/dance1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance1_subject2.npz",
+        "source_sha256": "36dfc82ecdad708ab65027c3b232c4fce94a993d1cc6365ef730d35251fbaed7",
+        "npz_sha256": "88bb1c1d4f7b9777d669f1d7a06fe85db20966070d4f82b37ce8b1ede475bee9",
+        "frames": 6573,
+        "fps": 50.0
+      },
+      {
+        "name": "dance1_subject3",
+        "npz": "npz/dance1_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance1_subject3.npz",
+        "source_sha256": "a1b08fbfea26689532084563d77ec75a201d00d4d594a8cdd2c78551216787cc",
+        "npz_sha256": "8f57c22131d7625e921b8f412ac2082eb7c70b68c8502dbff405b590b3f5c1bf",
+        "frames": 6573,
+        "fps": 50.0
+      },
+      {
+        "name": "dance2_subject1",
+        "npz": "npz/dance2_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance2_subject1.npz",
+        "source_sha256": "266967b05383d9f7e8f9d98deeae621fbdef24f400ff6566270e215d0f80ac11",
+        "npz_sha256": "d8055adc2d98e0baa2491d4b58f7605e602cfd9357a0f4bee9e59b4bcdf9bd86",
+        "frames": 11283,
+        "fps": 50.0
+      },
+      {
+        "name": "dance2_subject2",
+        "npz": "npz/dance2_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance2_subject2.npz",
+        "source_sha256": "5a75003a21f3fc63309878f320f77275886b003b25fbe67ee6977aedf5dc4d00",
+        "npz_sha256": "91fdebf410417470f394fe98aa77ad5376c2a28c1033e62e61fba9a7488c82a3",
+        "frames": 11283,
+        "fps": 50.0
+      },
+      {
+        "name": "dance2_subject3",
+        "npz": "npz/dance2_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance2_subject3.npz",
+        "source_sha256": "07cb21053504b7c45036583976592ab9c7aec86ef02f512c595727fec1b80bda",
+        "npz_sha256": "9650160bbdc0f139fa6f023b1936e166287a305c4ec0c62599054c10bc5a1f28",
+        "frames": 11283,
+        "fps": 50.0
+      },
+      {
+        "name": "dance2_subject4",
+        "npz": "npz/dance2_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance2_subject4.npz",
+        "source_sha256": "723d6ca06054f5f8e4d8dd164db0bce68cab694a691f5a2d0d436b05c0044188",
+        "npz_sha256": "f15cf4420f23928e93d0aaae82950b6fb49e4de9c4dc01e2995f30a0cbe5071e",
+        "frames": 11283,
+        "fps": 50.0
+      },
+      {
+        "name": "dance2_subject5",
+        "npz": "npz/dance2_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/dance2_subject5.npz",
+        "source_sha256": "4a5b7aca15249155e852a5651fb8487c8b252e8a1424ab38615a1b3036f7100a",
+        "npz_sha256": "a7c3700d0a60cc88128bb1879ca77f2171c2d39d755bb61c215cc26a2ecd4301",
+        "frames": 11283,
+        "fps": 50.0
+      },
+      {
+        "name": "fallAndGetUp1_subject1",
+        "npz": "npz/fallAndGetUp1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fallAndGetUp1_subject1.npz",
+        "source_sha256": "6072f35cbd2df1fa02e4330acaca1c8990ef0ac61754579e9b4b7497b1db68fe",
+        "npz_sha256": "512353815e08c4c28ef002ba2180b3007eb2766a73d1a3d6ea8ab8b282be9303",
+        "frames": 8410,
+        "fps": 50.0
+      },
+      {
+        "name": "fallAndGetUp1_subject4",
+        "npz": "npz/fallAndGetUp1_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fallAndGetUp1_subject4.npz",
+        "source_sha256": "bba81b17c1b1af0859d311a3d815b2aa0791715142dbe956f9b5fa6d77e1f80e",
+        "npz_sha256": "e89a5e33cf7f2b4060b5bceb6ac2a9aea236ca96da783783cc76efa172f48dce",
+        "frames": 8410,
+        "fps": 50.0
+      },
+      {
+        "name": "fallAndGetUp1_subject5",
+        "npz": "npz/fallAndGetUp1_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fallAndGetUp1_subject5.npz",
+        "source_sha256": "27a4b8b1290b3484c4aa7519ac22917a50425bedc1a94fb3f2613dd6aec50692",
+        "npz_sha256": "beca9e7e622101bf6429ef32df15716c10e637ea42068faaa206c2aad0499ec3",
+        "frames": 8410,
+        "fps": 50.0
+      },
+      {
+        "name": "fallAndGetUp2_subject2",
+        "npz": "npz/fallAndGetUp2_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fallAndGetUp2_subject2.npz",
+        "source_sha256": "9a8bb8d84322b3b089aef448507904fc5487a91bed44cf9cea84c5c5a76dfdc4",
+        "npz_sha256": "e14b670a3ad61ed5268c550f32f7bf5f99b58ba73cfe84170bd9bb3d36138208",
+        "frames": 8195,
+        "fps": 50.0
+      },
+      {
+        "name": "fallAndGetUp2_subject3",
+        "npz": "npz/fallAndGetUp2_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fallAndGetUp2_subject3.npz",
+        "source_sha256": "e96d22ec1f130b9b29c2dfc7b58b8cc4cf74899321f7683ff7f888a4a5e110c1",
+        "npz_sha256": "a80b8ac190ea423fa854aa8b34392318512deb4cbec6b888bdd14270871db075",
+        "frames": 8195,
+        "fps": 50.0
+      },
+      {
+        "name": "fallAndGetUp3_subject1",
+        "npz": "npz/fallAndGetUp3_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fallAndGetUp3_subject1.npz",
+        "source_sha256": "57df4c64caef38d0af39ae27f6d133ba7a341b432a9cfeb7eab4f958cdf2814d",
+        "npz_sha256": "f3b0901479b44c2e543639fbcf13cfaea29b65e8377fe01ecad4a0cdb310e34b",
+        "frames": 5108,
+        "fps": 50.0
+      },
+      {
+        "name": "fight1_subject2",
+        "npz": "npz/fight1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fight1_subject2.npz",
+        "source_sha256": "4eb6311af45f2a38d510650963774c162124fe9e4da64d8650fba3928457eefc",
+        "npz_sha256": "6daaffc6bfdd9b1811b4d1fd178b3f09d6dd063bb9a846c7a1f214a2db6dd836",
+        "frames": 12243,
+        "fps": 50.0
+      },
+      {
+        "name": "fight1_subject3",
+        "npz": "npz/fight1_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fight1_subject3.npz",
+        "source_sha256": "b13a875d4fd7cb22dd81bf6d6187f0a53d0c8063a35d2f73e4c3f45a9e8af302",
+        "npz_sha256": "0612675f15ae8d7fdc5aa4fb719ef94fabc393a884755d638e4a05e5bd10c845",
+        "frames": 12243,
+        "fps": 50.0
+      },
+      {
+        "name": "fight1_subject5",
+        "npz": "npz/fight1_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fight1_subject5.npz",
+        "source_sha256": "8ae9ccf4c6a1fcb258a6a91cf911f89e8ebf2cbb0cc78513ee864df889019ce5",
+        "npz_sha256": "f35517069ea6213115212bbbe56f979e84e7f6ed1067ee15ead46532fe2eb101",
+        "frames": 12243,
+        "fps": 50.0
+      },
+      {
+        "name": "fightAndSports1_subject1",
+        "npz": "npz/fightAndSports1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fightAndSports1_subject1.npz",
+        "source_sha256": "9d9fb3d649575fa277cbe5f2c686c2a74fe26b888732633685f49905786ebc9a",
+        "npz_sha256": "7c3ae10b968c4ff32d3e688966d97ed357a3c776f2e8944d6f8abcda078e00a5",
+        "frames": 12257,
+        "fps": 50.0
+      },
+      {
+        "name": "fightAndSports1_subject4",
+        "npz": "npz/fightAndSports1_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/fightAndSports1_subject4.npz",
+        "source_sha256": "48964f94abb473a988bb581f9d3864851f5f04ec588882e2c675935e35d42713",
+        "npz_sha256": "ddf268646869c3eb448463dd5464e1467f578ef49a5311aa5b283f00e277b37e",
+        "frames": 12257,
+        "fps": 50.0
+      },
+      {
+        "name": "ground1_subject1",
+        "npz": "npz/ground1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/ground1_subject1.npz",
+        "source_sha256": "ffe28bc08a7e394fa7b0f0b45782085384847f87bdc9b58b7cc52235691b7f0d",
+        "npz_sha256": "170c7bb77619c611269ad361b0902640172f32266469d0e6bb355a071b5359ba",
+        "frames": 7902,
+        "fps": 50.0
+      },
+      {
+        "name": "ground1_subject4",
+        "npz": "npz/ground1_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/ground1_subject4.npz",
+        "source_sha256": "de9b99cc895560cb0ed4c152ba08cd2d39dd2cb64c6c6b895db7c9a9d490077d",
+        "npz_sha256": "3217e5e91bbd4ed7695ee54deb11039cf54c45ada107c38431d355ed9ce5777d",
+        "frames": 7902,
+        "fps": 50.0
+      },
+      {
+        "name": "ground1_subject5",
+        "npz": "npz/ground1_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/ground1_subject5.npz",
+        "source_sha256": "7115f87ea1e260f253d40ba78aba3a5bed8a7838004f12513eb3b3b43821a619",
+        "npz_sha256": "134d8f31c56c5ffc8596b4fb510d2c9eae778e91fe7b1bbcd0e0d32af9667fff",
+        "frames": 7902,
+        "fps": 50.0
+      },
+      {
+        "name": "ground2_subject2",
+        "npz": "npz/ground2_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/ground2_subject2.npz",
+        "source_sha256": "74c045afec6f78758ce741790c2f1e72d67c042ebc2f7b9330a7e2b88f6876a2",
+        "npz_sha256": "283476b2c9995c9ebe48d85438ffd7dc67206842aa967a5ebbd68491106b6976",
+        "frames": 9248,
+        "fps": 50.0
+      },
+      {
+        "name": "ground2_subject3",
+        "npz": "npz/ground2_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/ground2_subject3.npz",
+        "source_sha256": "76287004ca5eb9f8cbda5437fe9acc2e60961de41ff37a3e8d96f1992adef140",
+        "npz_sha256": "80028636bd608edc4030b056b6045729ae76d87ea8025410aaa37244e4556360",
+        "frames": 9248,
+        "fps": 50.0
+      },
+      {
+        "name": "jumps1_subject1",
+        "npz": "npz/jumps1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/jumps1_subject1.npz",
+        "source_sha256": "ab6466a0a6cd1f4ae6e345e20bca956484ceb137fd2bd3a730bca89378d7100c",
+        "npz_sha256": "5bdb1df113d908261887e5cc6176d0dbc42e2a8f0deb869674801166bebc8668",
+        "frames": 12222,
+        "fps": 50.0
+      },
+      {
+        "name": "jumps1_subject2",
+        "npz": "npz/jumps1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/jumps1_subject2.npz",
+        "source_sha256": "150cdccda7ba25b397d2220eb539d9a68af991c172f05409933b206532221dcd",
+        "npz_sha256": "55bb6f4fc5ce018ac156882e30ad07bf80698f9440691bf2ad8025a7b89c481e",
+        "frames": 12222,
+        "fps": 50.0
+      },
+      {
+        "name": "jumps1_subject5",
+        "npz": "npz/jumps1_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/jumps1_subject5.npz",
+        "source_sha256": "2cf60d45c9c6d80df2f22a9a2a80f3e7b16c880efe7868f4f44b6966f54b5c18",
+        "npz_sha256": "cdd1e1a006c1e3a806ddd63d8d9f7ac691c53e66c4a55b40f3f1fd317be69e48",
+        "frames": 12222,
+        "fps": 50.0
+      },
+      {
+        "name": "multipleActions1_subject1",
+        "npz": "npz/multipleActions1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/multipleActions1_subject1.npz",
+        "source_sha256": "77ddecb2c40db9ba9b3c24c24192420facd5a29a0c9d023236414a92a86f1504",
+        "npz_sha256": "a96f189d569b42adb24c2c3c1ddd6050d28bff8ac92ab82e51196eece4a3a618",
+        "frames": 7643,
+        "fps": 50.0
+      },
+      {
+        "name": "multipleActions1_subject2",
+        "npz": "npz/multipleActions1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/multipleActions1_subject2.npz",
+        "source_sha256": "6ee937ab2542c884b19aabd2547e353add496fd5742083299ec99fb30a3190ed",
+        "npz_sha256": "e7299f797bb18693f0e3d68b9047977b48f07c5a56216a517953be0948f457d0",
+        "frames": 7643,
+        "fps": 50.0
+      },
+      {
+        "name": "multipleActions1_subject3",
+        "npz": "npz/multipleActions1_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/multipleActions1_subject3.npz",
+        "source_sha256": "a89280648bc724f13ea17a5e86f5e17bed083cafb708ab9ce5890f94f5a8997d",
+        "npz_sha256": "b613baa5e9968b0f1205314c4eae3c4dfde83f8f657e51485c954d12d5b47c48",
+        "frames": 7643,
+        "fps": 50.0
+      },
+      {
+        "name": "multipleActions1_subject4",
+        "npz": "npz/multipleActions1_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/multipleActions1_subject4.npz",
+        "source_sha256": "c5ea2b1d088e04fb7d18b1742c3372c3744472c7d633035126881f9ac48102c0",
+        "npz_sha256": "8775eef89febae404d470d23a572d2c1aeac404e80bd44842fb53439cac9abf8",
+        "frames": 7643,
+        "fps": 50.0
+      },
+      {
+        "name": "push1_subject2",
+        "npz": "npz/push1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/push1_subject2.npz",
+        "source_sha256": "370ba2879918af9b702b146edcb8247c027c8a23fb1827b5a25c5b3253d75948",
+        "npz_sha256": "56a1bc428e067e01a576b7085fc98af13c6123955e05b4f102f9aeac0d3af5d2",
+        "frames": 5108,
+        "fps": 50.0
+      },
+      {
+        "name": "pushAndFall1_subject1",
+        "npz": "npz/pushAndFall1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/pushAndFall1_subject1.npz",
+        "source_sha256": "6b95a86f8dd9e74bad650ba8fe2d51118bd6d1bdcfda467ed77e08c33e7e44cf",
+        "npz_sha256": "6d8eadccdf3eed505c77d5c3af6898729f787725852c4da7ae84204e38a73e4d",
+        "frames": 8263,
+        "fps": 50.0
+      },
+      {
+        "name": "pushAndFall1_subject4",
+        "npz": "npz/pushAndFall1_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/pushAndFall1_subject4.npz",
+        "source_sha256": "80794c5725ceadc68ec5a873a96d0ac312b7e6d860e226798f0db188d82d4f49",
+        "npz_sha256": "2c99dec768711055c9f65358ef6c16dbd38d28aabc3f2fe8187e610ac4706122",
+        "frames": 8263,
+        "fps": 50.0
+      },
+      {
+        "name": "pushAndStumble1_subject2",
+        "npz": "npz/pushAndStumble1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/pushAndStumble1_subject2.npz",
+        "source_sha256": "8b0386bde966944982f7c7d08c341b525df33e446b7a658ca0a7a0ebe6465a2f",
+        "npz_sha256": "a0eda575d90bdb2121376ff00708457d4e89305f04bce98507d1bf31fbea8f5f",
+        "frames": 11333,
+        "fps": 50.0
+      },
+      {
+        "name": "pushAndStumble1_subject3",
+        "npz": "npz/pushAndStumble1_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/pushAndStumble1_subject3.npz",
+        "source_sha256": "311de5ebcb8a2bf53487bc5d331296f37f2d83d3023edc6d85a87072ae0ddffd",
+        "npz_sha256": "0fdb7bbbfdd43786e82a76a5429ce3914dcb9e2b078828be5a6245cbb5cf1619",
+        "frames": 11333,
+        "fps": 50.0
+      },
+      {
+        "name": "pushAndStumble1_subject5",
+        "npz": "npz/pushAndStumble1_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/pushAndStumble1_subject5.npz",
+        "source_sha256": "b7e02746b41a736b68fe6a4ad40070ddd194e5db39fd7c05473379be1fcc2f77",
+        "npz_sha256": "cff6a591dcf59ba58f8acf5980ec27f0f883127c5df03a5f1f438293f81b1039",
+        "frames": 11333,
+        "fps": 50.0
+      },
+      {
+        "name": "run1_subject2",
+        "npz": "npz/run1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/run1_subject2.npz",
+        "source_sha256": "859011174e8a036dfb7fa6c8f49261975db42e8bc22dc62c030f2c86e0d32e82",
+        "npz_sha256": "419162267ffb661a99ae88a8e60ff195f86ba276b2200c1ae52d10db683164e1",
+        "frames": 11890,
+        "fps": 50.0
+      },
+      {
+        "name": "run1_subject5",
+        "npz": "npz/run1_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/run1_subject5.npz",
+        "source_sha256": "2b87523ab688d1367eb02e5c60d45488aabcabf691441df1c96f0af4ced89b45",
+        "npz_sha256": "413b5bc7403185e87a3c78eebc405287a8cd51b05ca4f9f4495f88c56fd395a2",
+        "frames": 11890,
+        "fps": 50.0
+      },
+      {
+        "name": "run2_subject1",
+        "npz": "npz/run2_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/run2_subject1.npz",
+        "source_sha256": "b797cf31503b217a97f341ee678e84026ef0e237c61b975724cfb40f12dde16d",
+        "npz_sha256": "bc4d6c5988f633520ff27d2ebcf758138879e280d766b43b02100397cd578509",
+        "frames": 12240,
+        "fps": 50.0
+      },
+      {
+        "name": "run2_subject4",
+        "npz": "npz/run2_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/run2_subject4.npz",
+        "source_sha256": "6541bf9be26a8118a74e8049daf71eff8fc450c44bc5910a7eea638489463ef0",
+        "npz_sha256": "776db622d9ccad02e8aa0664af7990e77fc18c0f1bb62c63db693d8c220fe6e7",
+        "frames": 12240,
+        "fps": 50.0
+      },
+      {
+        "name": "sprint1_subject2",
+        "npz": "npz/sprint1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/sprint1_subject2.npz",
+        "source_sha256": "0465e3fb0f4609d878069d44660ebd40bcfb128129ee2bb7866aad73747a5c63",
+        "npz_sha256": "0591311d6b9d627b26ce986a82e3052d2ebc9b0b04fbfb50b1408f83366146bf",
+        "frames": 13655,
+        "fps": 50.0
+      },
+      {
+        "name": "sprint1_subject4",
+        "npz": "npz/sprint1_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/sprint1_subject4.npz",
+        "source_sha256": "91b43199948b3226f4447a3f1e7d2bbd17b4175e1b3bc1f3598623c9191577f2",
+        "npz_sha256": "ad0c418a0f39e977cf0bc9749bc41035bf4c24e1a6783c8f05693fac3774eaf1",
+        "frames": 13655,
+        "fps": 50.0
+      },
+      {
+        "name": "walk1_subject1",
+        "npz": "npz/walk1_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk1_subject1.npz",
+        "source_sha256": "3df48a8737397ae5eedfc819bf42cb3cd8b6a7fef1769d46096069327d803a83",
+        "npz_sha256": "564ca07c9d42936f7df6638192e776088a336a0f2d3a68065b610bd902e5b211",
+        "frames": 13065,
+        "fps": 50.0
+      },
+      {
+        "name": "walk1_subject2",
+        "npz": "npz/walk1_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk1_subject2.npz",
+        "source_sha256": "99e14bf4a6c4e77bbf8068347b0fcbecf7fa81858ff566017b6bd054a252315c",
+        "npz_sha256": "f5ce7d90f3222968a205c0a3992e3c0126effcaa5defd16090ef35fee72d9fab",
+        "frames": 13065,
+        "fps": 50.0
+      },
+      {
+        "name": "walk1_subject5",
+        "npz": "npz/walk1_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk1_subject5.npz",
+        "source_sha256": "d1580e67d13efc588c906fac9c64bfb98bce57ebd9788db313cd65798586060d",
+        "npz_sha256": "cffde04f30a1311716c9b5fc1573f581ed4abb3b13d8f07f65955303b9593a1f",
+        "frames": 13065,
+        "fps": 50.0
+      },
+      {
+        "name": "walk2_subject1",
+        "npz": "npz/walk2_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk2_subject1.npz",
+        "source_sha256": "464559e04cc54e3a5a7272017f25f261567e7eeffa67edb038fd3a1fb7d89b5a",
+        "npz_sha256": "dedb0a3739c9e9f8f49e23b31b239ce65f16175c56c5fc120fda17650b61f9f1",
+        "frames": 11908,
+        "fps": 50.0
+      },
+      {
+        "name": "walk2_subject3",
+        "npz": "npz/walk2_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk2_subject3.npz",
+        "source_sha256": "74c6ef6add74b1a8be7e3fb4c9ecd8e916bbcabd89aac7d36018bcf26984926a",
+        "npz_sha256": "0341d3c5c43b7f84fd5e4e8f45a014568228c09a594461799318aa5c174411c8",
+        "frames": 11908,
+        "fps": 50.0
+      },
+      {
+        "name": "walk2_subject4",
+        "npz": "npz/walk2_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk2_subject4.npz",
+        "source_sha256": "3f55ccbe0244e90e9bfa51bc768448c7ee4a5a059d3cdac213b2518a6e3309bf",
+        "npz_sha256": "8e7375d42dd60a82b0ec9eee4158ee17b94222b3140fede1f7472471d8f303ec",
+        "frames": 11908,
+        "fps": 50.0
+      },
+      {
+        "name": "walk3_subject1",
+        "npz": "npz/walk3_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk3_subject1.npz",
+        "source_sha256": "d8a35ce17f0c7fba74ec16449189159a8a5161fe5efc2447c6408f85681d7f57",
+        "npz_sha256": "b83600ccac53421842f3600cdbcaf1009636f4058a89e8d6c7be6f500c6c8dd4",
+        "frames": 12330,
+        "fps": 50.0
+      },
+      {
+        "name": "walk3_subject2",
+        "npz": "npz/walk3_subject2.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk3_subject2.npz",
+        "source_sha256": "87d3a0d747f6f3ee50ec2237bcc380844d7d7bc9bd6cd6ecd27fb7effe0bca9e",
+        "npz_sha256": "832473193403296041319034aa8295b54ff28456298fd2600fb572e4a05a9965",
+        "frames": 12330,
+        "fps": 50.0
+      },
+      {
+        "name": "walk3_subject3",
+        "npz": "npz/walk3_subject3.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk3_subject3.npz",
+        "source_sha256": "ccbbec8351b9b76c0db72cef3e365eb859414f3beec88f0ad46d2b5425d3848f",
+        "npz_sha256": "2521a838a1942caf67ad9d21cd5ec2f185a696bb183882fb9e51bac8bda36311",
+        "frames": 12330,
+        "fps": 50.0
+      },
+      {
+        "name": "walk3_subject4",
+        "npz": "npz/walk3_subject4.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk3_subject4.npz",
+        "source_sha256": "dc621fbcc875682fe69484fda19afbb5aea954bf6d7022d5af10701b939e61b2",
+        "npz_sha256": "2ef9216dcc27fea020dc2606219eb731c0ca7954007b311d999e3417aaca34ab",
+        "frames": 12330,
+        "fps": 50.0
+      },
+      {
+        "name": "walk3_subject5",
+        "npz": "npz/walk3_subject5.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk3_subject5.npz",
+        "source_sha256": "a93d37ccb33e65e9d81a1b1a81df3b1567bb106b2dd676b18fe58b4bf2e1b5dc",
+        "npz_sha256": "2059cdfd6092d2dba14e1d00c6b6edddfad442514dbbb5a055598697dd4003c6",
+        "frames": 12330,
+        "fps": 50.0
+      },
+      {
+        "name": "walk4_subject1",
+        "npz": "npz/walk4_subject1.npz",
+        "source": "/data/zym/roboparty_train/ufo_data/motions/rp1_lafan/npz/walk4_subject1.npz",
+        "source_sha256": "a0cddcc3c160cb0399805437282e61838c616e2fd1ef634a970ff948fce4ee07",
+        "npz_sha256": "c3fb466a7f865c90e9006fcc833800cb744388a244ff26e87bf7b4e1d8070524",
+        "frames": 8195,
+        "fps": 50.0
+      }
+    ]
+  }
+}

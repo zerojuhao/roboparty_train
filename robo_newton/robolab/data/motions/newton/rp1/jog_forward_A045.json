@@ -1,0 +1,22 @@
+{
+  "source_npz": "jog_rp1_24dof_50fps_npz/221010__jog_ff_loop_180_R_002__A045_rp1_24dof.npz",
+  "source_sha256": "ec3baee6df67a6f42ad045b52f0a748892fc187e6f52e32a38168fc99c958ca8",
+  "start_frame": 72,
+  "end_frame_exclusive": 293,
+  "fps": 50.0,
+  "max_joint_correction_rad": 0.00473793387413024,
+  "ground_penetration_p50_p95_max_m": [
+    0.007492540274296336,
+    0.034313310370412665,
+    0.041213662829131636
+  ],
+  "root_quaternion_order": "wxyz",
+  "ground_height_corrected": false,
+  "transforms": [
+    "center root XY",
+    "clamp small joint-limit overshoot",
+    "named joint mapping",
+    "MuJoCo FK"
+  ],
+  "note": "Absolute height is preserved. AMP uses body-relative key positions, not root height."
+}

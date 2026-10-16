@@ -1,0 +1,478 @@
+<mujoco model="rpo">
+<compiler angle="radian" meshdir="../meshes/" eulerseq="zyx"/>
+<option timestep="0.001" iterations="100" solver="PGS" gravity="0 0 -9.81">
+<flag frictionloss="enable"/>
+</option>
+<size njmax="5000" nconmax="1000"/>
+<visual>
+<quality shadowsize="4096"/>
+<map znear="0.001" zfar="50"/>
+</visual>
+<default>
+<joint limited="true"/>
+<motor ctrllimited="true"/>
+<geom condim="4" contype="1" conaffinity="0" solref="0.001 2" friction="0.9 0.2 0.2" group="1"/>
+<equality solref="0.001 2"/>
+<default class="visualgeom">
+<geom material="visualgeom" condim="1" contype="0" conaffinity="0"/>
+</default>
+<default class="obstacle">
+<geom material="obstacle" condim="3" contype="1" conaffinity="15"/>
+</default>
+<default class="waist_joint_param">
+<joint damping="0.01" frictionloss="0.01" armature="0.01"/>
+</default>
+<default class="leg_joint_param">
+<joint damping="0.01" frictionloss="0.01" armature="0.01"/>
+</default>
+<default class="arm_joint_param">
+<joint damping="0.01" frictionloss="0.01" armature="0.01"/>
+</default>
+<!-- Environment: stair box geoms use same solref as robot collision (was 0.02 → soft / visible sink vs plane). -->
+<default class="stair_tread">
+<geom type="box" condim="4" contype="1" conaffinity="15" friction="1 0.005 0.0001"
+      solref="0.001 2" margin="0" gap="0" priority="1"
+      material="mat_stair_tread" group="0"/>
+</default>
+<default class="stair_riser">
+<geom type="box" condim="4" contype="1" conaffinity="15" friction="1 0.005 0.0001"
+      solref="0.001 2" margin="0" gap="0" priority="1"
+      material="mat_stair_riser" group="0"/>
+</default>
+</default>
+<asset>
+<texture type="skybox" builtin="gradient" rgb1="0.68 0.84 0.98" rgb2="0.90 0.95 1.0" width="512" height="512"/>
+<texture name="tex_marble" type="2d" builtin="checker" width="512" height="512" rgb1="0.92 0.92 0.94" rgb2="0.76 0.76 0.82"/>
+<material name="matplane" texture="tex_marble" texrepeat="20 20" specular="0.52" shininess="0.58" reflectance="0.14" rgba="1 1 1 1"/>
+<material name="mat_stair_tread" rgba="0.76 0.55 0.36 1" reflectance="0.07" specular="0.22" shininess="0.32"/>
+<material name="mat_stair_riser" rgba="0.50 0.34 0.22 1" reflectance="0.05" specular="0.14" shininess="0.22"/>
+<material name="obstacle" rgba="0.9 0.6 0.2 1"/>
+<material name="visualgeom" rgba="0.5 0.9 0.2 1"/>
+<mesh name="base_link" file="base_link.STL"/>
+<mesh name="left_thigh_yaw_link" file="left_thigh_yaw_link.STL"/>
+<mesh name="left_thigh_roll_link" file="left_thigh_roll_link.STL"/>
+<mesh name="left_thigh_pitch_link" file="left_thigh_pitch_link.STL"/>
+<mesh name="left_knee_link" file="left_knee_link.STL"/>
+<mesh name="left_ankle_pitch_link" file="left_ankle_pitch_link.STL"/>
+<mesh name="left_ankle_roll_link" file="left_ankle_roll_link.STL"/>
+<mesh name="right_thigh_yaw_link" file="right_thigh_yaw_link.STL"/>
+<mesh name="right_thigh_roll_link" file="right_thigh_roll_link.STL"/>
+<mesh name="right_thigh_pitch_link" file="right_thigh_pitch_link.STL"/>
+<mesh name="right_knee_link" file="right_knee_link.STL"/>
+<mesh name="right_ankle_pitch_link" file="right_ankle_pitch_link.STL"/>
+<mesh name="right_ankle_roll_link" file="right_ankle_roll_link.STL"/>
+<mesh name="torso_link" file="torso_link.STL"/>
+<mesh name="left_arm_pitch_link" file="left_arm_pitch_link.STL"/>
+<mesh name="left_arm_roll_link" file="left_arm_roll_link.STL"/>
+<mesh name="left_arm_yaw_link" file="left_arm_yaw_link.STL"/>
+<mesh name="left_elbow_pitch_link" file="left_elbow_pitch_link.STL"/>
+<mesh name="left_elbow_yaw_link" file="left_elbow_yaw_link.STL"/>
+<mesh name="right_arm_pitch_link" file="right_arm_pitch_link.STL"/>
+<mesh name="right_arm_roll_link" file="right_arm_roll_link.STL"/>
+<mesh name="right_arm_yaw_link" file="right_arm_yaw_link.STL"/>
+<mesh name="right_elbow_pitch_link" file="right_elbow_pitch_link.STL"/>
+<mesh name="right_elbow_yaw_link" file="right_elbow_yaw_link.STL"/>
+<hfield name="hf0" nrow="200" ncol="200" size="10 5 0.2 .1"/>
+</asset>
+<worldbody>
+<light directional="true" diffuse=".4 .4 .4" specular="0.1 0.1 0.1" pos="0 0 5.0" dir="0 0 -1" castshadow="false"/>
+<light directional="true" diffuse=".6 .6 .6" specular="0.2 0.2 0.2" pos="0 0 4" dir="0 0 -1"/>
+<geom name="ground" type="plane" size="0 0 1" pos="0.001 0 0" quat="1 0 0 0" material="matplane" condim="1" conaffinity="15" group="0"/>
+<!-- Parkour: 10cm pyramid ahead of robot spawn (+X), center 2.8 m from origin. -->
+<body name="stairs_pyramid_up" pos="2.8 0 0">
+<geom name="pyramid_riser_0_rs_1" class="stair_riser" pos="0.000000 -2.120000 0.050000" size="2.100000 0.020000 0.050000"/>
+<geom name="pyramid_riser_0_rn_2" class="stair_riser" pos="0.000000 2.120000 0.050000" size="2.100000 0.020000 0.050000"/>
+<geom name="pyramid_riser_0_rw_3" class="stair_riser" pos="-2.120000 0.000000 0.050000" size="0.020000 2.100000 0.050000"/>
+<geom name="pyramid_riser_0_re_4" class="stair_riser" pos="2.120000 0.000000 0.050000" size="0.020000 2.100000 0.050000"/>
+<geom name="pyramid_ring_1_s_5" class="stair_tread" pos="0.000000 -1.950000 0.050000" size="2.100000 0.150000 0.050000"/>
+<geom name="pyramid_ring_1_n_6" class="stair_tread" pos="0.000000 1.950000 0.050000" size="2.100000 0.150000 0.050000"/>
+<geom name="pyramid_ring_1_w_7" class="stair_tread" pos="-1.950000 0.000000 0.050000" size="0.150000 1.800000 0.050000"/>
+<geom name="pyramid_ring_1_e_8" class="stair_tread" pos="1.950000 0.000000 0.050000" size="0.150000 1.800000 0.050000"/>
+<geom name="pyramid_riser_1_rs_9" class="stair_riser" pos="0.000000 -1.820000 0.150000" size="1.800000 0.020000 0.050000"/>
+<geom name="pyramid_riser_1_rn_10" class="stair_riser" pos="0.000000 1.820000 0.150000" size="1.800000 0.020000 0.050000"/>
+<geom name="pyramid_riser_1_rw_11" class="stair_riser" pos="-1.820000 0.000000 0.150000" size="0.020000 1.800000 0.050000"/>
+<geom name="pyramid_riser_1_re_12" class="stair_riser" pos="1.820000 0.000000 0.150000" size="0.020000 1.800000 0.050000"/>
+<geom name="pyramid_ring_2_s_13" class="stair_tread" pos="0.000000 -1.650000 0.150000" size="1.800000 0.150000 0.050000"/>
+<geom name="pyramid_ring_2_n_14" class="stair_tread" pos="0.000000 1.650000 0.150000" size="1.800000 0.150000 0.050000"/>
+<geom name="pyramid_ring_2_w_15" class="stair_tread" pos="-1.650000 0.000000 0.150000" size="0.150000 1.500000 0.050000"/>
+<geom name="pyramid_ring_2_e_16" class="stair_tread" pos="1.650000 0.000000 0.150000" size="0.150000 1.500000 0.050000"/>
+<geom name="pyramid_riser_2_rs_17" class="stair_riser" pos="0.000000 -1.520000 0.250000" size="1.500000 0.020000 0.050000"/>
+<geom name="pyramid_riser_2_rn_18" class="stair_riser" pos="0.000000 1.520000 0.250000" size="1.500000 0.020000 0.050000"/>
+<geom name="pyramid_riser_2_rw_19" class="stair_riser" pos="-1.520000 0.000000 0.250000" size="0.020000 1.500000 0.050000"/>
+<geom name="pyramid_riser_2_re_20" class="stair_riser" pos="1.520000 0.000000 0.250000" size="0.020000 1.500000 0.050000"/>
+<geom name="pyramid_ring_3_s_21" class="stair_tread" pos="0.000000 -1.350000 0.250000" size="1.500000 0.150000 0.050000"/>
+<geom name="pyramid_ring_3_n_22" class="stair_tread" pos="0.000000 1.350000 0.250000" size="1.500000 0.150000 0.050000"/>
+<geom name="pyramid_ring_3_w_23" class="stair_tread" pos="-1.350000 0.000000 0.250000" size="0.150000 1.200000 0.050000"/>
+<geom name="pyramid_ring_3_e_24" class="stair_tread" pos="1.350000 0.000000 0.250000" size="0.150000 1.200000 0.050000"/>
+<geom name="pyramid_riser_3_rs_25" class="stair_riser" pos="0.000000 -1.220000 0.350000" size="1.200000 0.020000 0.050000"/>
+<geom name="pyramid_riser_3_rn_26" class="stair_riser" pos="0.000000 1.220000 0.350000" size="1.200000 0.020000 0.050000"/>
+<geom name="pyramid_riser_3_rw_27" class="stair_riser" pos="-1.220000 0.000000 0.350000" size="0.020000 1.200000 0.050000"/>
+<geom name="pyramid_riser_3_re_28" class="stair_riser" pos="1.220000 0.000000 0.350000" size="0.020000 1.200000 0.050000"/>
+<geom name="pyramid_top" class="stair_tread" pos="0.000000 0.000000 0.350000" size="1.200000 1.200000 0.050000"/>
+</body>
+<!-- Second pyramid: 15cm rise; behind robot (-X), center 2.8 m from origin. -->
+<body name="stairs_pyramid_up_h015" pos="-2.8 0 0">
+<geom name="pyramid_h015_riser_0_rs" class="stair_riser" pos="0.000000 -2.120000 0.075000" size="2.100000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_0_rn" class="stair_riser" pos="0.000000 2.120000 0.075000" size="2.100000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_0_rw" class="stair_riser" pos="-2.120000 0.000000 0.075000" size="0.020000 2.100000 0.075000"/>
+<geom name="pyramid_h015_riser_0_re" class="stair_riser" pos="2.120000 0.000000 0.075000" size="0.020000 2.100000 0.075000"/>
+<geom name="pyramid_h015_ring_1_s" class="stair_tread" pos="0.000000 -1.950000 0.075000" size="2.100000 0.150000 0.075000"/>
+<geom name="pyramid_h015_ring_1_n" class="stair_tread" pos="0.000000 1.950000 0.075000" size="2.100000 0.150000 0.075000"/>
+<geom name="pyramid_h015_ring_1_w" class="stair_tread" pos="-1.950000 0.000000 0.075000" size="0.150000 1.800000 0.075000"/>
+<geom name="pyramid_h015_ring_1_e" class="stair_tread" pos="1.950000 0.000000 0.075000" size="0.150000 1.800000 0.075000"/>
+<geom name="pyramid_h015_riser_1_rs" class="stair_riser" pos="0.000000 -1.820000 0.225000" size="1.800000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_1_rn" class="stair_riser" pos="0.000000 1.820000 0.225000" size="1.800000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_1_rw" class="stair_riser" pos="-1.820000 0.000000 0.225000" size="0.020000 1.800000 0.075000"/>
+<geom name="pyramid_h015_riser_1_re" class="stair_riser" pos="1.820000 0.000000 0.225000" size="0.020000 1.800000 0.075000"/>
+<geom name="pyramid_h015_ring_2_s" class="stair_tread" pos="0.000000 -1.650000 0.225000" size="1.800000 0.150000 0.075000"/>
+<geom name="pyramid_h015_ring_2_n" class="stair_tread" pos="0.000000 1.650000 0.225000" size="1.800000 0.150000 0.075000"/>
+<geom name="pyramid_h015_ring_2_w" class="stair_tread" pos="-1.650000 0.000000 0.225000" size="0.150000 1.500000 0.075000"/>
+<geom name="pyramid_h015_ring_2_e" class="stair_tread" pos="1.650000 0.000000 0.225000" size="0.150000 1.500000 0.075000"/>
+<geom name="pyramid_h015_riser_2_rs" class="stair_riser" pos="0.000000 -1.520000 0.375000" size="1.500000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_2_rn" class="stair_riser" pos="0.000000 1.520000 0.375000" size="1.500000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_2_rw" class="stair_riser" pos="-1.520000 0.000000 0.375000" size="0.020000 1.500000 0.075000"/>
+<geom name="pyramid_h015_riser_2_re" class="stair_riser" pos="1.520000 0.000000 0.375000" size="0.020000 1.500000 0.075000"/>
+<geom name="pyramid_h015_ring_3_s" class="stair_tread" pos="0.000000 -1.350000 0.375000" size="1.500000 0.150000 0.075000"/>
+<geom name="pyramid_h015_ring_3_n" class="stair_tread" pos="0.000000 1.350000 0.375000" size="1.500000 0.150000 0.075000"/>
+<geom name="pyramid_h015_ring_3_w" class="stair_tread" pos="-1.350000 0.000000 0.375000" size="0.150000 1.200000 0.075000"/>
+<geom name="pyramid_h015_ring_3_e" class="stair_tread" pos="1.350000 0.000000 0.375000" size="0.150000 1.200000 0.075000"/>
+<geom name="pyramid_h015_riser_3_rs" class="stair_riser" pos="0.000000 -1.220000 0.525000" size="1.200000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_3_rn" class="stair_riser" pos="0.000000 1.220000 0.525000" size="1.200000 0.020000 0.075000"/>
+<geom name="pyramid_h015_riser_3_rw" class="stair_riser" pos="-1.220000 0.000000 0.525000" size="0.020000 1.200000 0.075000"/>
+<geom name="pyramid_h015_riser_3_re" class="stair_riser" pos="1.220000 0.000000 0.525000" size="0.020000 1.200000 0.075000"/>
+<geom name="pyramid_h015_top" class="stair_tread" pos="0.000000 0.000000 0.525000" size="1.200000 1.200000 0.075000"/>
+</body>
+<!-- Trapezoid: entry + 10 up + platform + 9 down (far end unchanged). body Y=10.5m -->
+<body name="stairs_trapezoid" pos="0.000000 10.500000 0.000000">
+<geom name="trap_up_entry" class="stair_tread" pos="0.000000 0.150000 0.075000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_entry_wl" class="stair_riser" pos="-0.990000 0.150000 0.075000" size="0.010000 0.150000 0.075000"/>
+<geom name="trap_up_entry_wr" class="stair_riser" pos="0.990000 0.150000 0.075000" size="0.010000 0.150000 0.075000"/>
+<geom name="trap_up_tread_0" class="stair_tread" pos="0.000000 -0.150000 0.075000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_0" class="stair_tread" pos="0.000000 -0.150000 0.225000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_0_wl" class="stair_riser" pos="-0.990000 -0.150000 0.150000" size="0.010000 0.150000 0.150000"/>
+<geom name="trap_up_tread_0_wr" class="stair_riser" pos="0.990000 -0.150000 0.150000" size="0.010000 0.150000 0.150000"/>
+<geom name="trap_up_tread_1" class="stair_tread" pos="0.000000 -0.450000 0.225000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_1" class="stair_tread" pos="0.000000 -0.450000 0.375000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_1_wl" class="stair_riser" pos="-0.990000 -0.450000 0.225000" size="0.010000 0.150000 0.225000"/>
+<geom name="trap_up_tread_1_wr" class="stair_riser" pos="0.990000 -0.450000 0.225000" size="0.010000 0.150000 0.225000"/>
+<geom name="trap_up_tread_2" class="stair_tread" pos="0.000000 -0.750000 0.375000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_2" class="stair_tread" pos="0.000000 -0.750000 0.525000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_2_wl" class="stair_riser" pos="-0.990000 -0.750000 0.300000" size="0.010000 0.150000 0.300000"/>
+<geom name="trap_up_tread_2_wr" class="stair_riser" pos="0.990000 -0.750000 0.300000" size="0.010000 0.150000 0.300000"/>
+<geom name="trap_up_tread_3" class="stair_tread" pos="0.000000 -1.050000 0.525000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_3" class="stair_tread" pos="0.000000 -1.050000 0.675000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_3_wl" class="stair_riser" pos="-0.990000 -1.050000 0.375000" size="0.010000 0.150000 0.375000"/>
+<geom name="trap_up_tread_3_wr" class="stair_riser" pos="0.990000 -1.050000 0.375000" size="0.010000 0.150000 0.375000"/>
+<geom name="trap_up_tread_4" class="stair_tread" pos="0.000000 -1.350000 0.675000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_4" class="stair_tread" pos="0.000000 -1.350000 0.825000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_4_wl" class="stair_riser" pos="-0.990000 -1.350000 0.450000" size="0.010000 0.150000 0.450000"/>
+<geom name="trap_up_tread_4_wr" class="stair_riser" pos="0.990000 -1.350000 0.450000" size="0.010000 0.150000 0.450000"/>
+<geom name="trap_up_tread_5" class="stair_tread" pos="0.000000 -1.650000 0.825000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_5" class="stair_tread" pos="0.000000 -1.650000 0.975000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_5_wl" class="stair_riser" pos="-0.990000 -1.650000 0.525000" size="0.010000 0.150000 0.525000"/>
+<geom name="trap_up_tread_5_wr" class="stair_riser" pos="0.990000 -1.650000 0.525000" size="0.010000 0.150000 0.525000"/>
+<geom name="trap_up_tread_6" class="stair_tread" pos="0.000000 -1.950000 0.975000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_6" class="stair_tread" pos="0.000000 -1.950000 1.125000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_6_wl" class="stair_riser" pos="-0.990000 -1.950000 0.600000" size="0.010000 0.150000 0.600000"/>
+<geom name="trap_up_tread_6_wr" class="stair_riser" pos="0.990000 -1.950000 0.600000" size="0.010000 0.150000 0.600000"/>
+<geom name="trap_up_tread_7" class="stair_tread" pos="0.000000 -2.250000 1.125000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_7" class="stair_tread" pos="0.000000 -2.250000 1.275000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_7_wl" class="stair_riser" pos="-0.990000 -2.250000 0.675000" size="0.010000 0.150000 0.675000"/>
+<geom name="trap_up_tread_7_wr" class="stair_riser" pos="0.990000 -2.250000 0.675000" size="0.010000 0.150000 0.675000"/>
+<geom name="trap_up_tread_8" class="stair_tread" pos="0.000000 -2.550000 1.275000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_infill_8" class="stair_tread" pos="0.000000 -2.550000 1.425000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_8_wl" class="stair_riser" pos="-0.990000 -2.550000 0.750000" size="0.010000 0.150000 0.750000"/>
+<geom name="trap_up_tread_8_wr" class="stair_riser" pos="0.990000 -2.550000 0.750000" size="0.010000 0.150000 0.750000"/>
+<geom name="trap_up_tread_9" class="stair_tread" pos="0.000000 -2.850000 1.425000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_up_tread_9_wl" class="stair_riser" pos="-0.990000 -2.850000 0.750000" size="0.010000 0.150000 0.750000"/>
+<geom name="trap_up_tread_9_wr" class="stair_riser" pos="0.990000 -2.850000 0.750000" size="0.010000 0.150000 0.750000"/>
+<geom name="trap_platform" class="stair_tread" pos="0.000000 -4.000000 0.750000" size="1.000000 1.000000 0.750000"/>
+<geom name="trap_platform_wl" class="stair_riser" pos="-0.990000 -4.000000 0.750000" size="0.010000 1.000000 0.750000"/>
+<geom name="trap_platform_wr" class="stair_riser" pos="0.990000 -4.000000 0.750000" size="0.010000 1.000000 0.750000"/>
+<geom name="trap_down_tread_0" class="stair_tread" pos="0.000000 -5.150000 1.275000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_0" class="stair_tread" pos="0.000000 -5.150000 1.125000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_0_wl" class="stair_riser" pos="-0.990000 -5.150000 0.675000" size="0.010000 0.150000 0.675000"/>
+<geom name="trap_down_tread_0_wr" class="stair_riser" pos="0.990000 -5.150000 0.675000" size="0.010000 0.150000 0.675000"/>
+<geom name="trap_down_tread_1" class="stair_tread" pos="0.000000 -5.450000 1.125000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_1" class="stair_tread" pos="0.000000 -5.450000 0.975000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_1_wl" class="stair_riser" pos="-0.990000 -5.450000 0.600000" size="0.010000 0.150000 0.600000"/>
+<geom name="trap_down_tread_1_wr" class="stair_riser" pos="0.990000 -5.450000 0.600000" size="0.010000 0.150000 0.600000"/>
+<geom name="trap_down_tread_2" class="stair_tread" pos="0.000000 -5.750000 0.975000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_2" class="stair_tread" pos="0.000000 -5.750000 0.825000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_2_wl" class="stair_riser" pos="-0.990000 -5.750000 0.525000" size="0.010000 0.150000 0.525000"/>
+<geom name="trap_down_tread_2_wr" class="stair_riser" pos="0.990000 -5.750000 0.525000" size="0.010000 0.150000 0.525000"/>
+<geom name="trap_down_tread_3" class="stair_tread" pos="0.000000 -6.050000 0.825000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_3" class="stair_tread" pos="0.000000 -6.050000 0.675000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_3_wl" class="stair_riser" pos="-0.990000 -6.050000 0.450000" size="0.010000 0.150000 0.450000"/>
+<geom name="trap_down_tread_3_wr" class="stair_riser" pos="0.990000 -6.050000 0.450000" size="0.010000 0.150000 0.450000"/>
+<geom name="trap_down_tread_4" class="stair_tread" pos="0.000000 -6.350000 0.675000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_4" class="stair_tread" pos="0.000000 -6.350000 0.525000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_4_wl" class="stair_riser" pos="-0.990000 -6.350000 0.375000" size="0.010000 0.150000 0.375000"/>
+<geom name="trap_down_tread_4_wr" class="stair_riser" pos="0.990000 -6.350000 0.375000" size="0.010000 0.150000 0.375000"/>
+<geom name="trap_down_tread_5" class="stair_tread" pos="0.000000 -6.650000 0.525000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_5" class="stair_tread" pos="0.000000 -6.650000 0.375000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_5_wl" class="stair_riser" pos="-0.990000 -6.650000 0.300000" size="0.010000 0.150000 0.300000"/>
+<geom name="trap_down_tread_5_wr" class="stair_riser" pos="0.990000 -6.650000 0.300000" size="0.010000 0.150000 0.300000"/>
+<geom name="trap_down_tread_6" class="stair_tread" pos="0.000000 -6.950000 0.375000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_6" class="stair_tread" pos="0.000000 -6.950000 0.225000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_6_wl" class="stair_riser" pos="-0.990000 -6.950000 0.225000" size="0.010000 0.150000 0.225000"/>
+<geom name="trap_down_tread_6_wr" class="stair_riser" pos="0.990000 -6.950000 0.225000" size="0.010000 0.150000 0.225000"/>
+<geom name="trap_down_tread_7" class="stair_tread" pos="0.000000 -7.250000 0.225000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_infill_7" class="stair_tread" pos="0.000000 -7.250000 0.075000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_7_wl" class="stair_riser" pos="-0.990000 -7.250000 0.150000" size="0.010000 0.150000 0.150000"/>
+<geom name="trap_down_tread_7_wr" class="stair_riser" pos="0.990000 -7.250000 0.150000" size="0.010000 0.150000 0.150000"/>
+<geom name="trap_down_tread_8" class="stair_tread" pos="0.000000 -7.550000 0.075000" size="1.000000 0.150000 0.075000"/>
+<geom name="trap_down_tread_8_wl" class="stair_riser" pos="-0.990000 -7.550000 0.075000" size="0.010000 0.150000 0.075000"/>
+<geom name="trap_down_tread_8_wr" class="stair_riser" pos="0.990000 -7.550000 0.075000" size="0.010000 0.150000 0.075000"/>
+</body>
+<!-- Right of spawn (-Y): four platforms 2.0m x 1.0m (h 0.15/0.15/0.20/0.25m), 0.3m edge gap each. -->
+<body name="platforms_right" pos="0.000000 -3.150000 0.000000">
+<geom name="platform_right_near" class="stair_tread" pos="0.000000 0.000000 0.075000" size="1.000000 0.500000 0.075000"/>
+<geom name="platform_right_far" class="stair_tread" pos="0.000000 -1.300000 0.075000" size="1.000000 0.500000 0.075000"/>
+<geom name="platform_right_h20" class="stair_tread" pos="0.000000 -2.600000 0.100000" size="1.000000 0.500000 0.100000"/>
+<geom name="platform_right_h25" class="stair_tread" pos="0.000000 -3.900000 0.125000" size="1.000000 0.500000 0.125000"/>
+</body>
+<body name="base_link" pos="0 0 0.75">
+<site name="imu" size="0.01" pos="0.0 0 0.0"/>
+<inertial pos="-0.04700769 -0.00000239 -0.00862801" mass="5.51295532" fullinertia="0.03052646 0.01536233 0.03006209 0.00000063 -0.00079063 0.00000026"/>
+<joint name="floating_base_joint" type="free" limited="false"/>
+<geom type="mesh" class="visualgeom" rgba="0.75294 0.75294 0.75294 1" mesh="base_link"/>
+      <geom type="box" pos="-0.06 0 -0.035" quat="0.965874 0.000000 0.259013 0.000000" size="0.065 0.14 0.03"/>
+<body name="left_thigh_yaw_link" pos="-0.071093 0.0725 -0.051778">
+<inertial pos="-0.03847656 -0.0000142 -0.05612329" mass="1.71784575" fullinertia="0.00319789 0.0024412 0.00251651 0.00000025 -0.00065088 0.00000117"/>
+<joint name="left_thigh_yaw_joint" pos="0 0 0" axis="-0.499998 0 -0.866027" range="-1 0.2" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.69804 0.69804 0.69804 1" mesh="left_thigh_yaw_link"/>
+<body name="left_thigh_roll_link" pos="-0.017693 0 -0.072346">
+<inertial pos="0.05748778 -0.00601901 -0.03308921" mass="1.66236465" fullinertia="0.00212675 0.00351120 0.00228565 0.00003170 0.00014062 -0.00001801"/>
+<joint name="left_thigh_roll_joint" pos="0 0 0" axis="0.866027 0 -0.499998" range="-0.2 2" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.69804 0.69804 0.69804 1" mesh="left_thigh_roll_link"/>
+<body name="left_thigh_pitch_link" pos="0.060622 0.02085 -0.035">
+<inertial pos="0.00004587 -0.01904764 -0.19858149" mass="2.34600715" fullinertia="0.02018963 0.02158818 0.00302937 -0.00000310 0.00001430 -0.00215090"/>
+<joint name="left_thigh_pitch_joint" pos="0 0 0" axis="0 1 0" range="-2.5 0.8" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.69804 0.69804 0.69804 1" mesh="left_thigh_pitch_link"/>
+      <geom type="box" pos="0 -0.02 -0.08" size="0.04 0.05 0.11"/>
+<body name="left_knee_link" pos="0 0 -0.25">
+<inertial pos="-0.00035292 -0.0132798 -0.15208271" mass="1.70223945" fullinertia="0.01013470 0.00981975 0.00110105 0.00002119 0.00003224 -0.00022577"/>
+<joint name="left_knee_joint" pos="0 0 0" axis="0 1 0" range="0 2.5" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.69804 0.69804 0.69804 1" mesh="left_knee_link"/>
+      <geom type="box" pos="0 -0.02 -0.14" size="0.04 0.05 0.12"/>
+<body name="left_ankle_pitch_link" pos="0 -0.02085 -0.3">
+<inertial pos="0.0 0.0 0.0" mass="0.084" fullinertia="0.00000863 0.00000863 0.00001448 0.0 0.0 0.0"/>
+<joint name="left_ankle_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.7 0.7" class="leg_joint_param" frictionloss="0.05"/>
+<geom type="mesh" class="visualgeom" rgba="0.69804 0.69804 0.69804 1" mesh="left_ankle_pitch_link"/>
+<body name="left_ankle_roll_link">
+<inertial pos="0.01454282 0.00284825 -0.02908608" mass="0.33517651" fullinertia="0.00013432 0.00054303 0.00058883 0.00001389 0.00002909 -0.00001883"/>
+<joint name="left_ankle_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.5 0.5" class="leg_joint_param" frictionloss="0.05"/>
+<geom type="mesh" class="visualgeom" rgba="0.898039 0.917647 0.929412 1" mesh="left_ankle_roll_link"/>
+      <geom type="box" pos="0.02 0 -0.04" size="0.1 0.035 0.005"/>
+</body>
+</body>
+</body>
+</body>
+</body>
+</body>
+<body name="right_thigh_yaw_link" pos="-0.071093 -0.0725 -0.051778">
+<inertial pos="-0.03847656 0.0000142 -0.05612329" mass="1.71632614" fullinertia="0.00319396 0.0024375 0.00251592 0.0 -0.00065014 -0.00000003"/>
+<joint name="right_thigh_yaw_joint" pos="0 0 0" axis="-0.499998 0 -0.866027" range="-0.2 1" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_thigh_yaw_link"/>
+<body name="right_thigh_roll_link" pos="-0.0189924084475403 0 -0.0715958163677252">
+<inertial pos="0.05748778 0.00601901 -0.03308921" mass="1.66310652" fullinertia="0.00213051 0.00351195 0.00228331 -0.00003033 0.00013508 0.00001792"/>
+<joint name="right_thigh_roll_joint" pos="0 0 0" axis="0.866027 0 -0.499998" range="-2 0.2" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_thigh_roll_link"/>
+<body name="right_thigh_pitch_link" pos="0.0619208163652291 -0.0208499999999942 -0.0357500000093095">
+<inertial pos="0.00004587 0.01904764 -0.19858149" mass="2.34600715" fullinertia="0.02018963 0.02158818 0.00302937 0.00000309 0.00001431 0.0021509"/>
+<joint name="right_thigh_pitch_joint" pos="0 0 0" axis="0 1 0" range="-2.5 0.8" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_thigh_pitch_link"/>
+      <geom type="box" pos="0 0.02 -0.08" size="0.04 0.05 0.11"/>
+<body name="right_knee_link" pos="0 0 -0.250000000000016">
+<inertial pos="-0.00035292 0.0132798 -0.15208271" mass="1.70223945" fullinertia="0.0101347 0.00981975 0.00110105 0.00002119 -0.00003224 0.00022577"/>
+<joint name="right_knee_joint" pos="0 0 0" axis="0 1 0" range="0 2.5" class="leg_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_knee_link"/>
+      <geom type="box" pos="0 0.02 -0.14" size="0.04 0.05 0.12"/>
+<body name="right_ankle_pitch_link" pos="0 0.0208500000000073 -0.299999999999986">
+<inertial pos="0 0 0" mass="0.084" fullinertia="0.00000863 0.00000863 0.00001448 0 0 0"/>
+<joint name="right_ankle_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.7 0.7" class="leg_joint_param" frictionloss="0.05"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_ankle_pitch_link"/>
+<body name="right_ankle_roll_link">
+<inertial pos="0.01454282 -0.00284825 -0.02908608" mass="0.33517651" fullinertia="0.00013432 0.00054303 0.00058883 -0.00001388 0.00002909 0.00001883"/>
+<joint name="right_ankle_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.5 0.5" class="leg_joint_param" frictionloss="0.05"/>
+<geom type="mesh" class="visualgeom" rgba="0.898039 0.917647 0.929412 1" mesh="right_ankle_roll_link"/>
+      <geom type="box" pos="0.02 0 -0.04" size="0.1 0.035 0.005"/>
+</body>
+</body>
+</body>
+</body>
+</body>
+</body>
+<body name="torso_link" pos="-0.0281649492242451 0 0.0672000000054882">
+<inertial pos="-0.00234775 -0.00000466 0.0984446" mass="7.58189737" fullinertia="0.06904132 0.05679531 0.03888628 -0.00004044 0.00223305 -0.00001881"/>
+<joint name="torso_joint" pos="0 0 0" axis="0 0 1" range="-2.62 2.62" class="waist_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="torso_link"/>
+      <geom type="box" pos="0 0 0.15" size="0.08 0.08 0.11"/>
+<body name="left_arm_pitch_link" pos="0 0.121749999999383 0.206175860782433">
+<inertial pos="-0.00436523 0.04995146 0.0" mass="0.47284363" fullinertia="0.00015644 0.00008197 0.00018907 0.00002207 0.0 0.0"/>
+<joint name="left_arm_pitch_joint" pos="0 0 0" axis="0 1 0" range="-3.14 2.57" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="left_arm_pitch_link"/>
+      <geom type="cylinder" pos="0 0.055 0" quat="0.707388 0.000000 0.706825 0.000000" size="0.03 0.025"/>
+<body name="left_arm_roll_link" pos="0.02 0.056 0">
+<inertial pos="-0.0029007 0.0 -0.02197112" mass="0.08401883" fullinertia="0.00004601 0.00005649 0.00002712 0.0 -0.00001743 0.0"/>
+<joint name="left_arm_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.25 3.14" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="left_arm_roll_link"/>
+      <geom type="cylinder" pos="-0.02 0 -0.12" size="0.03 0.05"/>
+<body name="left_arm_yaw_link" pos="-0.02 0 -0.05">
+<inertial pos="-0.00004328 -0.0018211 -0.10615895" mass="1.15324354" fullinertia="0.00619553 0.00615816 0.0003308 -0.00000002 -0.00000077 -0.0001812"/>
+<joint name="left_arm_yaw_joint" pos="0 0 0" axis="0 0 -1" range="-2.6 2.6" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="left_arm_yaw_link"/>
+      <geom type="cylinder" pos="0 0 -0.19" quat="0.500398 -0.499602 0.500000 0.500000" size="0.03 0.025"/>
+<body name="left_elbow_pitch_link" pos="0 0.02 -0.18875">
+<inertial pos="0.02378501 -0.00433076 0.0" mass="0.09168684" fullinertia="0.00003059 0.00005023 0.00006277 0.00002004 0.0 0.0"/>
+<joint name="left_elbow_pitch_joint" pos="0 0 0" axis="0 1 0" range="-1 3.57" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="left_elbow_pitch_link"/>
+      <geom type="cylinder" pos="0.14 -0.02 0" quat="0.707388 0.000000 0.706825 0.000000" size="0.03 0.05"/>
+<body name="left_elbow_yaw_link" pos="0.05 -0.02 0">
+<inertial pos="0.05317619 -0.0000345 -0.00001992" mass="0.68145595" fullinertia="0.00024481 0.00132562 0.00132647 -0.00000008 -0.00000014 -0.0000006"/>
+<joint name="left_elbow_yaw_joint" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="left_elbow_yaw_link"/>
+</body>
+</body>
+</body>
+</body>
+</body>
+<body name="right_arm_pitch_link" pos="0 -0.12175 0.20518">
+<inertial pos="-0.00436523 -0.04995146 0.0" mass="0.47284363" fullinertia="0.00015644 0.00008197 0.00018907 -0.00002207 0.0 0.0"/>
+<joint name="right_arm_pitch_joint" pos="0 0 0" axis="0 1 0" range="-3.14 2.57" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_arm_pitch_link"/>
+      <geom type="cylinder" pos="0 -0.055 0" quat="0.707388 0.000000 0.706825 0.000000" size="0.03 0.025"/>
+<body name="right_arm_roll_link" pos="0.02 -0.056 0">
+<inertial pos="-0.0029007 0.0 -0.02197112" mass="0.08401883" fullinertia="0.00004601 0.00005649 0.00002712 0.0 -0.00001743 0.0"/>
+<joint name="right_arm_roll_joint" pos="0 0 0" axis="1 0 0" range="-3.14 0.25" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_arm_roll_link"/>
+      <geom type="cylinder" pos="-0.02 0 -0.12" size="0.03 0.05"/>
+<body name="right_arm_yaw_link" pos="-0.02 0 -0.05">
+<inertial pos="-0.00004328 0.0018211 -0.10615895" mass="1.15429959" fullinertia="0.0062043 0.00616498 0.00033199 0.00000007 -0.00000008 0.00017831"/>
+<joint name="right_arm_yaw_joint" pos="0 0 0" axis="0 0 -1" range="-2.6 2.6" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_arm_yaw_link"/>
+      <geom type="cylinder" pos="0 0 -0.19" quat="0.500398 -0.499602 0.500000 0.500000" size="0.03 0.025"/>
+<body name="right_elbow_pitch_link" pos="0 -0.02 -0.18875">
+<inertial pos="0.02378501 0.00433076 0.0" mass="0.09168684" fullinertia="0.00003059 0.00005023 0.00006277 -0.00002004 0.0 0.0"/>
+<joint name="right_elbow_pitch_joint" pos="0 0 0" axis="0 1 0" range="-1.0 3.57" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_elbow_pitch_link"/>
+      <geom type="cylinder" pos="0.14 0.02 0" quat="0.707388 0.000000 0.706825 0.000000" size="0.03 0.05"/>
+<body name="right_elbow_yaw_link" pos="0.05 0.02 0">
+<inertial pos="0.05317619 0.0000345 -0.00001992" mass="0.68145595" fullinertia="0.00024481 0.00132562 0.00132647 0.00000008 0.00000014 -0.0000006"/>
+<joint name="right_elbow_yaw_joint" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" class="arm_joint_param"/>
+<geom type="mesh" class="visualgeom" rgba="0.752941 0.752941 0.752941 1" mesh="right_elbow_yaw_link"/>
+</body>
+</body>
+</body>
+</body>
+</body>
+</body>
+</body>
+</worldbody>
+<actuator>
+<motor name="left_thigh_yaw_joint" joint="left_thigh_yaw_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_thigh_roll_joint" joint="left_thigh_roll_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_thigh_pitch_joint" joint="left_thigh_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_knee_joint" joint="left_knee_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_ankle_pitch_joint" joint="left_ankle_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_ankle_roll_joint" joint="left_ankle_roll_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_thigh_yaw_joint" joint="right_thigh_yaw_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_thigh_roll_joint" joint="right_thigh_roll_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_thigh_pitch_joint" joint="right_thigh_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_knee_joint" joint="right_knee_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_ankle_pitch_joint" joint="right_ankle_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_ankle_roll_joint" joint="right_ankle_roll_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="torso_joint" joint="torso_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_arm_pitch_joint" joint="left_arm_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_arm_roll_joint" joint="left_arm_roll_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_arm_yaw_joint" joint="left_arm_yaw_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_elbow_pitch_joint" joint="left_elbow_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="left_elbow_yaw_joint" joint="left_elbow_yaw_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_arm_pitch_joint" joint="right_arm_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_arm_roll_joint" joint="right_arm_roll_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_arm_yaw_joint" joint="right_arm_yaw_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_elbow_pitch_joint" joint="right_elbow_pitch_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+<motor name="right_elbow_yaw_joint" joint="right_elbow_yaw_joint" gear="1" ctrllimited="true" ctrlrange="-200 200"/>
+</actuator>
+<sensor>
+<actuatorpos name="left_thigh_yaw_p" actuator="left_thigh_yaw_joint" user="13"/>
+<actuatorpos name="left_thigh_roll_p" actuator="left_thigh_roll_joint" user="13"/>
+<actuatorpos name="left_thigh_pitch_p" actuator="left_thigh_pitch_joint" user="13"/>
+<actuatorpos name="left_knee_p" actuator="left_knee_joint" user="13"/>
+<actuatorpos name="left_ankle_pitch_p" actuator="left_ankle_pitch_joint" user="13"/>
+<actuatorpos name="left_ankle_roll_p" actuator="left_ankle_roll_joint" user="13"/>
+<actuatorpos name="right_thigh_yaw_p" actuator="right_thigh_yaw_joint" user="13"/>
+<actuatorpos name="right_thigh_roll_p" actuator="right_thigh_roll_joint" user="13"/>
+<actuatorpos name="right_thigh_pitch_p" actuator="right_thigh_pitch_joint" user="13"/>
+<actuatorpos name="right_knee_p" actuator="right_knee_joint" user="13"/>
+<actuatorpos name="right_ankle_pitch_p" actuator="right_ankle_pitch_joint" user="13"/>
+<actuatorpos name="right_ankle_roll_p" actuator="right_ankle_roll_joint" user="13"/>
+<actuatorpos name="torso_yaw_p" actuator="torso_joint" user="13"/>
+<actuatorpos name="left_arm_pitch_p" actuator="left_arm_pitch_joint" user="13"/>
+<actuatorpos name="left_arm_roll_p" actuator="left_arm_roll_joint" user="13"/>
+<actuatorpos name="left_arm_yaw_p" actuator="left_arm_yaw_joint" user="13"/>
+<actuatorpos name="left_elbow_pitch_p" actuator="left_elbow_pitch_joint" user="13"/>
+<actuatorpos name="left_elbow_yaw_p" actuator="left_elbow_yaw_joint" user="13"/>
+<actuatorpos name="right_arm_pitch_p" actuator="right_arm_pitch_joint" user="13"/>
+<actuatorpos name="right_arm_roll_p" actuator="right_arm_roll_joint" user="13"/>
+<actuatorpos name="right_arm_yaw_p" actuator="right_arm_yaw_joint" user="13"/>
+<actuatorpos name="right_elbow_pitch_p" actuator="right_elbow_pitch_joint" user="13"/>
+<actuatorpos name="right_elbow_yaw_p" actuator="right_elbow_yaw_joint" user="13"/>
+<actuatorvel name="left_thigh_yaw_v" actuator="left_thigh_yaw_joint" user="13"/>
+<actuatorvel name="left_thigh_roll_v" actuator="left_thigh_roll_joint" user="13"/>
+<actuatorvel name="left_thigh_pitch_v" actuator="left_thigh_pitch_joint" user="13"/>
+<actuatorvel name="left_knee_v" actuator="left_knee_joint" user="13"/>
+<actuatorvel name="left_ankle_pitch_v" actuator="left_ankle_pitch_joint" user="13"/>
+<actuatorvel name="left_ankle_roll_v" actuator="left_ankle_roll_joint" user="13"/>
+<actuatorvel name="right_thigh_yaw_v" actuator="right_thigh_yaw_joint" user="13"/>
+<actuatorvel name="right_thigh_roll_v" actuator="right_thigh_roll_joint" user="13"/>
+<actuatorvel name="right_thigh_pitch_v" actuator="right_thigh_pitch_joint" user="13"/>
+<actuatorvel name="right_knee_v" actuator="right_knee_joint" user="13"/>
+<actuatorvel name="right_ankle_pitch_v" actuator="right_ankle_pitch_joint" user="13"/>
+<actuatorvel name="right_ankle_roll_v" actuator="right_ankle_roll_joint" user="13"/>
+<actuatorvel name="torso_yaw_v" actuator="torso_joint" user="13"/>
+<actuatorvel name="left_arm_pitch_v" actuator="left_arm_pitch_joint" user="13"/>
+<actuatorvel name="left_arm_roll_v" actuator="left_arm_roll_joint" user="13"/>
+<actuatorvel name="left_arm_yaw_v" actuator="left_arm_yaw_joint" user="13"/>
+<actuatorvel name="left_elbow_pitch_v" actuator="left_elbow_pitch_joint" user="13"/>
+<actuatorvel name="left_elbow_yaw_v" actuator="left_elbow_yaw_joint" user="13"/>
+<actuatorvel name="right_arm_pitch_v" actuator="right_arm_pitch_joint" user="13"/>
+<actuatorvel name="right_arm_roll_v" actuator="right_arm_roll_joint" user="13"/>
+<actuatorvel name="right_arm_yaw_v" actuator="right_arm_yaw_joint" user="13"/>
+<actuatorvel name="right_elbow_pitch_v" actuator="right_elbow_pitch_joint" user="13"/>
+<actuatorvel name="right_elbow_yaw_v" actuator="right_elbow_yaw_joint" user="13"/>
+<actuatorfrc name="left_thigh_yaw_f" actuator="left_thigh_yaw_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_thigh_roll_f" actuator="left_thigh_roll_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_thigh_pitch_f" actuator="left_thigh_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_knee_f" actuator="left_knee_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_ankle_pitch_f" actuator="left_ankle_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_ankle_roll_f" actuator="left_ankle_roll_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_thigh_yaw_f" actuator="right_thigh_yaw_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_thigh_roll_f" actuator="right_thigh_roll_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_thigh_pitch_f" actuator="right_thigh_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_knee_f" actuator="right_knee_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_ankle_pitch_f" actuator="right_ankle_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_ankle_roll_f" actuator="right_ankle_roll_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="torso_yaw_f" actuator="torso_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_arm_pitch_f" actuator="left_arm_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_arm_roll_f" actuator="left_arm_roll_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_arm_yaw_f" actuator="left_arm_yaw_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_elbow_pitch_f" actuator="left_elbow_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="left_elbow_yaw_f" actuator="left_elbow_yaw_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_arm_pitch_f" actuator="right_arm_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_arm_roll_f" actuator="right_arm_roll_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_arm_yaw_f" actuator="right_arm_yaw_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_elbow_pitch_f" actuator="right_elbow_pitch_joint" user="13" noise="1e-3"/>
+<actuatorfrc name="right_elbow_yaw_f" actuator="right_elbow_yaw_joint" user="13" noise="1e-3"/>
+<framequat name="orientation" objtype="site" noise="0.001" objname="imu"/>
+<framepos name="position" objtype="site" noise="0.001" objname="imu"/>
+<gyro name="angular-velocity" site="imu" noise="0.005" cutoff="34.9"/>
+<velocimeter name="linear-velocity" site="imu" noise="0.001" cutoff="30"/>
+<accelerometer name="linear-acceleration" site="imu" noise="0.005" cutoff="157"/>
+<magnetometer name="magnetometer" site="imu"/>
+</sensor>
+<visual>
+<global offwidth="1920" offheight="1080"/>
+</visual>
+</mujoco>
