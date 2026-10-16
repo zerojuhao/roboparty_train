@@ -31,12 +31,50 @@ IsaacLab-3.0/
 *.mp4
 *.pt
 
-# Local robot assets and unified motion data are provisioned with the checkout,
-# but remain outside the source repository because the motion licenses do not
-# permit publishing this bundle here.
-/robo_newton/robolab/data/
+# Local robot assets and unified motion data are provisioned separately. Keep
+# only the documented directory skeleton in Git; never publish the asset files.
+/robo_newton/robolab/data/**
+!/robo_newton/robolab/data/README.md
+!/robo_newton/robolab/data/robots/
+!/robo_newton/robolab/data/robots/rp1/
+!/robo_newton/robolab/data/robots/rp1/.gitkeep
+!/robo_newton/robolab/data/robots/rp1/urdf/
+!/robo_newton/robolab/data/robots/rp1/urdf/.gitkeep
+!/robo_newton/robolab/data/robots/rp1/mjcf/
+!/robo_newton/robolab/data/robots/rp1/mjcf/.gitkeep
+!/robo_newton/robolab/data/robots/rp1/meshes/
+!/robo_newton/robolab/data/robots/rp1/meshes/.gitkeep
+!/robo_newton/robolab/data/robots/rp1/terrain_assets/
+!/robo_newton/robolab/data/robots/rp1/terrain_assets/.gitkeep
+!/robo_newton/robolab/data/robots/rpo/
+!/robo_newton/robolab/data/robots/rpo/.gitkeep
+!/robo_newton/robolab/data/robots/rpo/urdf/
+!/robo_newton/robolab/data/robots/rpo/urdf/.gitkeep
+!/robo_newton/robolab/data/robots/rpo/mjcf/
+!/robo_newton/robolab/data/robots/rpo/mjcf/.gitkeep
+!/robo_newton/robolab/data/robots/rpo/meshes/
+!/robo_newton/robolab/data/robots/rpo/meshes/.gitkeep
+!/robo_newton/robolab/data/robots/rpo/terrain_assets/
+!/robo_newton/robolab/data/robots/rpo/terrain_assets/.gitkeep
+!/robo_newton/robolab/data/motions/
+!/robo_newton/robolab/data/motions/newton/
+!/robo_newton/robolab/data/motions/newton/rp1/
+!/robo_newton/robolab/data/motions/newton/rp1/.gitkeep
+!/robo_newton/robolab/data/motions/newton/rpo/
+!/robo_newton/robolab/data/motions/newton/rpo/.gitkeep
+!/robo_newton/robolab/data/motions/newton/rp1_upper_run_bounded/
+!/robo_newton/robolab/data/motions/newton/rp1_upper_run_bounded/.gitkeep
+!/robo_newton/robolab/data/motions/newton/rp1_lafan/
+!/robo_newton/robolab/data/motions/newton/rp1_lafan/.gitkeep
+!/robo_newton/robolab/data/motions/newton/rp1_lafan/npz/
+!/robo_newton/robolab/data/motions/newton/rp1_lafan/npz/.gitkeep
 /data
 /ufo_data
+
+# Tests are kept for local validation but are not part of the public checkout.
+**/tests/
+**/test_*.py
+**/*_test.py
 
 # Host-local experiment scripts and notes are not repository sources.
 /project_ops/
