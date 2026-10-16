@@ -9,7 +9,7 @@ data/
   robots/
     rp1/                 RP1 URDF, MJCF, meshes, and terrain assets
     rpo/                 RPO URDF, MJCF, meshes, and terrain assets
-  motions/newton/
+  motions/
     rp1/                 RP1 AMP, Parkour, and SSR motions
     rpo/                 RPO AMP and Parkour motions
     rp1_upper_run_bounded/

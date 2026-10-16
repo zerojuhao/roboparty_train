@@ -18,8 +18,8 @@ def _motion_roots() -> list[Path]:
 
 
 def motion_data_dir(dataset: str) -> str:
-    """Return the first available ``motions/newton/<dataset>`` directory."""
-    candidates = [root / "motions" / "newton" / dataset for root in _motion_roots()]
+    """Return the first available ``motions/<dataset>`` directory."""
+    candidates = [root / "motions" / dataset for root in _motion_roots()]
     for candidate in candidates:
         if candidate.is_dir():
             return str(candidate)

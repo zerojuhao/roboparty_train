@@ -43,7 +43,7 @@ export ROBO_TRAIN_LOG_ROOT="$PWD/logs/rsl_rl"
 robo_newton/robolab/data/
   robots/rp1/  RP1 URDF、MJCF、网格
   robots/rpo/    RPO URDF、MJCF、网格
-  motions/newton/
+  motions/
     rp1/                  RP1 AMP、Parkour、SSR
     rp1_upper_run_bounded/ RP1 AMP 上半身参考动作
     rpo/                  RPO AMP、Parkour、BeyondMimic
@@ -63,7 +63,7 @@ robo_newton/robolab/data/
 
 位置单位为米，关节角度为弧度，世界坐标系速度保留来源语义。全身数据的第一个身体为 `base_link`。AMP 保留原有前向差分速度算法和关键身体位置，不凭空补全缺失的全身轨迹。转换不重新重定向、不重采样、不平滑动作；NPZ 压缩无损，转换报告记录来源与输出的哈希。
 
-UFO/PUFO 默认读取 `motions/newton/rp1_lafan/manifest.json`，可用 `UFO_MOTION_MANIFEST` 指定其他统一格式数据。后缀同为 `.npz` 不代表四元数和关节排列兼容。
+UFO/PUFO 默认读取 `motions/rp1_lafan/manifest.json`，可用 `UFO_MOTION_MANIFEST` 指定其他统一格式数据。后缀同为 `.npz` 不代表四元数和关节排列兼容。
 
 请使用外部工具完成动作重定向，并在训练前准备符合上述规范的 NPZ 数据。历史重定向、CSV/PKL 处理和一次性迁移脚本已移除。训练运行时的数据校验与按名称映射仍由 [motion_npz.py](robo_newton/robolab/utils/motion_npz.py) 提供；该模块不会重新重定向、补全缺失轨迹或猜测来源数据的排列约定。
 
@@ -76,7 +76,7 @@ UFO/PUFO 默认读取 `motions/newton/rp1_lafan/manifest.json`，可用 `UFO_MOT
 | `rp1_upper_run_bounded` | 1 | 小于 0.1 MiB |
 | `rp1_lafan/npz` | 55 | 743.5 MiB |
 
-这些文件应放在 `robo_newton/robolab/data/motions/newton/`。训练不需要原始动作、中间 PKL 或重复备份；NPZ 旁保留 LAFAN 清单及相关来源记录。机器人资产放在同级的 `robots/` 目录。
+这些文件应放在 `robo_newton/robolab/data/motions/`。训练不需要原始动作、中间 PKL 或重复备份；NPZ 旁保留 LAFAN 清单及相关来源记录。机器人资产放在同级的 `robots/` 目录。
 
 动作数据不自动适用源码许可证。[Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) 使用 [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) 许可。重定向不会消除上游许可限制，发布修改后的动作数据前需确认再分发权利；其他目录中的 LAFAN 衍生片段同样需要确认。
 

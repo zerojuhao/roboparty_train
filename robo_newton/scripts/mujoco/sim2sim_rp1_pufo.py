@@ -60,7 +60,7 @@ def terrain_metadata():
 
 
 def default_motion_manifest():
-    return DATA_ROOT / "motions/newton/rp1_lafan/manifest.json"
+    return DATA_ROOT / "motions/rp1_lafan/manifest.json"
 
 
 def read_motion(path, joint_names, body_names):

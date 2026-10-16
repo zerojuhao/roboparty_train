@@ -26,7 +26,7 @@ def resolve_motion_manifest(path):
     manifest = Path(str(path)).expanduser()
     if manifest.is_dir() or manifest.name == "rp1_lafan":
         manifest = manifest / "manifest.json"
-    canonical = ROBO_NEWTON_ROOT / "data/motions/newton/rp1_lafan/manifest.json"
+    canonical = ROBO_NEWTON_ROOT / "data/motions/rp1_lafan/manifest.json"
     if not canonical.is_file():
         canonical = Path(motion_file("rp1_lafan", "manifest.json"))
     old = [

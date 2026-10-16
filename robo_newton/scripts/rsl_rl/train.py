@@ -57,7 +57,7 @@ parser.add_argument("--num_envs", type=int, default=None, help="Number of enviro
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
     "--data_root", type=str, default=None,
-    help="Motion-data root containing motions/newton; defaults to ROBO_TRAIN_DATA_ROOT or robo_newton/robolab/data/.",
+    help="Motion-data root containing motions; defaults to ROBO_TRAIN_DATA_ROOT or robo_newton/robolab/data/.",
 )
 parser.add_argument(
     "--motion_manifest", type=str, default=None,

@@ -43,7 +43,7 @@ The repository includes the robot assets and unified datasets below. A checkout 
 robo_newton/robolab/data/
   robots/rp1/  RP1 URDF, MJCF, and meshes
   robots/rpo/    RPO URDF, MJCF, and meshes
-  motions/newton/
+  motions/
     rp1/                  RP1 AMP, Parkour, and SSR
     rp1_upper_run_bounded/ RP1 AMP upper-body reference
     rpo/                  RPO AMP, Parkour, and BeyondMimic
@@ -61,7 +61,7 @@ All training clips use `roboparty_motion_v1` NPZ with `allow_pickle=False`. Meta
 
 Positions are metres, joint angles radians, and world-space velocities retain source semantics. Full-body tracks put `base_link` first. AMP retains its forward-difference velocity calculation and key-body measurements. Conversion does not invent missing body tracks, retarget, resample, or smooth motions. Compression is lossless; the conversion report records source/output hashes.
 
-UFO/PUFO defaults to `motions/newton/rp1_lafan/manifest.json`; override with `UFO_MOTION_MANIFEST`. A `.npz` extension alone does not establish compatible conventions.
+UFO/PUFO defaults to `motions/rp1_lafan/manifest.json`; override with `UFO_MOTION_MANIFEST`. A `.npz` extension alone does not establish compatible conventions.
 
 Retarget motions with external tools and prepare NPZ files that follow the schema above before training. Legacy retargeting, CSV/PKL preparation, and one-time migration scripts have been removed. Runtime validation and name-based mapping remain in [motion_npz.py](robo_newton/robolab/utils/motion_npz.py); this module does not retarget motions or infer missing tracks or source conventions.
 
@@ -74,7 +74,7 @@ The current slimmed local dataset contains 125 clips, approximately 752 MiB in t
 | `rp1_upper_run_bounded` | 1 | Less than 0.1 MiB |
 | `rp1_lafan/npz` | 55 | 743.5 MiB |
 
-These files belong under `robo_newton/robolab/data/motions/newton/`. Original motions, intermediate PKLs, and duplicate backups are not needed. Keep the LAFAN manifest and relevant provenance records alongside the NPZs. Robot assets belong under the sibling `robots/` directory.
+These files belong under `robo_newton/robolab/data/motions/`. Original motions, intermediate PKLs, and duplicate backups are not needed. Keep the LAFAN manifest and relevant provenance records alongside the NPZs. Robot assets belong under the sibling `robots/` directory.
 
 Motion data does not inherit the source-code license. [Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) is released under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Retargeting does not remove upstream restrictions; confirm redistribution rights before publishing modified motion data. This also applies to LAFAN-derived clips stored in other folders.
 
