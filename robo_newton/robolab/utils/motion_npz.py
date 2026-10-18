@@ -8,6 +8,7 @@ tracks. Missing full-body measurements are never fabricated from AMP clips.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import xml.etree.ElementTree as ET
 import warnings
 
@@ -59,6 +60,21 @@ def name_indices(source, target):
     if missing:
         raise ValueError(f"Motion is missing named entries: {sorted(missing)}")
     return [lookup[name] for name in target]
+
+
+def resolve_name_patterns(source, patterns):
+    """Expand ordered regular-expression name patterns against source names."""
+    source = list(source)
+    patterns = list(patterns)
+    resolved = []
+    for pattern in patterns:
+        matches = [name for name in source if re.fullmatch(pattern, name)]
+        if not matches:
+            raise ValueError(f"Name pattern {pattern!r} did not match any source name.")
+        resolved.extend(matches)
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("Name patterns resolve to duplicate names.")
+    return resolved
 
 
 def validate_motion(data):

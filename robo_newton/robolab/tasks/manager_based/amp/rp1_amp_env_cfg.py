@@ -37,23 +37,42 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 from robolab import ROBOLAB_ROOT_DIR
-from robolab.assets.robots.roboparty import RP1_24DOF_CFG, RP1_JOINT_NAMES
+from robolab.assets.robots.roboparty import RP1_24DOF_CFG, RP1_BODY_NAMES, RP1_JOINT_NAMES
 from robolab.utils.data_paths import motion_data_dir
+from robolab.utils.motion_npz import resolve_name_patterns
 import robolab.tasks.manager_based.amp.mdp as mdp
 
 from .amp_env_cfg import AmpEnvCfg, CommandsCfg, RewardsCfg
 from .mdp.commands import SingleAxisVelocityCommandCfg
 from .mdp.curriculums import VelocityTrackingCurriculum
-from .managers import MotionDataTermCfg
 
 # Demonstrations and discriminator observations share the explicit URDF order.
 MOTION_JOINT_NAMES = RP1_JOINT_NAMES
+# Keep the AMP feature order explicit.  These are all RP1 links except the
+# floating articulation root (``base_link``), which is the reference frame.
 KEY_BODY_NAMES = [
-    "left_ankle_roll_link", "right_ankle_roll_link",
-    "left_knee_link", "right_knee_link",
-    "left_wrist_link", "right_wrist_link",
+    ".*_hip_pitch_link",
+    ".*_hip_roll_link",
+    ".*_hip_yaw_link",
+    ".*_knee_link",
+    ".*_ankle_pitch_link",
+    ".*_ankle_roll_link",
+    "waist_roll_link",
+    "waist_yaw_link",
+    ".*_shoulder_pitch_link",
+    ".*_shoulder_roll_link",
+    ".*_shoulder_yaw_link",
+    ".*_elbow_link",
+    ".*_wrist_link",
 ]
-AMP_NUM_STEPS = 3
+UPPER_KEY_BODY_NAMES = [
+    ".*_shoulder_pitch_link",
+    ".*_shoulder_roll_link",
+    ".*_shoulder_yaw_link",
+    ".*_elbow_link",
+    ".*_wrist_link",
+]
+AMP_NUM_STEPS = 1
 
 
 @configclass
@@ -64,7 +83,7 @@ class RP1AmpCurriculumCfg:
             "command_name": "base_velocity",
             "reward_term_name": "track_lin_vel_xy_exp",
             "min_velocity": 1.2,
-            "max_velocity": 4.0,
+            "max_velocity": 3.0,
             "step_size": 0.1,
             "down_threshold": 0.55,
             # Require sustained tracking before increasing speed, but recover
@@ -82,7 +101,7 @@ class RP1CommandsCfg(CommandsCfg):
     single_axis_velocity = SingleAxisVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(7.5, 15.0),
-        rel_standing_envs=0.05,
+        rel_standing_envs=0.10,
         stop_sequence_probability=0.2,
         stop_start_time_range=(0.5, 1.5),
         stop_peak_speed_probability=0.5,
@@ -120,21 +139,31 @@ class RP1AmpEnvCfg(AmpEnvCfg):
         self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights = {
             "stand_still": 1.0,
-            # Keep the low-speed walking reference for commands around 1 m/s.
-            "walk_ff_loop_180_R_001__A048": 2.0,
-            "move_back": 2.0,
-            "run_start_180_R_001__A345": 2.0,
-            "run_stop_180_R_001__A345": 2.0,
-            # Jog references carry the 1.5-2 m/s running style without replacing
-            # the walking behavior at 1 m/s.
-            "jog_forward_A021": 6.0,
-            "jog_forward_A045": 6.0,
-            # Sustained run loop (~3.2-3.8 m/s) for 4 m/s lateral/speed focus.
-            "run_loop_180_R_003__A326": 8.0,
-            # Keep left/right turning balanced and close to half of the sampler.
-            "turn_l": 9.0,
-            "turn_r": 9.0,
+            "walk_ff_loop_180_R_001__A048": 1.0,
+            "move_back": 1.0,
+            "run_start_180_R_001__A345": 1.0,
+            "run_stop_180_R_001__A345": 1.0,
+            "jog_forward_A021": 1.0,
+            "jog_forward_A045": 1.0,
+            "run_loop_180_R_003__A326": 1.0,
+            "turn_l": 1.0,
+            "turn_r": 1.0,
         }
+        self.motion_data.motion_dataset.sampling_mode = "command_match"
+        self.motion_data.motion_dataset.command_name = "single_axis_velocity"
+        self.motion_data.motion_dataset.command_match_temperature = 0.3
+        self.motion_data.motion_dataset.command_match_min_probability = 0.02
+        self.motion_data.motion_dataset.command_match_segment_duration = 0.5
+        self.motion_data.motion_dataset.command_match_current_weight = 0.3
+        self.motion_data.motion_dataset.command_match_target_weight = 0.7
+        # Keep commanded/measured velocity in the policy and critic, but prevent
+        # AMP from using absolute root speed as a shortcut for motion style.
+        self.observations.disc.base_lin_vel = None
+        self.observations.disc_demo.ref_root_lin_vel_b = None
+        self.observations.upper_disc.base_lin_vel = None
+        self.observations.upper_disc_demo.ref_root_lin_vel_b = None
+        self.observations.disc.history_length = AMP_NUM_STEPS
+        self.observations.upper_disc.history_length = AMP_NUM_STEPS
         for term in (self.observations.disc.joint_pos, self.observations.disc.joint_vel):
             term.params["asset_cfg"] = SceneEntityCfg(
                 "robot", joint_names=MOTION_JOINT_NAMES, preserve_order=True
@@ -156,32 +185,24 @@ class RP1AmpEnvCfg(AmpEnvCfg):
         )
         self.observations.upper_disc.key_body_pos_b.params = {
             "asset_cfg": SceneEntityCfg(
-                "robot", body_names=["left_wrist_link", "right_wrist_link"], preserve_order=True
+                "robot", body_names=UPPER_KEY_BODY_NAMES, preserve_order=True
             )
         }
         self.observations.upper_disc_demo.ref_joint_pos.params["joint_indices"] = upper_joint_indices
         self.observations.upper_disc_demo.ref_joint_vel.params["joint_indices"] = upper_joint_indices
-        self.observations.upper_disc_demo.ref_key_body_pos_b.params["body_indices"] = [4, 5]
-        self.motion_data.motion_dataset_upper = MotionDataTermCfg(
-            motion_data_dir=motion_data_dir("rp1_upper_run_bounded"),
-            motion_data_weights={"run_loop_180_R_003__A326": 1.0},
-            key_body_names=KEY_BODY_NAMES,
-        )
-        self.animation.animation_upper = self.animation.animation.replace(
-            motion_data_term="motion_dataset_upper", enable_visualization=False,
-        )
-        for name, term in vars(self.observations.upper_disc_demo).items():
-            if term is not None and hasattr(term, "func"):
-                term.func = mdp.high_speed_upper_reference
-                term.params.update(
-                    reference_function=name, fast_animation="animation_upper",
-                    command_name="single_axis_velocity", min_linear_command=1.5,
-                )
+        resolved_key_body_names = resolve_name_patterns(RP1_BODY_NAMES, KEY_BODY_NAMES)
+        resolved_upper_key_body_names = resolve_name_patterns(RP1_BODY_NAMES, UPPER_KEY_BODY_NAMES)
+        self.observations.upper_disc_demo.ref_key_body_pos_b.params["body_indices"] = [
+            resolved_key_body_names.index(name) for name in resolved_upper_key_body_names
+        ]
+        # Both discriminator routes read the same sampled animation frames;
+        # the upper route only selects its joint and key-body channels.
 
-        # Keep the shared reward functions and weights; only resolve RP1 body names.
+        # Resolve RP1 body names and strengthen the RP1-only standing-pose target.
         self.rewards.undesired_contacts.params["sensor_cfg"] = SceneEntityCfg(
             "contact_forces", body_names="^(?!.*ankle_roll_link$).*$"
         )
+        self.rewards.stand_still_joint_deviation.weight = -0.5
 
         self.events.randomize_rigid_body_com.params["asset_cfg"] = SceneEntityCfg(
             "robot", body_names=["base_link", "waist_yaw_link"]

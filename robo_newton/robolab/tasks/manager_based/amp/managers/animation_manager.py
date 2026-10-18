@@ -60,6 +60,8 @@ class AnimationTerm(ManagerTermBase):
             self.step_indices = torch.arange(cfg.num_steps_to_use + 1, 1, dtype=torch.long, device=env.device)
         else:
             raise ValueError("num_steps_to_use cannot be zero.")
+        self.sample_min_time_offset = min(0, cfg.num_steps_to_use + 1) * env.step_dt
+        self.sample_max_time_offset = max(0, cfg.num_steps_to_use - 1) * env.step_dt
         
         # Get motion data term
         self.motion_data_term: MotionDataTerm = env.motion_data_manager.get_term(cfg.motion_data_term)
@@ -104,35 +106,109 @@ class AnimationTerm(ManagerTermBase):
             )
             self.key_body_marker: VisualizationMarkers = VisualizationMarkers(marker_cfg)
 
+    def _sampling_context(self, env_ids: Sequence[int]) -> tuple[torch.Tensor, torch.Tensor] | None:
+        if self.motion_data_term.cfg.sampling_mode != "command_match":
+            return None
+        command_name = self.motion_data_term.cfg.command_name
+        if command_name is None or not hasattr(self._env, "command_manager"):
+            return None
+        command = self._env.command_manager.get_command(command_name)
+        robot = self._env.scene["robot"]
+        root_lin_vel_b = robot.data.root_lin_vel_b
+        root_ang_vel_b = robot.data.root_ang_vel_b
+        if hasattr(root_lin_vel_b, "torch"):
+            root_lin_vel_b = root_lin_vel_b.torch
+        if hasattr(root_ang_vel_b, "torch"):
+            root_ang_vel_b = root_ang_vel_b.torch
+        current = torch.cat((root_lin_vel_b[:, :2], root_ang_vel_b[:, 2:3]), dim=1)
+        return command[env_ids].detach(), current[env_ids].detach()
+
+    def _resample_motion_ids(
+        self,
+        env_ids: Sequence[int],
+        context: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ):
+        if context is None:
+            self.motion_ids[env_ids] = self.motion_data_term.sample_motions(len(env_ids))
+        else:
+            commands, current = context
+            sampled_ids, sampled_times = self.motion_data_term.sample_motion_segments(
+                len(env_ids), commands=commands, current_velocity=current,
+                min_time_offset=self.sample_min_time_offset,
+                max_time_offset=self.sample_max_time_offset,
+            )
+            self.motion_ids[env_ids] = sampled_ids
+        self.motion_durations[env_ids] = self.motion_data_term.get_motion_durations(self.motion_ids[env_ids])
+
+        truncate_time = self.num_steps * self._env.step_dt
+        if context is not None:
+            self.motion_fetch_time[env_ids, 0] = sampled_times
+        elif self.cfg.random_initialize:
+            if self.cfg.num_steps_to_use > 0:
+                self.motion_fetch_time[env_ids, 0] = self.motion_data_term.sample_times(
+                    self.motion_ids[env_ids], truncate_time_end=truncate_time
+                )
+            else:
+                self.motion_fetch_time[env_ids, 0] = self.motion_data_term.sample_times(
+                    self.motion_ids[env_ids], truncate_time_start=truncate_time
+                )
+        else:
+            self.motion_fetch_time[env_ids, 0] = 0.0
+        if self.num_steps > 1:
+            self.motion_fetch_time[env_ids, 1:] = (
+                self.motion_fetch_time[env_ids, 0:1]
+                + self.step_indices[1:].float() * self._env.step_dt
+            )
+        self._fetch_motion_data(env_ids)
+
     def reset(self, env_ids: Sequence[int] | None = None):
         if env_ids is None:
             return
-        
-        # resample motion ids for the reset envs
-        self.motion_ids[env_ids] = self.motion_data_term.sample_motions(len(env_ids))
-        self.motion_durations[env_ids] = self.motion_data_term.get_motion_durations(self.motion_ids[env_ids])
-        
-        truncate_time = self.num_steps * self._env.step_dt
-        if self.cfg.random_initialize:
-            # random start time
-            if self.cfg.num_steps_to_use > 0:
-                self.motion_fetch_time[env_ids, 0] = self.motion_data_term.sample_times(self.motion_ids[env_ids], truncate_time_end=truncate_time)
-            else:
-                self.motion_fetch_time[env_ids, 0] = self.motion_data_term.sample_times(self.motion_ids[env_ids], truncate_time_start=truncate_time)
-        else:
-            # start from beginning
-            self.motion_fetch_time[env_ids, 0] = 0.0
-        if self.num_steps > 1:
-            self.motion_fetch_time[env_ids, 1:] = self.motion_fetch_time[env_ids, 0:1] + self.step_indices[1:].float() * self._env.step_dt
 
-        self._fetch_motion_data(env_ids)
+        context = self._sampling_context(env_ids)
+        self._resample_motion_ids(env_ids, context=context)
 
     def update(self, dt: float):
-        if self.cfg.random_fetch:
-            if self.cfg.num_steps_to_use > 0:
-                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(self.motion_ids, truncate_time_end=self.num_steps * dt)
-            else: 
-                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(self.motion_ids, truncate_time_start=self.num_steps * dt)
+        command_match_resampled = False
+        if self.motion_data_term.cfg.sampling_mode == "command_match":
+            env_ids = torch.arange(self.num_envs, device=self._env.device)
+            context = self._sampling_context(env_ids)
+            if context is not None:
+                commands, current = context
+                # The body velocity changes every control step, so the full
+                # clip/segment distribution must be recomputed every step.
+                sampled_ids, sampled_times = self.motion_data_term.sample_motion_segments(
+                    self.num_envs, commands=commands, current_velocity=current,
+                    min_time_offset=self.sample_min_time_offset,
+                    max_time_offset=self.sample_max_time_offset,
+                )
+                self.motion_ids[:] = sampled_ids
+                self.motion_durations[:] = self.motion_data_term.get_motion_durations(sampled_ids)
+                self.motion_fetch_time[:, 0] = sampled_times
+                if self.num_steps > 1:
+                    self.motion_fetch_time[:, 1:] = (
+                        self.motion_fetch_time[:, 0:1]
+                        + self.step_indices[1:].float() * dt
+                    )
+                command_match_resampled = True
+
+        if self.cfg.random_fetch and not command_match_resampled:
+            context = self._sampling_context(torch.arange(self.num_envs, device=self._env.device))
+            if context is not None:
+                commands, current = context
+                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_segment_times(
+                    self.motion_ids, commands=commands, current_velocity=current,
+                    min_time_offset=self.sample_min_time_offset,
+                    max_time_offset=self.sample_max_time_offset,
+                )
+            elif self.cfg.num_steps_to_use > 0:
+                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
+                    self.motion_ids, truncate_time_end=self.num_steps * dt
+                )
+            else:
+                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
+                    self.motion_ids, truncate_time_start=self.num_steps * dt
+                )
             
             if self.num_steps > 1:
                 self.motion_fetch_time[:, 1:] = self.motion_fetch_time[:, 0:1] + self.step_indices[1:].float() * dt
@@ -140,7 +216,7 @@ class AnimationTerm(ManagerTermBase):
         self._fetch_motion_data()
         
         # Advance time
-        if not self.cfg.random_fetch:
+        if not self.cfg.random_fetch and not command_match_resampled:
             self.motion_fetch_time += dt # only effective when random_fetch is False
             
         if self.cfg.enable_visualization:

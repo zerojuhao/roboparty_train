@@ -48,7 +48,8 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 from robolab.utils.math import vel_forward_diff, ang_vel_from_quat_diff, quat_slerp, linear_interpolate, calc_frame_blend
-from robolab.utils.motion_npz import load_motion
+from robolab.utils.motion_npz import load_motion, name_indices, resolve_name_patterns
+from robolab.utils.tensors import as_torch_tensor
 
 
 class LoopMode(enum.Enum):
@@ -84,6 +85,8 @@ class MotionDataTerm(ManagerTermBase):
         self.motion_num_frames = []
         self.motion_weights = []
         self.motion_loop_modes = []
+        self.motion_segment_features = []
+        self.motion_segment_times = []
         
         self.root_pos_w = []
         self.root_quat = []
@@ -103,12 +106,21 @@ class MotionDataTerm(ManagerTermBase):
             # load the motion data file
             motion_path = os.path.join(self.cfg.motion_data_dir, motion_file)
             print(f"[Motion Data Manager] Loading motion data from {motion_path}...")
-            motion_raw_data = load_motion(
-                motion_path, joint_names=self.joint_names, key_body_names=self.cfg.key_body_names
-            )
+            # Do not request key bodies from ``load_motion`` here.  Older AMP
+            # files contain only six cached key bodies, while RP1 now requests
+            # every non-root link and computes missing positions from FK below.
+            motion_raw_data = load_motion(motion_path, joint_names=self.joint_names)
+            requested_key_body_names = self.cfg.key_body_names
+            if requested_key_body_names is None:
+                requested_key_body_names = motion_raw_data["key_body_names"].tolist()
+            else:
+                requested_key_body_names = resolve_name_patterns(
+                    self._env.scene["robot"].body_names, requested_key_body_names
+                )
+            requested_key_body_names = list(requested_key_body_names)
             if not self.key_body_pos_w:
-                self.key_body_names = motion_raw_data["key_body_names"].tolist()
-            elif self.key_body_names != motion_raw_data["key_body_names"].tolist():
+                self.key_body_names = requested_key_body_names
+            elif self.key_body_names != requested_key_body_names:
                 raise ValueError(f"Inconsistent key-body order in {motion_file}.")
             
             # Some info about the motion
@@ -143,6 +155,32 @@ class MotionDataTerm(ManagerTermBase):
             # root angular velocity in world frame, shape (num_frames, 3)
             root_ang_vel_w = ang_vel_from_quat_diff(root_quat, dt, in_frame="world")
             root_ang_vel_w.requires_grad_(False)
+
+            root_vel_b = math_utils.quat_apply_inverse(root_quat, root_vel_w)
+            root_ang_vel_b = math_utils.quat_apply_inverse(root_quat, root_ang_vel_w)
+            if self.cfg.sampling_mode == "command_match":
+                segment_frames = max(
+                    2, int(round(self.cfg.command_match_segment_duration / dt)) + 1
+                )
+                # Adjacent segments share one endpoint, so a 0.5 s segment
+                # at 50 Hz starts every 25 frames while spanning 26 samples.
+                segment_stride = segment_frames - 1
+                if num_frames >= segment_frames:
+                    vx_segments = root_vel_b[:, 0].unfold(0, segment_frames, segment_stride)
+                    yaw_segments = root_ang_vel_b[:, 2].unfold(0, segment_frames, segment_stride)
+                    features = torch.stack(
+                        (vx_segments.mean(dim=1), yaw_segments.mean(dim=1)), dim=1
+                    )
+                    times = torch.arange(
+                        features.shape[0], device=self.device, dtype=torch.float32
+                    ) * (segment_stride * dt)
+                else:
+                    features = torch.stack(
+                        (root_vel_b[:, 0].mean(), root_ang_vel_b[:, 2].mean())
+                    ).reshape(1, 2)
+                    times = torch.zeros(1, device=self.device, dtype=torch.float32)
+                self.motion_segment_features.append(features)
+                self.motion_segment_times.append(times)
             
             # dof position, shape (num_frames, num_dofs)
             dof_pos = torch.from_numpy(motion_raw_data["joint_pos"]).to(self.device).float()
@@ -152,9 +190,13 @@ class MotionDataTerm(ManagerTermBase):
             dof_vel = vel_forward_diff(dof_pos, dt)
             dof_vel.requires_grad_(False)
             
-            # key body position in world frame, shape (num_frames, num_key_bodies, 3)
-            key_body_pos_w = torch.from_numpy(motion_raw_data["key_body_pos_w"]).to(self.device).float()
-            key_body_pos_w.requires_grad_(False)
+            # Key-body positions are read from the file when available.  RP1's
+            # all-link configuration falls back to batched Newton FK, so no
+            # second dataset-conversion pass is needed when the cached file only
+            # contains the historical six key bodies.
+            key_body_pos_w = self._load_or_compute_key_body_pos_w(
+                motion_raw_data, requested_key_body_names, motion_file
+            )
             
             self.root_pos_w.append(root_pos_w)
             self.root_quat.append(root_quat)
@@ -169,9 +211,53 @@ class MotionDataTerm(ManagerTermBase):
         self.motion_durations = torch.tensor(self.motion_durations, dtype=torch.float32, device=self.device)
         self.motion_num_frames = torch.tensor(self.motion_num_frames, dtype=torch.int32, device=self.device)
         self.motion_loop_modes = torch.tensor(self.motion_loop_modes, dtype=torch.int32, device=self.device)
+        if self.cfg.sampling_mode == "command_match":
+            self.motion_segment_counts = torch.tensor(
+                [features.shape[0] for features in self.motion_segment_features],
+                dtype=torch.long, device=self.device,
+            )
+            max_segments = int(self.motion_segment_counts.max().item())
+            self.motion_segment_features_padded = torch.zeros(
+                len(self.motion_segment_features), max_segments, 2,
+                device=self.device, dtype=torch.float32,
+            )
+            self.motion_segment_times_padded = torch.zeros(
+                len(self.motion_segment_times), max_segments,
+                device=self.device, dtype=torch.float32,
+            )
+            for motion_id, (features, times) in enumerate(
+                zip(self.motion_segment_features, self.motion_segment_times)
+            ):
+                count = features.shape[0]
+                self.motion_segment_features_padded[motion_id, :count] = features
+                self.motion_segment_times_padded[motion_id, :count] = times
+            self.motion_segment_valid = (
+                torch.arange(max_segments, device=self.device)[None, :]
+                < self.motion_segment_counts[:, None]
+            )
+            del self.motion_segment_features
+            del self.motion_segment_times
         # Get the normalized motion weights
         self.motion_weights = torch.tensor(self.motion_weights, dtype=torch.float32, device=self.device)
         self.motion_weights = self.motion_weights / torch.sum(self.motion_weights)
+
+        if self.cfg.sampling_mode not in ("static", "command_match"):
+            raise ValueError(f"Unsupported motion sampling_mode: {self.cfg.sampling_mode}")
+        if self.cfg.sampling_mode == "command_match":
+            if not self.cfg.command_name:
+                raise ValueError("command_match sampling requires command_name")
+            if self.cfg.command_match_temperature <= 0.0:
+                raise ValueError("command_match_temperature must be positive")
+            if not 0.0 <= self.cfg.command_match_min_probability <= 1.0:
+                raise ValueError("command_match_min_probability must be in [0, 1]")
+            if self.cfg.command_match_velocity_scale <= 0.0 or self.cfg.command_match_yaw_scale <= 0.0:
+                raise ValueError("command matching scales must be positive")
+            if self.cfg.command_match_segment_duration <= 0.0:
+                raise ValueError("command_match_segment_duration must be positive")
+            if self.cfg.command_match_current_weight < 0.0 or self.cfg.command_match_target_weight < 0.0:
+                raise ValueError("command match weights must be non-negative")
+            if self.cfg.command_match_current_weight + self.cfg.command_match_target_weight <= 0.0:
+                raise ValueError("command match weights cannot both be zero")
         
         # Some other information
         self.num_dofs = self.dof_pos[0].shape[1]
@@ -226,8 +312,261 @@ class MotionDataTerm(ManagerTermBase):
             int: The loop mode of the motion.
         """
         return self.motion_loop_modes[motion_ids]
-        
-    def sample_motions(self, n: int) -> torch.Tensor:
+
+    def _load_or_compute_key_body_pos_w(
+        self,
+        motion_raw_data: dict,
+        requested_names: list[str],
+        motion_file: str,
+    ) -> torch.Tensor:
+        """Return requested link positions, using startup Newton FK when needed.
+
+        The original RP1 AMP files cache only six key bodies. Keeping that
+        format is useful for compatibility, but it cannot satisfy the current
+        all-link discriminator configuration. In that case the motion's root
+        pose and joint positions are replayed into a batched Newton articulation
+        and the resulting link poses are copied into the motion buffer.
+        """
+        raw_key_names = motion_raw_data.get("key_body_names")
+        raw_key_names = raw_key_names.tolist() if raw_key_names is not None else []
+        if "key_body_pos_w" in motion_raw_data and set(requested_names).issubset(raw_key_names):
+            indices = name_indices(raw_key_names, requested_names)
+            key_body_pos_w = torch.from_numpy(
+                motion_raw_data["key_body_pos_w"][:, indices]
+            ).to(self.device).float()
+            key_body_pos_w.requires_grad_(False)
+            return key_body_pos_w
+
+        raw_body_names = motion_raw_data.get("body_names")
+        raw_body_names = raw_body_names.tolist() if raw_body_names is not None else []
+        if "body_pos_w" in motion_raw_data and set(requested_names).issubset(raw_body_names):
+            indices = name_indices(raw_body_names, requested_names)
+            key_body_pos_w = torch.from_numpy(
+                motion_raw_data["body_pos_w"][:, indices]
+            ).to(self.device).float()
+            key_body_pos_w.requires_grad_(False)
+            return key_body_pos_w
+
+        print(
+            f"[Motion Data Manager] {motion_file}: computing "
+            f"{len(requested_names)} key-body positions with Newton FK"
+        )
+        return self._compute_key_body_pos_w_with_newton(
+            motion_raw_data, requested_names, motion_file
+        )
+
+    def _compute_key_body_pos_w_with_newton(
+        self,
+        motion_raw_data: dict,
+        requested_names: list[str],
+        motion_file: str,
+    ) -> torch.Tensor:
+        """Compute link positions from a motion using the live Newton model.
+
+        This runs at manager initialization, before rollout or learning starts.
+        It uses the same articulation model and body-frame conventions as the
+        policy observations, avoiding a second URDF FK implementation that could
+        disagree with Newton at fixed-link offsets.
+        """
+        robot = self._env.scene["robot"]
+        backend_name = getattr(robot.data, "__backend_name__", None)
+        if backend_name != "newton":
+            raise RuntimeError(
+                f"{motion_file}: all-link AMP features require the Newton backend; "
+                f"got {backend_name!r}."
+            )
+
+        body_names = list(robot.body_names)
+        if not body_names or body_names[0] != "base_link":
+            raise RuntimeError(
+                f"{motion_file}: RP1 FK requires body index 0 to be base_link, got {body_names[:3]}"
+            )
+        try:
+            body_indices = name_indices(body_names, requested_names)
+        except ValueError as exc:
+            raise ValueError(
+                f"{motion_file}: requested RP1 key bodies are not present in the Newton articulation"
+            ) from exc
+
+        root_pos = torch.from_numpy(motion_raw_data["root_pos_w"]).to(self.device).float()
+        root_quat = torch.from_numpy(motion_raw_data["root_quat_w"]).to(self.device).float()
+        joint_pos = torch.from_numpy(motion_raw_data["joint_pos"]).to(self.device).float()
+        num_frames = int(root_pos.shape[0])
+        num_envs = int(self._env.num_envs)
+        if num_envs < 1:
+            raise RuntimeError("Cannot compute motion FK without at least one environment")
+
+        env_origins = as_torch_tensor(self._env.scene.env_origins).to(
+            device=self.device, dtype=torch.float32
+        )[:, :3]
+        if env_origins.shape[0] < min(num_envs, num_frames):
+            raise RuntimeError("Scene environment origins do not cover the FK batch")
+
+        # Save the live training scene because FK is evaluated by temporarily
+        # writing the motion poses into the first batch of environments.
+        saved_root_state = as_torch_tensor(robot.data.root_link_state_w).clone()
+        saved_joint_pos = as_torch_tensor(robot.data.joint_pos).clone()
+        saved_joint_vel = as_torch_tensor(robot.data.joint_vel).clone()
+        key_body_pos_w = torch.empty(
+            (num_frames, len(requested_names), 3), device=self.device, dtype=torch.float32
+        )
+
+        try:
+            with torch.no_grad():
+                batch_size = min(num_envs, num_frames)
+                for start in range(0, num_frames, batch_size):
+                    end = min(start + batch_size, num_frames)
+                    env_ids = torch.arange(end - start, device=self.device, dtype=torch.long)
+                    origins = env_origins[env_ids]
+                    root_pose = torch.cat(
+                        (root_pos[start:end] + origins, root_quat[start:end]), dim=-1
+                    )
+                    robot.write_root_pose_to_sim_index(root_pose=root_pose, env_ids=env_ids)
+                    robot.write_joint_position_to_sim_index(
+                        position=joint_pos[start:end], env_ids=env_ids
+                    )
+
+                    # Newton refreshes FK on this read after the manual pose
+                    # writes; no physics step or dataset write is required.
+                    body_pos = as_torch_tensor(robot.data.body_pos_w)
+                    key_body_pos_w[start:end] = (
+                        body_pos[env_ids][:, body_indices, :] - origins.unsqueeze(1)
+                    )
+        finally:
+            with torch.no_grad():
+                restore_env_ids = torch.arange(
+                    saved_root_state.shape[0], device=self.device, dtype=torch.long
+                )
+                robot.write_root_link_pose_to_sim_index(
+                    root_pose=saved_root_state[:, :7], env_ids=restore_env_ids
+                )
+                robot.write_root_link_velocity_to_sim_index(
+                    root_velocity=saved_root_state[:, 7:], env_ids=restore_env_ids
+                )
+                robot.write_joint_state_to_sim_index(
+                    position=saved_joint_pos,
+                    velocity=saved_joint_vel,
+                    env_ids=restore_env_ids,
+                )
+                # Ensure subsequent observations see the restored articulation.
+                _ = as_torch_tensor(robot.data.body_pos_w)
+
+        key_body_pos_w.requires_grad_(False)
+        return key_body_pos_w
+
+    def _matching_target(
+        self, commands: torch.Tensor, current_velocity: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        target = torch.stack((commands[:, 0], commands[:, 2]), dim=1)
+        if current_velocity is None:
+            return target
+        current = torch.stack((current_velocity[:, 0], current_velocity[:, 2]), dim=1)
+        current_weight = self.cfg.command_match_current_weight
+        target_weight = self.cfg.command_match_target_weight
+        return (current_weight * current + target_weight * target) / (current_weight + target_weight)
+
+    def motion_segment_probabilities(
+        self,
+        commands: torch.Tensor,
+        current_velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return the normalized joint clip/segment distribution used in training."""
+        commands = commands.to(device=self.device, dtype=torch.float32)
+        if commands.ndim != 2 or commands.shape[1] < 3:
+            raise ValueError(f"Expected commands with shape (N, >=3), got {tuple(commands.shape)}")
+        n = commands.shape[0]
+        if current_velocity is not None:
+            current_velocity = current_velocity.to(device=self.device, dtype=torch.float32)
+            if current_velocity.shape != commands.shape:
+                raise ValueError("Current velocity must have the same shape as commands")
+        target = self._matching_target(commands, current_velocity)
+        scale = torch.tensor(
+            [self.cfg.command_match_velocity_scale, self.cfg.command_match_yaw_scale],
+            device=self.device, dtype=torch.float32,
+        )
+        features = self.motion_segment_features_padded
+        distance = torch.abs(target[:, None, None, :] - features[None, :, :, :])
+        distance = (distance / scale).sum(dim=-1)
+        valid = self.motion_segment_valid[None, :, :]
+        per_segment_prior = self.motion_weights[:, None] / self.motion_segment_counts.float()[:, None]
+        # Log-space normalization keeps the exploration floor at its configured
+        # mass even when a target is far from every demonstration segment.
+        logits = -distance / self.cfg.command_match_temperature + per_segment_prior.log()[None, :, :]
+        logits = logits.masked_fill(~valid, -torch.inf)
+        probabilities = torch.softmax(logits.reshape(n, -1), dim=1)
+        prior = per_segment_prior.expand(n, -1, -1)
+        prior = torch.where(valid, prior, torch.zeros_like(prior)).reshape(n, -1)
+        probabilities = probabilities / probabilities.sum(dim=1, keepdim=True).clamp_min(1.0e-8)
+        floor = self.cfg.command_match_min_probability
+        if floor > 0.0:
+            probabilities = (1.0 - floor) * probabilities + floor * prior
+        return probabilities.reshape(n, *features.shape[:2])
+
+    def _sample_time_in_segment(
+        self, motion_ids, segment_ids, min_time_offset=0.0, max_time_offset=0.0
+    ):
+        """Uniformly sample an anchor whose entire reference sequence stays inside its segment."""
+        if not min_time_offset <= 0.0 <= max_time_offset:
+            raise ValueError("Time offsets must bracket the anchor at zero")
+        starts = self.motion_segment_times_padded[motion_ids, segment_ids]
+        dt = self.motion_dt[motion_ids]
+        spans = torch.round(self.cfg.command_match_segment_duration / dt).clamp_min(1) * dt
+        ends = torch.minimum(starts + spans, self.motion_durations[motion_ids])
+        lower = starts - min_time_offset
+        upper = ends - max_time_offset
+        if torch.any(upper < lower - 1.0e-6):
+            raise ValueError("Motion segment is too short for the requested reference sequence")
+        return lower + torch.rand_like(starts) * (upper - lower).clamp_min(0.0)
+
+    def sample_motion_segments(
+        self, n: int, commands: torch.Tensor, current_velocity: torch.Tensor | None = None,
+        *, min_time_offset: float = 0.0, max_time_offset: float = 0.0,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select a segment by average speed, then a random sequence anchor within it."""
+        if commands.shape[0] != n:
+            raise ValueError("Command batch size must equal n")
+        probabilities = self.motion_segment_probabilities(commands, current_velocity)
+        sampled = torch.multinomial(probabilities.flatten(1), num_samples=1, replacement=True).squeeze(1)
+        max_segments = probabilities.shape[2]
+        motion_ids = torch.div(sampled, max_segments, rounding_mode="floor")
+        segment_ids = sampled.remainder(max_segments)
+        times = self._sample_time_in_segment(
+            motion_ids, segment_ids, min_time_offset, max_time_offset
+        )
+        return motion_ids, times
+
+    def sample_segment_times(
+        self,
+        motion_ids: torch.Tensor,
+        commands: torch.Tensor,
+        current_velocity: torch.Tensor | None = None,
+        *, min_time_offset: float = 0.0, max_time_offset: float = 0.0,
+    ) -> torch.Tensor:
+        """Sample a sequence anchor in a command-matched segment within selected clips."""
+        commands = commands.to(device=self.device, dtype=torch.float32)
+        if current_velocity is not None:
+            current_velocity = current_velocity.to(device=self.device, dtype=torch.float32)
+        target = self._matching_target(commands, current_velocity)
+        scale = torch.tensor(
+            [self.cfg.command_match_velocity_scale, self.cfg.command_match_yaw_scale],
+            device=self.device, dtype=torch.float32,
+        )
+        features = self.motion_segment_features_padded[motion_ids]
+        valid = self.motion_segment_valid[motion_ids]
+        distance = torch.abs(target[:, None, :] - features)
+        distance = (distance / scale).sum(dim=-1)
+        logits = (-distance / self.cfg.command_match_temperature).masked_fill(~valid, -torch.inf)
+        probabilities = torch.softmax(logits, dim=1)
+        floor = self.cfg.command_match_min_probability
+        if floor > 0.0:
+            prior = valid.float() / self.motion_segment_counts[motion_ids, None].float()
+            probabilities = (1.0 - floor) * probabilities + floor * prior
+        segment_ids = torch.multinomial(probabilities, num_samples=1, replacement=True).squeeze(1)
+        return self._sample_time_in_segment(
+            motion_ids, segment_ids, min_time_offset, max_time_offset
+        )
+
+    def sample_motions(self, n: int, commands: torch.Tensor | None = None) -> torch.Tensor:
         """Sample a batch of motion IDs.
 
         Args:
@@ -236,8 +575,9 @@ class MotionDataTerm(ManagerTermBase):
         Returns:
             torch.Tensor: A tensor of sampled motion IDs, shape (n,).
         """
-        motion_ids = torch.multinomial(self.motion_weights, num_samples=n, replacement=True)
-        return motion_ids
+        if self.cfg.sampling_mode == "static" or commands is None:
+            return torch.multinomial(self.motion_weights, num_samples=n, replacement=True)
+        return self.sample_motion_segments(n, commands)[0]
         
     def sample_times(self, motion_ids: torch.Tensor, truncate_time_start: float = None, truncate_time_end: float = None):
         """Sample time within the duration of the given motions.

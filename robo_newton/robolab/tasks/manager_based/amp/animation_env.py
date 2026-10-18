@@ -147,10 +147,18 @@ class AnimationEnv(ManagerBasedRLEnv):
 
 
     def _reset_idx(self, env_ids: Sequence[int]):
-        # -- animation manager
-        info = self.animation_manager.reset(env_ids)
-        
-        super()._reset_idx(env_ids)
+        # Command-matched motion sampling needs the freshly resampled command.
+        # Static datasets retain the historical animation-before-base ordering.
+        command_aware = any(
+            term.motion_data_term.cfg.sampling_mode == "command_match"
+            for term in self.animation_manager._terms.values()
+        )
+        if command_aware:
+            super()._reset_idx(env_ids)
+            self.animation_manager.reset(env_ids)
+        else:
+            self.animation_manager.reset(env_ids)
+            super()._reset_idx(env_ids)
         
 
 

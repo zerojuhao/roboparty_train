@@ -487,6 +487,10 @@ def main() -> None:
     command_group.add_argument("--max-speed", type=float)
     command_group.add_argument("--yaw-rate", type=float)
     command_group.add_argument("--forward-speed", type=float)
+    command_group.add_argument(
+        "--sequence", type=str,
+        help='JSON list of command segments, e.g. [{"kind":"vx","value":0.7,"duration":4}]',
+    )
     parser.add_argument("--fps", type=int, choices=(25, 50), default=50)
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
@@ -495,18 +499,33 @@ def main() -> None:
                         help="Override saved initial root height; use 0.78 to reproduce older recordings.")
     parser.add_argument("--threads", type=int, default=2)
     args = parser.parse_args()
+    sequence = None
+    if args.sequence is not None:
+        try:
+            sequence = json.loads(args.sequence)
+        except json.JSONDecodeError as exc:
+            parser.error(f"invalid --sequence JSON: {exc}")
+        if not isinstance(sequence, list) or not sequence:
+            parser.error("--sequence must be a non-empty JSON list")
+        for segment in sequence:
+            if (not isinstance(segment, dict) or segment.get("kind") not in {"vx", "yaw"}
+                    or not np.isfinite(float(segment.get("value")))
+                    or not np.isfinite(float(segment.get("duration")))
+                    or float(segment["duration"]) <= 0):
+                parser.error("each sequence segment needs kind=vx|yaw, finite value, and positive duration")
+        args.duration = float(sum(float(segment["duration"]) for segment in sequence))
     max_speed = args.max_speed
-    if args.yaw_rate is None and args.forward_speed is None and max_speed is None:
+    if sequence is None and args.yaw_rate is None and args.forward_speed is None and max_speed is None:
         max_speed = 3.6
     if args.duration <= 0 or (max_speed is not None and max_speed < 0) or args.camera_distance <= 0:
         parser.error("duration and camera distance must be positive; max speed must be nonnegative")
-    if args.ramp_seconds is not None:
+    if sequence is None and args.ramp_seconds is not None:
         if max_speed is None:
             parser.error("--ramp-seconds applies only to a speed ramp")
         available_ramp_time = args.duration - min(0.5, args.duration * 0.05)
         if not np.isfinite(args.ramp_seconds) or not 0 < args.ramp_seconds < available_ramp_time:
             parser.error("ramp seconds must be positive and leave time to hold the maximum speed")
-    if args.deceleration_seconds is not None:
+    if sequence is None and args.deceleration_seconds is not None:
         if args.ramp_seconds is None or max_speed is None:
             parser.error("braking requires a speed ramp with --ramp-seconds")
         if not np.isfinite(args.deceleration_seconds) or args.deceleration_seconds <= 0:
@@ -517,29 +536,35 @@ def main() -> None:
         cruise_end = args.duration - args.standing_seconds - args.deceleration_seconds
         if cruise_end <= cruise_start:
             parser.error("duration must leave time to cruise between acceleration and braking")
-    elif args.standing_seconds != 0:
+    elif sequence is None and args.standing_seconds != 0:
         parser.error("--standing-seconds requires --deceleration-seconds")
-    if args.abrupt_stop_at is not None:
+    if sequence is None and args.abrupt_stop_at is not None:
         if max_speed is None or not np.isfinite(args.abrupt_stop_at) or not 0 < args.abrupt_stop_at < args.duration:
             parser.error("abrupt stop time must be finite, positive, and inside the clip")
         if args.deceleration_seconds is not None:
             parser.error("--abrupt-stop-at cannot be combined with --deceleration-seconds")
-    if args.abrupt_start_at is not None:
+    if sequence is None and args.abrupt_start_at is not None:
         if (max_speed is None or args.abrupt_stop_at is None
                 or not np.isfinite(args.abrupt_start_at)
                 or not 0 <= args.abrupt_start_at < args.abrupt_stop_at):
             parser.error("abrupt start requires --max-speed and a later --abrupt-stop-at")
         if args.ramp_seconds is not None or args.deceleration_seconds is not None:
             parser.error("abrupt start cannot be combined with acceleration or braking ramps")
-    if args.yaw_rate is not None and not np.isfinite(args.yaw_rate):
+    if sequence is None and args.yaw_rate is not None and not np.isfinite(args.yaw_rate):
         parser.error("yaw rate must be finite")
-    if args.forward_speed is not None and not np.isfinite(args.forward_speed):
+    if sequence is None and args.forward_speed is not None and not np.isfinite(args.forward_speed):
         parser.error("forward speed must be finite")
     if args.width % 2 or args.height % 2:
         parser.error("video width and height must be even")
 
     checkpoint = args.checkpoint.resolve()
-    if args.yaw_rate is not None:
+    if sequence is not None:
+        recording_suffix = "sequence"
+        command_description = ", ".join(
+            f"{segment['kind']} {float(segment['value']):g} for {float(segment['duration']):g}s"
+            for segment in sequence
+        )
+    elif args.yaw_rate is not None:
         recording_suffix = f"yaw_{args.yaw_rate:g}"
         command_description = f"fixed yaw rate {args.yaw_rate:g} rad/s"
     elif args.forward_speed is not None:
@@ -590,7 +615,21 @@ def main() -> None:
         encoder = subprocess.Popen(command, stdin=subprocess.PIPE)
         for step in range(policy_steps):
             seconds = step / 50.0
-            if args.yaw_rate is not None:
+            if sequence is not None:
+                elapsed = 0.0
+                active = sequence[-1]
+                for segment in sequence:
+                    if seconds < elapsed + float(segment["duration"]):
+                        active = segment
+                        break
+                    elapsed += float(segment["duration"])
+                value = float(active["value"])
+                command_value = value
+                if active["kind"] == "yaw":
+                    policy_command = np.array([0.0, 0.0, value], dtype=np.float32)
+                else:
+                    policy_command = np.array([value, 0.0, 0.0], dtype=np.float32)
+            elif args.yaw_rate is not None:
                 command_value = args.yaw_rate
                 policy_command = np.array([0.0, 0.0, command_value], dtype=np.float32)
             else:
@@ -621,7 +660,13 @@ def main() -> None:
             root_height = float(environment.data.qpos[2])
             if fallen_at is None and root_height < 0.45:
                 fallen_at = seconds
-            if args.yaw_rate is not None:
+            if sequence is not None:
+                measured_value = actual_vx if active["kind"] == "vx" else actual_yaw
+                auxiliary_value = float(estimated_velocity[0])
+                command_text = f"{active['kind']} command {command_value:+4.2f}"
+                measured_text = f"actual vx {actual_vx:+4.2f} yaw {actual_yaw:+4.2f}"
+                auxiliary_text = f"lateral offset {state['root_position_w'][1]:+5.3f} m"
+            elif args.yaw_rate is not None:
                 measured_value = actual_yaw
                 auxiliary_value = linear_drift
                 command_text = f"command yaw {command_value:+4.2f} rad/s"
