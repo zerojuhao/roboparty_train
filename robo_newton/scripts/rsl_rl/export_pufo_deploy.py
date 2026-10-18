@@ -79,6 +79,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None, help="Checkpoint path or file name in the run (default: latest model_N.pt).")
     parser.add_argument("--motion", default="dance1_subject2", help="Motion clip exported as the context.")
     parser.add_argument("--start_frame", type=int, default=50, help="First motion frame of the context.")
+    parser.add_argument("--manifest", type=Path, default=None, help="Override the motion manifest saved in env.yaml.")
     args = parser.parse_args()
     torch.set_num_threads(4)
 
@@ -131,8 +132,9 @@ def main() -> None:
     motion_cfg = env["commands"]["motion"]
     dt = float(env["sim"]["dt"]) * int(env["decimation"])
     # One unwindowed clip, so the context spans the whole motion as on the robot.
+    manifest = args.manifest or Path(motion_cfg["manifest_path"])
     motion_lib = MotionLibNPZ({
-        "motion_file": motion_cfg["manifest_path"], "step_dt": motion_cfg["step_dt"],
+        "motion_file": str(manifest), "step_dt": motion_cfg["step_dt"],
         "clip_seconds": 0.0, "min_clip_seconds": motion_cfg["min_clip_seconds"], "motion_names": [args.motion],
     }, num_envs=1, device="cpu")
     policy_terms = env["observations"]["policy"]
