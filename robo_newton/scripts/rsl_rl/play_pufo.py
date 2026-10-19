@@ -78,7 +78,7 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import robolab.tasks  # noqa: F401
-from robolab.tasks.manager_based.ufo.expert_motion_loader import load_expert_trajectories_from_motion_lib
+from robolab.tasks.manager_based.ufo.mdp.expert_motion_loader import load_expert_trajectories_from_motion_lib
 from robolab.tasks.manager_based.ufo.mdp.pufo_observations import (
     heading_observation,
     velocity_observation,

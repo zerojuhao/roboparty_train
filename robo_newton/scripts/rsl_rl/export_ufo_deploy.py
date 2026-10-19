@@ -41,7 +41,7 @@ from rsl_rl.algorithms.fb_networks import (
     ResidualActor,
 )
 from rsl_rl.runners.fbcpr_runner import default_rsl_rl_log_root
-from robolab.tasks.manager_based.ufo.expert_motion_loader import (
+from robolab.tasks.manager_based.ufo.mdp.expert_motion_loader import (
     load_expert_trajectories_from_motion_lib,
 )
 from robolab.tasks.manager_based.ufo.mdp.pufo_observations import world_to_yaw
@@ -132,7 +132,8 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None, help="Checkpoint path or model_N.pt name.")
     parser.add_argument("--motion", default="dance1_subject2")
     parser.add_argument("--start_frame", type=int, default=50)
-    parser.add_argument("--manifest", type=Path, default=None, help="Override the motion manifest saved in env.yaml.")
+    parser.add_argument("--motion-dir", "--manifest", dest="motion_dir", type=Path, default=None,
+                        help="Override the motion directory saved in env.yaml (--manifest is a legacy alias).")
     args = parser.parse_args()
     torch.set_num_threads(4)
 
@@ -181,12 +182,12 @@ def main() -> None:
         module.eval().requires_grad_(False)
 
     motion_cfg = env_cfg["commands"]["motion"]
-    manifest = args.manifest or Path(motion_cfg["manifest_path"])
-    if not manifest.is_absolute():
-        manifest = (run / manifest).resolve()
+    motion_dir = args.motion_dir or Path(motion_cfg.get("motion_dir") or motion_cfg["manifest_path"])
+    if not motion_dir.is_absolute():
+        motion_dir = (run / motion_dir).resolve()
     motion_lib = MotionLibNPZ(
         {
-            "motion_file": str(manifest),
+            "motion_file": str(motion_dir),
             "step_dt": motion_cfg["step_dt"],
             "clip_seconds": 0.0,
             "min_clip_seconds": motion_cfg["min_clip_seconds"],

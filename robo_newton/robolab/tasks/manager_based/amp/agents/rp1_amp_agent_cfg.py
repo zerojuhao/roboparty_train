@@ -24,8 +24,6 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
         "critic": ["critic"],
         "discriminator": ["disc"],
         "discriminator_demonstration": ["disc_demo"],
-        "upper_discriminator": ["upper_disc"],
-        "upper_discriminator_demonstration": ["upper_disc_demo"],
     }
     actor = AMPModelCfg(
         hidden_dims=[512, 256, 128],
@@ -72,7 +70,7 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             disc_max_grad_norm=1.0,
             disc_num_updates=4,
             amp_discriminator=RslRlAmpCfg.AMPDiscriminatorCfg(
-                hidden_dims=[1024, 512],
+                hidden_dims=[256, 128],
                 activation="elu",
                 style_reward_scale=4.0,
                 task_style_lerp=0.7,
@@ -82,23 +80,9 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
                     "all_envs": True,
                     "policy_obs_set": "discriminator",
                     "demonstration_obs_set": "discriminator_demonstration",
-                    "amp_discriminator": {"hidden_dims": [1024, 512]},
-                },
-                "upper": {
-                    "all_envs": True,
-                    "policy_obs_set": "upper_discriminator",
-                    "demonstration_obs_set": "upper_discriminator_demonstration",
-                    "style_reward_weight": 3.0,
-                    "amp_discriminator": {"hidden_dims": [1024, 512]},
+                    "amp_discriminator": {"hidden_dims": [256, 128]},
                 },
             },
             loss_type="LSGAN",
         ),
     )
-
-
-@configclass
-class RP1AmpPathRunnerCfg(RP1AmpRunnerCfg):
-    """Runner for path rewards and privileged critic path feedback."""
-
-    experiment_name = "rp1_amp_path"

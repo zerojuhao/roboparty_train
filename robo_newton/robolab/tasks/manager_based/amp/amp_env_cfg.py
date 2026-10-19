@@ -182,7 +182,7 @@ class ObservationsCfg():
     @configclass
     class DiscriminatorCfg(ObsGroup):
         root_local_rot_tan_norm = ObsTerm(func=mdp.root_local_rot_tan_norm)
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        # base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
         joint_pos = ObsTerm(func=mdp.joint_pos)
         joint_vel = ObsTerm(func=mdp.joint_vel)
@@ -201,36 +201,9 @@ class ObservationsCfg():
     disc: DiscriminatorCfg = DiscriminatorCfg()
 
     @configclass
-    class UpperDiscriminatorCfg(ObsGroup):
-        """Policy observations used by the upper-body AMP discriminator."""
-
-        root_local_rot_tan_norm = ObsTerm(func=mdp.root_local_rot_tan_norm)
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
-        joint_pos = ObsTerm(func=mdp.joint_pos, params={"asset_cfg": MISSING})
-        joint_vel = ObsTerm(func=mdp.joint_vel, params={"asset_cfg": MISSING})
-        key_body_pos_b = ObsTerm(func=mdp.key_body_pos_b, params=MISSING)
-
-        def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = True
-            self.concatenate_dim = -1
-            self.history_length = 3
-            self.flatten_history_dim = False
-
-    upper_disc: UpperDiscriminatorCfg = UpperDiscriminatorCfg()
-            
-    @configclass
     class DiscriminatorDemoCfg(ObsGroup):
         ref_root_local_rot_tan_norm = ObsTerm(
             func=mdp.ref_root_local_rot_tan_norm,
-            params={
-                "animation": ANIMATION_TERM_NAME,
-                "flatten_steps_dim": False,
-            }
-        )
-        ref_root_lin_vel_b = ObsTerm(
-            func=mdp.ref_root_lin_vel_b,
             params={
                 "animation": ANIMATION_TERM_NAME,
                 "flatten_steps_dim": False,
@@ -272,41 +245,6 @@ class ObservationsCfg():
     
     disc_demo: DiscriminatorDemoCfg = DiscriminatorDemoCfg()
 
-    @configclass
-    class UpperDiscriminatorDemoCfg(ObsGroup):
-        """Reference observations used by the upper-body AMP discriminator."""
-
-        ref_root_local_rot_tan_norm = ObsTerm(
-            func=mdp.ref_root_local_rot_tan_norm,
-            params={"animation": ANIMATION_TERM_NAME, "flatten_steps_dim": False},
-        )
-        ref_root_lin_vel_b = ObsTerm(
-            func=mdp.ref_root_lin_vel_b,
-            params={"animation": ANIMATION_TERM_NAME, "flatten_steps_dim": False},
-        )
-        ref_root_ang_vel_b = ObsTerm(
-            func=mdp.ref_root_ang_vel_b,
-            params={"animation": ANIMATION_TERM_NAME, "flatten_steps_dim": False},
-        )
-        ref_joint_pos = ObsTerm(
-            func=mdp.ref_joint_pos,
-            params={"animation": ANIMATION_TERM_NAME, "flatten_steps_dim": False, "joint_indices": MISSING},
-        )
-        ref_joint_vel = ObsTerm(
-            func=mdp.ref_joint_vel,
-            params={"animation": ANIMATION_TERM_NAME, "flatten_steps_dim": False, "joint_indices": MISSING},
-        )
-        ref_key_body_pos_b = ObsTerm(
-            func=mdp.ref_key_body_pos_b,
-            params={"animation": ANIMATION_TERM_NAME, "flatten_steps_dim": False, "body_indices": MISSING},
-        )
-
-        def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = True
-            self.concatenate_dim = -1
-
-    upper_disc_demo: UpperDiscriminatorDemoCfg = UpperDiscriminatorDemoCfg()
         
 
 
@@ -428,12 +366,12 @@ class RewardsCfg:
     )
     # dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     feet_slide = RewTerm(
-        func=mdp.feet_slide,
+        func=mdp.feet_contact_slip,
         weight=-0.5,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
-            "contact_threshold": 1.0,
+            "asset_cfg": SceneEntityCfg("robot"),
+            "force_threshold_ratio": 0.05,
         },
     )
     feet_close_y_gauss = RewTerm(
@@ -493,7 +431,7 @@ class RewardsCfg:
         },
     )
     stand_still_joint_deviation = RewTerm(
-        func=mdp.stand_still_joint_deviation_l1, weight=-0.1,
+        func=mdp.stand_still_joint_deviation_l1, weight=-0.5,
         params={
             "command_name": "base_velocity",
             "command_threshold": 0.1, "yaw_command_threshold": 0.1,
@@ -522,7 +460,7 @@ class RewardsCfg:
     )
     # -- optional penalties
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-10.0)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
+    flat_orientation_l2 = None
     feet_air_time = RewTerm(
         func=mdp.feet_air_time_positive_biped, weight=1.0,
         params={
@@ -538,16 +476,15 @@ class RewardsCfg:
         func=mdp.turn_command_offset_l2, weight=-0.3,
         params={"command_name": "base_velocity"},
     )
-    # Optional path rewards are enabled by the path environment.
     lean_orientation_l2 = RewTerm(
-        func=mdp.lean_orientation_l2, weight=0.0,
+        func=mdp.lean_orientation_l2, weight=-6.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=["base_link", "waist_yaw_link"]),
             "forward_tolerance": math.radians(15.0), "backward_scale": 16.0,
         },
     )
     shoulder_roll_excess = RewTerm(
-        func=mdp.shoulder_roll_excess_l2, weight=0.0,
+        func=mdp.shoulder_roll_excess_l2, weight=-1.5,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot", joint_names=["left_shoulder_roll_joint", "right_shoulder_roll_joint"],
@@ -556,7 +493,7 @@ class RewardsCfg:
         },
     )
     high_speed_double_flight = RewTerm(
-        func=mdp.high_speed_double_flight, weight=0.0,
+        func=mdp.high_speed_double_flight, weight=4.0,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
             "command_name": "base_velocity", "speed_gate": 1.5, "max_flight_time": 0.30,

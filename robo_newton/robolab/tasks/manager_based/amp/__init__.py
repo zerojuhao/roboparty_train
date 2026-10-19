@@ -35,9 +35,6 @@ from . import agents
 for task_id, cfg_name, runner_name in (
     ("RP1-AMP", "RP1AmpEnvCfg", "RP1AmpRunnerCfg"),
     ("RP1-AMP-Play", "RP1AmpEnvCfg_PLAY", "RP1AmpRunnerCfg"),
-    ("RP1-AMP-Path", "RP1AmpPathEnvCfg", "RP1AmpPathRunnerCfg"),
-    ("RP1-AMP-Path-AnkleSlip", "RP1AmpPathAnkleSlipEnvCfg", "RP1AmpPathRunnerCfg"),
-    ("RP1-AMP-Path-Play", "RP1AmpPathEnvCfg_PLAY", "RP1AmpPathRunnerCfg"),
 ):
     gym.register(
         id=task_id,

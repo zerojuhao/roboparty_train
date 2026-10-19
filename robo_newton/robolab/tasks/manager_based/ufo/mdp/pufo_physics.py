@@ -6,7 +6,7 @@ from robolab.utils.guarded_mjwarp import GuardedMJWarpSolverCfg, NewtonGuardedMJ
 
 @configclass
 class PUFOMJWarpSolverCfg(GuardedMJWarpSolverCfg):
-    class_type: str = "robolab.tasks.manager_based.ufo.pufo_physics:NewtonPUFOMJWarpManager"
+    class_type: str = "robolab.tasks.manager_based.ufo.mdp.pufo_physics:NewtonPUFOMJWarpManager"
 
 
 # An alias keeps lifecycle state identical across both task entry points.

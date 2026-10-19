@@ -14,7 +14,7 @@ import warnings
 
 import numpy as np
 
-from .data_paths import motion_file
+from .data_paths import motion_data_dir
 
 FORMAT = "roboparty_motion_v1"
 FULL_BODY_FIELDS = ("body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w")
@@ -22,23 +22,42 @@ FULL_BODY_FIELDS = ("body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel
 ROBO_NEWTON_ROOT = Path(__file__).resolve().parents[1]
 
 
-def resolve_motion_manifest(path):
-    """Resolve known retired LAFAN entrances without redirecting custom datasets."""
-    manifest = Path(str(path)).expanduser()
-    if manifest.is_dir() or manifest.name == "rp1_lafan":
-        manifest = manifest / "manifest.json"
-    canonical = ROBO_NEWTON_ROOT / "data/motions/rp1_lafan/manifest.json"
-    if not canonical.is_file():
-        canonical = Path(motion_file("rp1_lafan", "manifest.json"))
-    old = [
-        ROBO_NEWTON_ROOT / "data/motions/rp1_lafan/manifest.json",
-        ROBO_NEWTON_ROOT.parent / "data/motions/rp1_lafan/manifest.json",
-        ROBO_NEWTON_ROOT.parent / "ufo_data/motions/rp1_lafan/manifest.json",
-    ]
-    if manifest.resolve() in {entry.resolve() for entry in old} and canonical.is_file():
-        warnings.warn(f"Retired LAFAN path {manifest}; using {canonical}", stacklevel=2)
+def resolve_motion_directory(path):
+    """Resolve a clip directory, including retired paths saved in run configs."""
+    directory = Path(str(path)).expanduser()
+    if directory.name == "manifest.json":
+        warnings.warn("Motion manifests are retired; loading NPZ files from the directory.", stacklevel=2)
+        directory = directory.parent
+    canonical = Path(motion_data_dir("rp1_lafan"))
+    old = {
+        base / "motions" / prefix / "rp1_lafan"
+        for base in (ROBO_NEWTON_ROOT / "data", ROBO_NEWTON_ROOT.parent / "data",
+                     ROBO_NEWTON_ROOT.parent / "ufo_data",
+                     ROBO_NEWTON_ROOT.parent.parent / "data", ROBO_NEWTON_ROOT.parent.parent / "ufo_data")
+        for prefix in ("", "newton")
+    }
+    if directory.name == "npz" and directory.parent.resolve() in {entry.resolve() for entry in old}:
+        directory = directory.parent
+    if directory.resolve() in {entry.resolve() for entry in old} and canonical.is_dir():
         return canonical
-    return manifest
+    return directory
+
+
+def motion_clip_paths(path, motion_names=None):
+    """Discover flat NPZ clips in stable filename order; metadata lives in each clip."""
+    directory = resolve_motion_directory(path)
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Motion directory does not exist: {directory}")
+    paths = sorted(p for p in directory.glob("*.npz") if p.is_file())
+    if not paths:
+        raise ValueError(f"Motion directory contains no NPZ clips: {directory}")
+    if motion_names is not None:
+        selected = set(motion_names)
+        missing = selected - {p.stem for p in paths}
+        if not selected or missing:
+            raise ValueError(f"Invalid motion selection; missing names: {sorted(missing)}")
+        paths = [p for p in paths if p.stem in selected]
+    return paths
 
 
 def urdf_names(path):

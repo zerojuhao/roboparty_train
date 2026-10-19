@@ -40,7 +40,7 @@ from robolab.tasks.manager_based.parkour.terrain_generator_cfg import ROUGH_TERR
 from robolab.utils.guarded_mjwarp import GuardedMJWarpSolverCfg
 from robolab.sensors.terrain_contact import TerrainContactSensorCfg
 from robolab.terrains.native_importer import validate_terrain_colliders
-from .terrain_importer import ParkourTerrainImporter
+from .mdp.terrain_importer import ParkourTerrainImporter
 from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
 
 __file_dir__ = os.path.dirname(os.path.realpath(__file__))

@@ -36,7 +36,7 @@ from scipy.spatial.transform import Rotation
 from rsl_rl.runners.fbcpr_runner import make_ufo_history
 from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
 from robolab.utils.mujoco_physics import NewtonPhysicsAsset
-from robolab.utils.motion_npz import FULL_BODY_FIELDS, load_motion
+from robolab.utils.motion_npz import FULL_BODY_FIELDS, load_motion, motion_clip_paths
 from robolab.tasks.manager_based.ufo.mdp.pufo_observations import (
     heading_observation,
     heading_xy,
@@ -52,7 +52,7 @@ from sim2sim_rp1_pufo import (  # noqa: E402
     NATIVE_PHYSICS,
     TERRAIN_XML,
     base_ang_vel_obs_scale,
-    default_motion_manifest,
+    default_motion_directory,
     joint_values,
     make_model,
 )
@@ -206,7 +206,7 @@ def compose(simulations: list[Simulation], seconds: float, total: float, errors:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--export-dir", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path, default=default_motion_manifest())
+    parser.add_argument("--motion-dir", "--manifest", dest="motion_dir", type=Path, default=default_motion_directory())
     parser.add_argument("--motion", default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--physics-profile", choices=("native", "legacy"), default="native")
@@ -233,15 +233,11 @@ def main() -> None:
     if len(contexts) != len(heading_relative) or len(contexts) != len(velocity_relative):
         raise ValueError("Context sidecar fields have inconsistent frame counts")
 
-    manifest = args.manifest.resolve()
-    manifest_json = json.loads(manifest.read_text())
-    record = next(item for item in manifest_json["clips"] if item["name"] == motion_name)
-    source = Path(record.get("npz", record.get("path")))
-    source = source if source.is_absolute() else manifest.parent / source
+    source = motion_clip_paths(args.motion_dir, [motion_name])[0]
     body_order = list(meta["body_order"])
     joint_order = list(meta["joint_order"])
     full_motion = read_motion(source, joint_order, body_order)
-    if float(full_motion["fps"].item()) != 50 or manifest_json["npz"]["body_quaternion_order"] != "xyzw":
+    if float(full_motion["fps"].item()) != 50:
         raise ValueError("Expected 50 Hz motion with XYZW quaternions")
     first = start_frame + 1
     last = min(len(full_motion["joint_pos"]), first + len(contexts))

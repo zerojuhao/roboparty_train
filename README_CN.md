@@ -47,8 +47,7 @@ robo_newton/robolab/data/
     rp1/                  RP1 AMP、Parkour、SSR
     rp1_upper_run_bounded/ RP1 AMP 上半身参考动作
     rpo/                  RPO AMP、Parkour、BeyondMimic
-    rp1_lafan/            UFO/PUFO 的 manifest.json 和 npz/
-    conversion_report.json
+    rp1_lafan/            UFO/PUFO NPZ 文件，不再嵌套 npz/ 或使用 JSON 清单
 ```
 
 训练数据统一为 `roboparty_motion_v1` NPZ，使用 `allow_pickle=False` 读取。元数据包含 `format`、`fps`、`quaternion_order="xyzw"`、`joint_order="urdf"`、`joint_names`。单位四元数为 `[0, 0, 0, 1]`。
@@ -61,9 +60,9 @@ robo_newton/robolab/data/
 | AMP | `root_pos_w`、`root_quat_w`、`key_body_pos_w`、`key_body_names`、`loop_mode` |
 | 全身跟踪 | `joint_vel`、`body_names`、`body_pos_w`、`body_quat_w`、`body_lin_vel_w`、`body_ang_vel_w` |
 
-位置单位为米，关节角度为弧度，世界坐标系速度保留来源语义。全身数据的第一个身体为 `base_link`。AMP 保留原有前向差分速度算法和关键身体位置，不凭空补全缺失的全身轨迹。转换不重新重定向、不重采样、不平滑动作；NPZ 压缩无损，转换报告记录来源与输出的哈希。
+位置单位为米，关节角度为弧度，世界坐标系速度保留来源语义。全身数据的第一个身体为 `base_link`。AMP 保留原有前向差分速度算法和关键身体位置，不凭空补全缺失的全身轨迹。转换不重新重定向、不重采样、不平滑动作；NPZ 压缩无损。
 
-UFO/PUFO 默认读取 `motions/rp1_lafan/manifest.json`，可用 `UFO_MOTION_MANIFEST` 指定其他统一格式数据。后缀同为 `.npz` 不代表四元数和关节排列兼容。
+UFO/PUFO 直接按文件名排序读取 `motions/rp1_lafan/` 下的 NPZ，从每个文件获取关节和 link 名称、帧率及四元数约定。可用 `UFO_MOTION_DIR` 或训练参数 `--motion_dir` 指定其他目录；导出和 sim2sim 使用 `--motion-dir`。旧 manifest 路径参数仍可作为目录别名，但不再读取 JSON 清单。后缀同为 `.npz` 不代表四元数和关节排列兼容。
 
 请使用外部工具完成动作重定向，并在训练前准备符合上述规范的 NPZ 数据。历史重定向、CSV/PKL 处理和一次性迁移脚本已移除。训练运行时的数据校验与按名称映射仍由 [motion_npz.py](robo_newton/robolab/utils/motion_npz.py) 提供；该模块不会重新重定向、补全缺失轨迹或猜测来源数据的排列约定。
 
@@ -74,19 +73,19 @@ UFO/PUFO 默认读取 `motions/rp1_lafan/manifest.json`，可用 `UFO_MOTION_MAN
 | `rp1` | 36 | 2.1 MiB |
 | `rpo` | 33 | 6.0 MiB |
 | `rp1_upper_run_bounded` | 1 | 小于 0.1 MiB |
-| `rp1_lafan/npz` | 55 | 743.5 MiB |
+| `rp1_lafan` | 55 | 743.5 MiB |
 
-这些文件应放在 `robo_newton/robolab/data/motions/`。训练不需要原始动作、中间 PKL 或重复备份；NPZ 旁保留 LAFAN 清单及相关来源记录。机器人资产放在同级的 `robots/` 目录。
+这些文件应放在 `robo_newton/robolab/data/motions/`。运行时不需要原始动作、中间 PKL、数据集 JSON 清单或重复备份。机器人资产放在同级的 `robots/` 目录，其中物理配置和地形 JSON 仍然需要保留。
 
 动作数据不自动适用源码许可证。[Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) 使用 [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) 许可。重定向不会消除上游许可限制，发布修改后的动作数据前需确认再分发权利；其他目录中的 LAFAN 衍生片段同样需要确认。
 
 ## 训练
 
-从任意工作目录都可以使用统一入口 `robo_newton/scripts/train_newton.py`；它会转发到 RSL-RL 的 `train.py`，并自动设置项目路径和数据路径。常用任务：`RP1-AMP`、`RP1-AMP-Path`、`RP1-Parkour`、`RP1-SSR`、`RP1-UFO`、`RP1-PUFO`、`RPO-AMP`、`RPO-Parkour`。
+从任意工作目录都可以使用统一入口 `robo_newton/scripts/train_newton.py`；它会转发到 RSL-RL 的 `train.py`，并自动设置项目路径和数据路径。常用任务：`RP1-AMP`、`RP1-Parkour`、`RP1-SSR`、`RP1-UFO`、`RP1-PUFO`、`RPO-AMP`、`RPO-Parkour`。
 
 ```bash
 python robo_newton/scripts/train_newton.py --rl_library rsl_rl \
-  --task RP1-AMP-Path --num_envs 1024 --device cuda:0 \
+  --task RP1-AMP --num_envs 1024 --device cuda:0 \
   --visualizer none --logger tensorboard
 ```
 
@@ -108,7 +107,7 @@ RP1 UFO 与 PUFO 共用筛选后的 40 条 LAFAN 动作。UFO 仍是无视觉的
 
 ```bash
 python robo_newton/scripts/rsl_rl/play_amp.py \
-  --task RP1-AMP-Path-Play --num_envs 1 \
+  --task RP1-AMP-Play --num_envs 1 \
   --checkpoint /path/to/run/model_N.pt --visualizer none
 
 python robo_newton/scripts/rsl_rl/play_parkour.py \

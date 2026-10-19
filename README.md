@@ -47,8 +47,7 @@ robo_newton/robolab/data/
     rp1/                  RP1 AMP, Parkour, and SSR
     rp1_upper_run_bounded/ RP1 AMP upper-body reference
     rpo/                  RPO AMP, Parkour, and BeyondMimic
-    rp1_lafan/            UFO/PUFO manifest.json and npz/
-    conversion_report.json
+    rp1_lafan/            UFO/PUFO NPZ clips (no nested directory or JSON index)
 ```
 
 All training clips use `roboparty_motion_v1` NPZ with `allow_pickle=False`. Metadata includes `format`, `fps`, `quaternion_order="xyzw"`, `joint_order="urdf"`, and `joint_names`. Identity rotation is `[0, 0, 0, 1]`. Joint columns follow non-fixed URDF declaration order; robot configurations explicitly select this order. Loaders validate names and map columns once at startup.
@@ -59,9 +58,9 @@ All training clips use `roboparty_motion_v1` NPZ with `allow_pickle=False`. Meta
 | AMP | `root_pos_w`, `root_quat_w`, `key_body_pos_w`, `key_body_names`, `loop_mode` |
 | Full-body | `joint_vel`, `body_names`, `body_pos_w`, `body_quat_w`, `body_lin_vel_w`, `body_ang_vel_w` |
 
-Positions are metres, joint angles radians, and world-space velocities retain source semantics. Full-body tracks put `base_link` first. AMP retains its forward-difference velocity calculation and key-body measurements. Conversion does not invent missing body tracks, retarget, resample, or smooth motions. Compression is lossless; the conversion report records source/output hashes.
+Positions are metres, joint angles radians, and world-space velocities retain source semantics. Full-body tracks put `base_link` first. AMP retains its forward-difference velocity calculation and key-body measurements. Conversion does not invent missing body tracks, retarget, resample, or smooth motions. NPZ compression is lossless.
 
-UFO/PUFO defaults to `motions/rp1_lafan/manifest.json`; override with `UFO_MOTION_MANIFEST`. A `.npz` extension alone does not establish compatible conventions.
+UFO/PUFO reads NPZ files directly from `motions/rp1_lafan/`, in sorted filename order. Each file supplies its own joint/body names, fps and quaternion convention. Override the directory with `UFO_MOTION_DIR` or training's `--motion_dir`; export and sim2sim use `--motion-dir`. Old manifest path arguments remain accepted as directory aliases, but no JSON index is read. A `.npz` extension alone does not establish compatible conventions.
 
 Retarget motions with external tools and prepare NPZ files that follow the schema above before training. Legacy retargeting, CSV/PKL preparation, and one-time migration scripts have been removed. Runtime validation and name-based mapping remain in [motion_npz.py](robo_newton/robolab/utils/motion_npz.py); this module does not retarget motions or infer missing tracks or source conventions.
 
@@ -72,19 +71,19 @@ The current slimmed local dataset contains 125 clips, approximately 752 MiB in t
 | `rp1` | 36 | 2.1 MiB |
 | `rpo` | 33 | 6.0 MiB |
 | `rp1_upper_run_bounded` | 1 | Less than 0.1 MiB |
-| `rp1_lafan/npz` | 55 | 743.5 MiB |
+| `rp1_lafan` | 55 | 743.5 MiB |
 
-These files belong under `robo_newton/robolab/data/motions/`. Original motions, intermediate PKLs, and duplicate backups are not needed. Keep the LAFAN manifest and relevant provenance records alongside the NPZs. Robot assets belong under the sibling `robots/` directory.
+These files belong under `robo_newton/robolab/data/motions/`. Original motions, intermediate PKLs, dataset JSON indexes, and duplicate backups are not needed at runtime. Robot assets belong under the sibling `robots/` directory; their physics and terrain JSON files are still required.
 
 Motion data does not inherit the source-code license. [Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) is released under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Retargeting does not remove upstream restrictions; confirm redistribution rights before publishing modified motion data. This also applies to LAFAN-derived clips stored in other folders.
 
 ## Training
 
-Use `robo_newton/scripts/train_newton.py` as the portable entry point from any working directory. It dispatches to the RSL-RL `train.py` backend and sets project/data paths. Common task IDs: `RP1-AMP`, `RP1-AMP-Path`, `RP1-Parkour`, `RP1-SSR`, `RP1-UFO`, `RP1-PUFO`, `RPO-AMP`, `RPO-Parkour`.
+Use `robo_newton/scripts/train_newton.py` as the portable entry point from any working directory. It dispatches to the RSL-RL `train.py` backend and sets project/data paths. Common task IDs: `RP1-AMP`, `RP1-Parkour`, `RP1-SSR`, `RP1-UFO`, `RP1-PUFO`, `RPO-AMP`, `RPO-Parkour`.
 
 ```bash
 python robo_newton/scripts/train_newton.py --rl_library rsl_rl \
-  --task RP1-AMP-Path --num_envs 1024 --device cuda:0 \
+  --task RP1-AMP --num_envs 1024 --device cuda:0 \
   --visualizer none --logger tensorboard
 ```
 
@@ -106,7 +105,7 @@ Use absolute checkpoint paths to avoid ambiguity between log roots:
 
 ```bash
 python robo_newton/scripts/rsl_rl/play_amp.py \
-  --task RP1-AMP-Path-Play --num_envs 1 \
+  --task RP1-AMP-Play --num_envs 1 \
   --checkpoint /path/to/run/model_N.pt --visualizer none
 
 python robo_newton/scripts/rsl_rl/play_parkour.py \

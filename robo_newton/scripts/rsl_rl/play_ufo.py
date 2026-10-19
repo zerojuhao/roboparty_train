@@ -48,7 +48,7 @@ from rsl_rl.runners.fbcpr_runner import default_rsl_rl_log_root, _obs_term_scale
 
 import isaaclab_tasks  # noqa: F401
 import robolab.tasks  # noqa: F401
-from robolab.tasks.manager_based.ufo.expert_motion_loader import load_expert_trajectories_from_motion_lib
+from robolab.tasks.manager_based.ufo.mdp.expert_motion_loader import load_expert_trajectories_from_motion_lib
 from robolab.tasks.manager_based.ufo.mdp.pufo_observations import (
     heading_observation,
     velocity_observation,

@@ -28,7 +28,7 @@ from isaaclab_newton.sensors.ray_caster.legacy_ray_caster import LegacyRayCaster
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from robolab.utils.data_paths import motion_file
+from robolab.utils.data_paths import motion_data_dir
 from robolab.assets.robots.roboparty import PR1_LINKS, RP1_UFO_CFG
 from robolab.sensors import NoisyGroupedRayCasterCameraCfg, get_link_prim_targets
 from robolab.utils.noise import (
@@ -44,17 +44,17 @@ from robolab.utils.noise import (
 
 from . import mdp
 from .pufo_terrain_cfg import PUFO_TERRAIN_CFG, PUFO_TILE_SIZE
-from .pufo_terrain_importer import PUFOTerrainImporter
+from .mdp.pufo_terrain_importer import PUFOTerrainImporter
 from robolab.sensors.terrain_contact import TerrainContactSensorCfg
-from .pufo_physics import PUFOMJWarpSolverCfg
+from .mdp.pufo_physics import PUFOMJWarpSolverCfg
 from .lafan_selected import MOTION_NAMES
 from .mdp.pufo_reset import reset_pufo_from_motion
 from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg as FiledTerrainImporterCfg
 
 
-MOTION_MANIFEST = os.environ.get(
-    "UFO_MOTION_MANIFEST",
-    motion_file("rp1_lafan", "manifest.json"),
+MOTION_DIR = os.environ.get(
+    "UFO_MOTION_DIR",
+    os.environ.get("UFO_MOTION_MANIFEST", motion_data_dir("rp1_lafan")),
 )
 
 
@@ -148,7 +148,7 @@ class PUFOSceneCfg(InteractiveSceneCfg):
 @configclass
 class PUFOCommandsCfg:
     motion = mdp.UFOMotionCommandCfg(
-        asset_name="robot", manifest_path=MOTION_MANIFEST, motion_names=MOTION_NAMES
+        asset_name="robot", motion_dir=MOTION_DIR, motion_names=MOTION_NAMES
     )
 
 

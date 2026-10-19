@@ -462,7 +462,7 @@ class FbCprRunner:
     # ------------------------------------------------------------- helpers
 
     def _build_expert_buffer(self):
-        from robolab.tasks.manager_based.ufo.expert_motion_loader import load_expert_trajectories_from_motion_lib
+        from robolab.tasks.manager_based.ufo.mdp.expert_motion_loader import load_expert_trajectories_from_motion_lib
 
         command = self._mgr_env.command_manager.get_term("motion")
         default_dof_pos = self._mgr_env.scene["robot"].data.default_joint_pos

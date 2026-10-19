@@ -60,8 +60,8 @@ parser.add_argument(
     help="Motion-data root containing motions; defaults to ROBO_TRAIN_DATA_ROOT or robo_newton/robolab/data/.",
 )
 parser.add_argument(
-    "--motion_manifest", type=str, default=None,
-    help="Explicit UFO/PUFO motion manifest path; overrides UFO_MOTION_MANIFEST.",
+    "--motion_dir", "--motion_manifest", dest="motion_dir", type=str, default=None,
+    help="UFO/PUFO NPZ directory; overrides UFO_MOTION_DIR (--motion_manifest is a legacy alias).",
 )
 parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
@@ -126,8 +126,8 @@ elif "ROBO_TRAIN_DATA_ROOT" not in os.environ:
     local_data = _PROJECT_ROOT / "robo_newton" / "robolab" / "data"
     if local_data.is_dir():
         os.environ["ROBO_TRAIN_DATA_ROOT"] = str(local_data)
-if args_cli.motion_manifest is not None:
-    os.environ["UFO_MOTION_MANIFEST"] = str(Path(args_cli.motion_manifest).expanduser().resolve())
+if args_cli.motion_dir is not None:
+    os.environ["UFO_MOTION_DIR"] = str(Path(args_cli.motion_dir).expanduser().resolve())
 
 # auto-enable distributed training when launched with torchrun / torch.distributed.run
 if int(os.getenv("WORLD_SIZE", "1")) > 1:

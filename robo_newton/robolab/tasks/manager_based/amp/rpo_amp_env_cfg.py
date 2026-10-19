@@ -196,12 +196,6 @@ class RPOAmpEnvCfg(AmpEnvCfg):
             "run_stop_180_R_001__A345":3
         }
 
-        # RPO uses the general discriminator only.  The inherited upper-body
-        # discriminator is RP1-specific and leaves required joint/body indices
-        # unresolved when it is kept in the observation manager.
-        self.observations.upper_disc = None
-        self.observations.upper_disc_demo = None
-        
         # ------------------------------------------------------
         # animation
         # ------------------------------------------------------

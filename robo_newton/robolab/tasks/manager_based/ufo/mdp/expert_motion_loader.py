@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .mdp.motion_observations import compute_humanoid_observations_max
-from .mdp.pufo_observations import heading_xy
+from .motion_observations import compute_humanoid_observations_max
+from .pufo_observations import heading_xy
 from robolab.tasks.manager_based.ufo.motion.torch_utils import quat_rotate_inverse
 
 

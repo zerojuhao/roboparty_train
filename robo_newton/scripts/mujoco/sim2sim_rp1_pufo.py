@@ -37,7 +37,8 @@ import yaml
 
 from robolab.utils.mujoco_physics import NewtonPhysicsAsset
 from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
-from robolab.utils.motion_npz import FULL_BODY_FIELDS, load_motion
+from robolab.utils.motion_npz import FULL_BODY_FIELDS, load_motion, motion_clip_paths
+from robolab.utils.data_paths import motion_data_dir
 
 from rsl_rl.algorithms.fb_networks import BackwardMap, ObsNormalizer, VisualResidualActor
 from rsl_rl.runners.fbcpr_runner import make_ufo_history
@@ -59,8 +60,8 @@ def terrain_metadata():
     return json.loads(TERRAIN_XML.with_name("meta.json").read_text())
 
 
-def default_motion_manifest():
-    return DATA_ROOT / "motions/rp1_lafan/manifest.json"
+def default_motion_directory():
+    return Path(os.environ.get("UFO_MOTION_DIR", os.environ.get("UFO_MOTION_MANIFEST", motion_data_dir("rp1_lafan"))))
 
 
 def read_motion(path, joint_names, body_names):
@@ -487,9 +488,9 @@ def main():
                         help="Robot physics asset exported from a nominal Newton model; independent of policy weights")
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument(
-        "--manifest",
+        "--motion-dir", "--manifest", dest="motion_dir",
         type=Path,
-        default=default_motion_manifest(),
+        default=default_motion_directory(),
     )
     parser.add_argument("--motion", default="dance1_subject2")
     parser.add_argument("--start", type=float, default=0.)
@@ -543,12 +544,12 @@ def main():
         raise FileExistsError(f"Refusing to overwrite an existing recording: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     env_cfg = read_config(checkpoint.parent / "params/env.yaml")
-    metadata = json.loads(args.manifest.read_text())
-    record = next(c for c in metadata["clips"] if c["name"] == args.motion)
-    source = Path(record["npz"])
-    source = source if source.is_absolute() else args.manifest.parent / source
-    full_motion = read_motion(source, metadata["npz"]["joint_order"], metadata["npz"]["body_order"])
-    if float(full_motion["fps"].item()) != 50 or metadata["npz"]["body_quaternion_order"] != "xyzw":
+    source = motion_clip_paths(args.motion_dir, [args.motion])[0]
+    loaded = load_motion(source)
+    names = loaded["joint_names"].tolist()
+    body_names = loaded["body_names"].tolist()
+    full_motion = {key: loaded[key] for key in ("fps", "joint_pos", "joint_vel", *FULL_BODY_FIELDS)}
+    if float(full_motion["fps"].item()) != 50:
         raise ValueError("Expected 50 Hz motion with XYZW quaternions")
     if args.hold_frame is not None:
         if args.hold_frame >= len(full_motion["joint_pos"]):
@@ -569,7 +570,6 @@ def main():
         motion_indices = np.arange(start, end, dtype=np.int64)
         motion = {k: v[start:end].copy() if k != "fps" else v for k, v in full_motion.items()}
     motion["body_pos_w"][..., :2] -= motion["body_pos_w"][0, 0, :2].copy()
-    names = metadata["npz"]["joint_order"]
     terrain = terrain_metadata()
     physics_asset = NewtonPhysicsAsset(args.physics_asset, data_root=DATA_ROOT)
     sims = [Simulation(make_model(stairs, args.physics_profile, physics_asset=physics_asset), names, env_cfg,
@@ -595,7 +595,7 @@ def main():
                 sim.data.qvel[:] = 0.0
                 mujoco.mj_forward(sim.model, sim.data)
         stairs_reset_height = place_on_stairs(sims[2])
-        body_ids = [sims[0].model.body(name).id for name in metadata["npz"]["body_order"]]
+        body_ids = [sims[0].model.body(name).id for name in body_names]
         fk_error = float(np.max(np.linalg.norm(sims[0].data.xpos[body_ids] - motion["body_pos_w"][0], axis=-1)))
         if fk_error > .025:
             raise ValueError(f"Motion/MJCF kinematic mismatch: {fk_error:.4f} m")

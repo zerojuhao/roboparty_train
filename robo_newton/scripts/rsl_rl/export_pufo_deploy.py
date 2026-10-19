@@ -43,7 +43,7 @@ import yaml
 from rsl_rl.algorithms.fb_cpr_aux import FbCprAuxAgent
 from rsl_rl.algorithms.fb_networks import BackwardMap, DepthEncoderOnnxExporter, ObsNormalizer, VisualResidualActor
 from rsl_rl.runners.fbcpr_runner import default_rsl_rl_log_root
-from robolab.tasks.manager_based.ufo.expert_motion_loader import load_expert_trajectories_from_motion_lib
+from robolab.tasks.manager_based.ufo.mdp.expert_motion_loader import load_expert_trajectories_from_motion_lib
 from robolab.tasks.manager_based.ufo.mdp.pufo_observations import world_to_yaw
 from robolab.tasks.manager_based.ufo.motion.motion_lib_npz import MotionLibNPZ
 
@@ -79,7 +79,8 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None, help="Checkpoint path or file name in the run (default: latest model_N.pt).")
     parser.add_argument("--motion", default="dance1_subject2", help="Motion clip exported as the context.")
     parser.add_argument("--start_frame", type=int, default=50, help="First motion frame of the context.")
-    parser.add_argument("--manifest", type=Path, default=None, help="Override the motion manifest saved in env.yaml.")
+    parser.add_argument("--motion-dir", "--manifest", dest="motion_dir", type=Path, default=None,
+                        help="Override the motion directory saved in env.yaml (--manifest is a legacy alias).")
     args = parser.parse_args()
     torch.set_num_threads(4)
 
@@ -132,9 +133,11 @@ def main() -> None:
     motion_cfg = env["commands"]["motion"]
     dt = float(env["sim"]["dt"]) * int(env["decimation"])
     # One unwindowed clip, so the context spans the whole motion as on the robot.
-    manifest = args.manifest or Path(motion_cfg["manifest_path"])
+    motion_dir = args.motion_dir or Path(motion_cfg.get("motion_dir") or motion_cfg["manifest_path"])
+    if not motion_dir.is_absolute():
+        motion_dir = (run / motion_dir).resolve()
     motion_lib = MotionLibNPZ({
-        "motion_file": str(manifest), "step_dt": motion_cfg["step_dt"],
+        "motion_file": str(motion_dir), "step_dt": motion_cfg["step_dt"],
         "clip_seconds": 0.0, "min_clip_seconds": motion_cfg["min_clip_seconds"], "motion_names": [args.motion],
     }, num_envs=1, device="cpu")
     policy_terms = env["observations"]["policy"]

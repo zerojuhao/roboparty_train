@@ -13,7 +13,7 @@ data/
     rp1/                 RP1 AMP, Parkour, and SSR motions
     rpo/                 RPO AMP and Parkour motions
     rp1_upper_run_bounded/
-    rp1_lafan/           UFO and PUFO motion manifest plus NPZ clips
+    rp1_lafan/           UFO and PUFO self-describing NPZ clips, directly in this directory
 ```
 
 Set `ROBO_TRAIN_DATA_ROOT` to this directory when using a non-default data

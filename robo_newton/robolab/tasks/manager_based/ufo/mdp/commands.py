@@ -21,7 +21,7 @@ class UFOMotionCommand(CommandTerm):
         super().__init__(cfg, env)
         motion_cfg = DictConfig(
             {
-                "motion_file": cfg.manifest_path,
+                "motion_file": cfg.motion_dir,
                 "step_dt": cfg.step_dt,
                 "clip_seconds": cfg.clip_seconds,
                 "min_clip_seconds": cfg.min_clip_seconds,
@@ -93,9 +93,8 @@ class UFOMotionCommandCfg(CommandTermCfg):
     class_type: type = UFOMotionCommand
 
     asset_name: str = MISSING
-    # Path to the BeyondMimic-format motion manifest (its ``npz`` clips are
-    # loaded by MotionLibNPZ).
-    manifest_path: str = MISSING
+    # Flat directory of self-describing unified NPZ clips.
+    motion_dir: str = MISSING
     motion_names: tuple[str, ...] | None = None
     step_dt: float = 0.02
     truncate_time_s: float | None = None

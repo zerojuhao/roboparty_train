@@ -1,7 +1,7 @@
-"""Manifest-backed NPZ motion library for the UFO task.
+"""Directory-backed NPZ motion library for the UFO task.
 
-Data management follows the WBC ``MotionStore`` conventions: the clip manifest
-is the single source of truth, clip boundaries are explicit, all clips share
+Data management follows the WBC ``MotionStore`` conventions: each NPZ stores
+its own metadata, clip boundaries are explicit, all clips share
 one fps, quaternions are XYZW, and every read stays inside one clip.
 
 Sampling uses uniform clip weights initially and a uniform phase start time.
@@ -14,14 +14,11 @@ SLERP for quaternions.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import numpy as np
 import torch
 
 from .torch_utils import slerp
-from robolab.utils.motion_npz import FORMAT, load_motion, name_indices, resolve_motion_manifest
+from robolab.utils.motion_npz import load_motion, motion_clip_paths, name_indices, resolve_motion_directory
 
 MOTION_FIELDS = (
     "joint_pos",
@@ -40,64 +37,29 @@ class MotionLibNPZ:
         self.device = torch.device(device)
         self.num_envs = num_envs
 
-        manifest_path = resolve_motion_manifest(motion_lib_cfg["motion_file"])
-        if not manifest_path.is_file():
-            raise FileNotFoundError(f"Motion manifest does not exist: {manifest_path}")
-        self.manifest_path = manifest_path
-
-        with manifest_path.open("r", encoding="utf-8") as stream:
-            manifest = json.load(stream)
-        if manifest.get("format") != FORMAT:
-            raise ValueError(f"Convert the motion dataset to {FORMAT} first: {manifest_path}")
-        records = manifest.get("clips")
-        if not isinstance(records, list) or not records:
-            raise ValueError(f"Manifest must contain a non-empty 'clips' list: {manifest_path}")
-        selected = motion_lib_cfg.get("motion_names")
-        if selected is not None:
-            selected = set(selected)
-            missing = selected - {str(record.get("name")) for record in records}
-            if not selected or missing:
-                raise ValueError(f"Invalid motion selection; missing names: {sorted(missing)}")
-            records = [record for record in records if str(record.get("name")) in selected]
-
-        npz_meta = manifest.get("npz", {})
-        if str(npz_meta.get("body_quaternion_order", "xyzw")).lower() != "xyzw":
-            raise ValueError("MotionLibNPZ expects XYZW quaternions in the NPZ.")
-        joint_order = npz_meta.get("joint_order")
-        if joint_order is None:
-            raise ValueError("Manifest 'npz.joint_order' is required to map motions to the robot.")
-        body_order = npz_meta["body_order"]
-        target_joints = list(motion_lib_cfg.get("joint_names", joint_order))
-        target_bodies = list(motion_lib_cfg.get("body_names", body_order))
-        joint_indices = name_indices(joint_order, target_joints)
-        body_indices = name_indices(body_order, target_bodies)
-        if target_bodies[0] != "base_link":
-            raise ValueError("UFO requires base_link at body index zero.")
-        expected_fps = npz_meta.get("output_fps")
+        self.motion_dir = resolve_motion_directory(motion_lib_cfg["motion_file"])
+        paths = motion_clip_paths(self.motion_dir, motion_lib_cfg.get("motion_names"))
+        target_joints = target_bodies = None
 
         names: list[str] = []
         fps_values: list[float] = []
         arrays: dict[str, list[torch.Tensor]] = {field: [] for field in MOTION_FIELDS}
-        for clip_id, record in enumerate(records):
-            name = str(record.get("name", clip_id))
-            raw_path = record.get("npz", record.get("path"))
-            if raw_path is None:
-                raise ValueError(f"Clip {name!r} has no 'npz' path in the manifest.")
-            path = Path(str(raw_path))
-            if not path.is_absolute():
-                path = (manifest_path.parent / path).resolve()
-            if not path.is_file():
-                raise FileNotFoundError(f"NPZ for clip {name!r} does not exist: {path}")
-
+        for path in paths:
+            name = path.stem
             loaded = load_motion(path)
-            if loaded["joint_names"].tolist() != joint_order or loaded["body_names"].tolist() != body_order:
-                raise ValueError(f"Clip {name!r}: joint/body names disagree with the manifest.")
-            missing = [field for field in MOTION_FIELDS + ("fps",) if field not in loaded]
+            missing = [field for field in MOTION_FIELDS + ("fps", "body_names") if field not in loaded]
             if missing:
                 raise ValueError(f"Clip {name!r} is missing NPZ keys: {missing}")
+            joint_order = loaded["joint_names"].tolist()
+            body_order = loaded["body_names"].tolist()
+            if target_joints is None:
+                target_joints = list(motion_lib_cfg.get("joint_names", joint_order))
+                target_bodies = list(motion_lib_cfg.get("body_names", body_order))
+                if not target_bodies or target_bodies[0] != "base_link":
+                    raise ValueError("UFO requires base_link at body index zero.")
+            joint_indices = name_indices(joint_order, target_joints)
+            body_indices = name_indices(body_order, target_bodies)
             fps = float(np.asarray(loaded["fps"]).reshape(-1)[0])
-            if expected_fps is not None and abs(fps - float(expected_fps)) > 1e-3:
-                raise ValueError(f"Clip {name!r} fps={fps} does not match manifest output_fps={expected_fps}.")
             for field in MOTION_FIELDS:
                 value = np.asarray(loaded[field], dtype=np.float32)
                 indices = joint_indices if field.startswith("joint") else body_indices
