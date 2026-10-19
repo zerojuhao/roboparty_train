@@ -27,6 +27,7 @@ IsaacLab-3.0/
 /*.npz
 /*.mp4
 /*.pt
+/*_sim2sim.json
 *.npz
 *.mp4
 *.pt
