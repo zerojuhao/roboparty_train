@@ -127,7 +127,7 @@ class RslRlPpoAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
 class RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
     class_name = "OnPolicyRunner"
     num_steps_per_env = 24
-    max_iterations = 5000
+    max_iterations = 10000
     save_interval = 500
     experiment_name = "rpo_amp"
     wandb_project = "rpo_amp"

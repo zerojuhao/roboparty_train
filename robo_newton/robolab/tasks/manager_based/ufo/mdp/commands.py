@@ -30,7 +30,10 @@ class UFOMotionCommand(CommandTerm):
                 "body_names": list(env.scene[cfg.asset_name].body_names),
             }
         )
-        self._motion_lib = MotionLibNPZ(motion_cfg, num_envs=self.num_envs, device=self.device)
+        robot = env.scene[cfg.asset_name]
+        self._motion_lib = MotionLibNPZ(
+            motion_cfg, num_envs=self.num_envs, device=self.device, robot=robot, env=env
+        )
         self._motion_lib.load_motions_for_training()
         self.motion_ids = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.motion_times = torch.zeros(self.num_envs, device=self.device)
@@ -93,8 +96,8 @@ class UFOMotionCommandCfg(CommandTermCfg):
     class_type: type = UFOMotionCommand
 
     asset_name: str = MISSING
-    # Flat directory of self-describing unified NPZ clips.
-    motion_dir: str = MISSING
+    # Flat directory (or tuple of directories) of self-describing unified NPZ clips.
+    motion_dir: str | tuple[str, ...] = MISSING
     motion_names: tuple[str, ...] | None = None
     step_dt: float = 0.02
     truncate_time_s: float | None = None

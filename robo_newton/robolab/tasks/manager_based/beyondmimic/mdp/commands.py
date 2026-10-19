@@ -44,7 +44,9 @@ from isaaclab.managers import CommandTerm, CommandTermCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.utils import configclass
-from robolab.utils.motion_npz import load_motion
+from robolab.utils.motion_npz import FULL_BODY_FIELDS, load_motion, name_indices
+from robolab.utils.newton_motion_fk import fill_full_body_tracks
+import numpy as np
 from isaaclab.utils.math import (
     quat_apply,
     quat_error_magnitude,
@@ -60,9 +62,31 @@ if TYPE_CHECKING:
 
 
 class MotionLoader:
-    def __init__(self, motion_file: str, body_indexes: Sequence[int], device: str = "cpu", *, joint_names, body_names):
+    def __init__(
+        self,
+        motion_file: str,
+        body_indexes: Sequence[int],
+        device: str = "cpu",
+        *,
+        joint_names,
+        body_names,
+        robot=None,
+        env=None,
+    ):
         assert os.path.isfile(motion_file), f"Invalid file path: {motion_file}"
-        data = load_motion(motion_file, joint_names=joint_names, body_names=body_names)
+        # Load root/joints first; body_* from Newton FK when scene exists (URDF offline fallback).
+        data = load_motion(motion_file, joint_names=joint_names)
+        if any(k not in data for k in ("body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w", "joint_vel", "body_names")):
+            data = fill_full_body_tracks(
+                data, robot=robot, env=env, motion_file=motion_file, device=device
+            )
+        # Remap body axes to the robot body_names order (load_motion body path).
+        if body_names is not None:
+            indices = name_indices(data["body_names"].tolist(), list(body_names))
+            for field in FULL_BODY_FIELDS:
+                if indices != list(range(data[field].shape[1])):
+                    data[field] = data[field][:, indices]
+            data["body_names"] = np.asarray(list(body_names), dtype=str)
         self.fps = float(data["fps"].reshape(-1)[0])
         self.joint_pos = torch.tensor(data["joint_pos"], dtype=torch.float32, device=device)
         self.joint_vel = torch.tensor(data["joint_vel"], dtype=torch.float32, device=device)
@@ -107,6 +131,7 @@ class MotionCommand(CommandTerm):
         self.motion = MotionLoader(
             self.cfg.motion_file, self.body_indexes, device=self.device,
             joint_names=self.robot.joint_names, body_names=self.robot.body_names,
+            robot=self.robot, env=env,
         )
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)

@@ -132,17 +132,18 @@ class AnimationTerm(ManagerTermBase):
             self.motion_ids[env_ids] = self.motion_data_term.sample_motions(len(env_ids))
         else:
             commands, current = context
-            sampled_ids, sampled_times = self.motion_data_term.sample_motion_segments(
-                len(env_ids), commands=commands, current_velocity=current,
-                min_time_offset=self.sample_min_time_offset,
-                max_time_offset=self.sample_max_time_offset,
+            self.motion_ids[env_ids] = self.motion_data_term.sample_motions(
+                len(env_ids), commands=commands, current_velocity=current
             )
-            self.motion_ids[env_ids] = sampled_ids
         self.motion_durations[env_ids] = self.motion_data_term.get_motion_durations(self.motion_ids[env_ids])
 
         truncate_time = self.num_steps * self._env.step_dt
         if context is not None:
-            self.motion_fetch_time[env_ids, 0] = sampled_times
+            self.motion_fetch_time[env_ids, 0] = self.motion_data_term.sample_times(
+                self.motion_ids[env_ids],
+                truncate_time_start=-self.sample_min_time_offset,
+                truncate_time_end=self.sample_max_time_offset,
+            )
         elif self.cfg.random_initialize:
             if self.cfg.num_steps_to_use > 0:
                 self.motion_fetch_time[env_ids, 0] = self.motion_data_term.sample_times(
@@ -175,16 +176,18 @@ class AnimationTerm(ManagerTermBase):
             context = self._sampling_context(env_ids)
             if context is not None:
                 commands, current = context
-                # The body velocity changes every control step, so the full
-                # clip/segment distribution must be recomputed every step.
-                sampled_ids, sampled_times = self.motion_data_term.sample_motion_segments(
-                    self.num_envs, commands=commands, current_velocity=current,
-                    min_time_offset=self.sample_min_time_offset,
-                    max_time_offset=self.sample_max_time_offset,
+                # The body velocity changes every control step, so the motion
+                # distribution must be recomputed every step.
+                sampled_ids = self.motion_data_term.sample_motions(
+                    self.num_envs, commands=commands, current_velocity=current
                 )
                 self.motion_ids[:] = sampled_ids
                 self.motion_durations[:] = self.motion_data_term.get_motion_durations(sampled_ids)
-                self.motion_fetch_time[:, 0] = sampled_times
+                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
+                    sampled_ids,
+                    truncate_time_start=-self.sample_min_time_offset,
+                    truncate_time_end=self.sample_max_time_offset,
+                )
                 if self.num_steps > 1:
                     self.motion_fetch_time[:, 1:] = (
                         self.motion_fetch_time[:, 0:1]
@@ -195,11 +198,10 @@ class AnimationTerm(ManagerTermBase):
         if self.cfg.random_fetch and not command_match_resampled:
             context = self._sampling_context(torch.arange(self.num_envs, device=self._env.device))
             if context is not None:
-                commands, current = context
-                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_segment_times(
-                    self.motion_ids, commands=commands, current_velocity=current,
-                    min_time_offset=self.sample_min_time_offset,
-                    max_time_offset=self.sample_max_time_offset,
+                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
+                    self.motion_ids,
+                    truncate_time_start=-self.sample_min_time_offset,
+                    truncate_time_end=self.sample_max_time_offset,
                 )
             elif self.cfg.num_steps_to_use > 0:
                 self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(

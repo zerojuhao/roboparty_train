@@ -294,40 +294,6 @@ def ref_velocity_commands(
     return command
 
 
-def high_speed_upper_reference(
-    env: AnimationEnv,
-    reference_function: str,
-    animation: str,
-    fast_animation: str,
-    command_name: str,
-    min_linear_command: float = 1.5,
-    flatten_steps_dim: bool = True,
-    joint_indices: list[int] | None = None,
-    body_indices: list[int] | None = None,
-) -> torch.Tensor:
-    """Use coherent running frames for high-speed upper AMP demonstrations only."""
-    functions = {
-        "ref_root_local_rot_tan_norm": ref_root_local_rot_tan_norm,
-        "ref_root_lin_vel_b": ref_root_lin_vel_b,
-        "ref_root_ang_vel_b": ref_root_ang_vel_b,
-        "ref_joint_pos": ref_joint_pos,
-        "ref_joint_vel": ref_joint_vel,
-        "ref_key_body_pos_b": ref_key_body_pos_b,
-    }
-    func = functions[reference_function]
-    params = {"flatten_steps_dim": flatten_steps_dim}
-    if reference_function in ("ref_joint_pos", "ref_joint_vel"):
-        params["joint_indices"] = joint_indices
-    elif reference_function == "ref_key_body_pos_b":
-        params["body_indices"] = body_indices
-    ordinary = func(env, animation=animation, **params)
-    running = func(env, animation=fast_animation, **params)
-    command = env.command_manager.get_command(command_name)
-    # Forward running only; backward locomotion and pure turns retain their references.
-    fast = (command[:, 0] > min_linear_command) & (command[:, 2].abs() < 0.1)
-    return torch.where(fast.reshape(-1, *([1] * (ordinary.ndim - 1))), running, ordinary)
-
-
 def ref_joint_pos(
     env: AnimationEnv, 
     animation: str, 

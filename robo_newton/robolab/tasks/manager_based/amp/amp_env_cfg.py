@@ -182,7 +182,6 @@ class ObservationsCfg():
     @configclass
     class DiscriminatorCfg(ObsGroup):
         root_local_rot_tan_norm = ObsTerm(func=mdp.root_local_rot_tan_norm)
-        # base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
         joint_pos = ObsTerm(func=mdp.joint_pos)
         joint_vel = ObsTerm(func=mdp.joint_vel)
@@ -537,7 +536,6 @@ class MotionDataCfg:
         motion_data_weights={},
     )
     motion_dataset_in_place_turn: MotionDataTerm | None = None
-    motion_dataset_upper: MotionDataTerm | None = None
     
 @configclass
 class AnimationCfg:
@@ -559,7 +557,6 @@ class AnimationCfg:
         enable_visualization=False,
     )
     animation_in_place_turn: AnimTerm | None = None
-    animation_upper: AnimTerm | None = None
 
 
 ##

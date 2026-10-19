@@ -14,10 +14,9 @@ from .rpo_amp_agent_cfg import RslRlAmpCfg, RslRlPpoAmpAlgorithmCfg
 class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
     class_name = "OnPolicyRunner"
     num_steps_per_env = 24
-    max_iterations = 5000
+    max_iterations = 10000
     save_interval = 500
     experiment_name = "rp1_amp"
-    logger = "wandb"
     wandb_project = "rp1_amp"
     obs_groups = {
         "actor": ["policy"],
@@ -71,8 +70,8 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             amp_discriminator=RslRlAmpCfg.AMPDiscriminatorCfg(
                 hidden_dims=[256, 128],
                 activation="elu",
-                style_reward_scale=4.0,
-                task_style_lerp=0.7,
+                style_reward_scale=2.0,
+                task_style_lerp=0.3,
             ),
             discriminators={
                 "general": {

@@ -19,6 +19,7 @@ import torch
 
 from .torch_utils import slerp
 from robolab.utils.motion_npz import load_motion, motion_clip_paths, name_indices, resolve_motion_directory
+from robolab.utils.newton_motion_fk import fill_full_body_tracks
 
 MOTION_FIELDS = (
     "joint_pos",
@@ -33,9 +34,11 @@ MOTION_FIELDS = (
 class MotionLibNPZ:
     """Serves the UFO motion API from unified XYZW / named NPZ clips."""
 
-    def __init__(self, motion_lib_cfg, num_envs, device):
+    def __init__(self, motion_lib_cfg, num_envs, device, robot=None, env=None):
         self.device = torch.device(device)
         self.num_envs = num_envs
+        self._robot = robot
+        self._env = env
 
         self.motion_dir = resolve_motion_directory(motion_lib_cfg["motion_file"])
         paths = motion_clip_paths(self.motion_dir, motion_lib_cfg.get("motion_names"))
@@ -47,6 +50,11 @@ class MotionLibNPZ:
         for path in paths:
             name = path.stem
             loaded = load_motion(path)
+            # Desktop joint_q lacks body_*; Newton FK when scene exists, else URDF.
+            if any(field not in loaded for field in MOTION_FIELDS + ("body_names",)):
+                loaded = fill_full_body_tracks(
+                    loaded, robot=robot, env=env, motion_file=name, device=self.device
+                )
             missing = [field for field in MOTION_FIELDS + ("fps", "body_names") if field not in loaded]
             if missing:
                 raise ValueError(f"Clip {name!r} is missing NPZ keys: {missing}")

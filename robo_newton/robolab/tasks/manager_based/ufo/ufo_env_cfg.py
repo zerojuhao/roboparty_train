@@ -39,10 +39,18 @@ from . import mdp
 from .mdp.pufo_physics import PUFOMJWarpSolverCfg
 from .lafan_selected import MOTION_NAMES
 
-# LAFAN motions shared with the RP1 WBC tracking task.
-MOTION_DIR = os.environ.get(
-    "UFO_MOTION_DIR",
-    os.environ.get("UFO_MOTION_MANIFEST", motion_data_dir("rp1_lafan")),
+# Default: LAFAN + RP1 locomotion + KEEP5.  UFO_MOTION_DIR /
+# UFO_MOTION_MANIFEST still overrides to a single directory when set.
+_MOTION_DIR_ENV = os.environ.get("UFO_MOTION_DIR") or os.environ.get("UFO_MOTION_MANIFEST")
+# Order: LAFAN → RP1 locomotion → KEEP5 action (clearest dataset grouping).
+MOTION_DIR = (
+    _MOTION_DIR_ENV
+    if _MOTION_DIR_ENV
+    else (
+        motion_data_dir("rp1_lafan"),
+        motion_data_dir("rp1"),
+        motion_data_dir("rp1_action"),
+    )
 )
 
 

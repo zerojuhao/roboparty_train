@@ -71,9 +71,6 @@ class MotionDataTermCfg:
     command_match_yaw_scale: float = 0.5
     """Yaw-rate scale (rad/s) used to normalize matching error."""
 
-    command_match_segment_duration: float = 0.5
-    """Fixed duration (seconds) of each command-matching motion segment."""
-
     command_match_current_weight: float = 0.3
     """Weight of the robot's current body-frame velocity in the match target."""
 

@@ -85,8 +85,7 @@ class MotionDataTerm(ManagerTermBase):
         self.motion_num_frames = []
         self.motion_weights = []
         self.motion_loop_modes = []
-        self.motion_segment_features = []
-        self.motion_segment_times = []
+        self.motion_features = []
         
         self.root_pos_w = []
         self.root_quat = []
@@ -159,28 +158,9 @@ class MotionDataTerm(ManagerTermBase):
             root_vel_b = math_utils.quat_apply_inverse(root_quat, root_vel_w)
             root_ang_vel_b = math_utils.quat_apply_inverse(root_quat, root_ang_vel_w)
             if self.cfg.sampling_mode == "command_match":
-                segment_frames = max(
-                    2, int(round(self.cfg.command_match_segment_duration / dt)) + 1
+                self.motion_features.append(
+                    torch.stack((root_vel_b[:, 0].mean(), root_ang_vel_b[:, 2].mean()))
                 )
-                # Adjacent segments share one endpoint, so a 0.5 s segment
-                # at 50 Hz starts every 25 frames while spanning 26 samples.
-                segment_stride = segment_frames - 1
-                if num_frames >= segment_frames:
-                    vx_segments = root_vel_b[:, 0].unfold(0, segment_frames, segment_stride)
-                    yaw_segments = root_ang_vel_b[:, 2].unfold(0, segment_frames, segment_stride)
-                    features = torch.stack(
-                        (vx_segments.mean(dim=1), yaw_segments.mean(dim=1)), dim=1
-                    )
-                    times = torch.arange(
-                        features.shape[0], device=self.device, dtype=torch.float32
-                    ) * (segment_stride * dt)
-                else:
-                    features = torch.stack(
-                        (root_vel_b[:, 0].mean(), root_ang_vel_b[:, 2].mean())
-                    ).reshape(1, 2)
-                    times = torch.zeros(1, device=self.device, dtype=torch.float32)
-                self.motion_segment_features.append(features)
-                self.motion_segment_times.append(times)
             
             # dof position, shape (num_frames, num_dofs)
             dof_pos = torch.from_numpy(motion_raw_data["joint_pos"]).to(self.device).float()
@@ -212,31 +192,7 @@ class MotionDataTerm(ManagerTermBase):
         self.motion_num_frames = torch.tensor(self.motion_num_frames, dtype=torch.int32, device=self.device)
         self.motion_loop_modes = torch.tensor(self.motion_loop_modes, dtype=torch.int32, device=self.device)
         if self.cfg.sampling_mode == "command_match":
-            self.motion_segment_counts = torch.tensor(
-                [features.shape[0] for features in self.motion_segment_features],
-                dtype=torch.long, device=self.device,
-            )
-            max_segments = int(self.motion_segment_counts.max().item())
-            self.motion_segment_features_padded = torch.zeros(
-                len(self.motion_segment_features), max_segments, 2,
-                device=self.device, dtype=torch.float32,
-            )
-            self.motion_segment_times_padded = torch.zeros(
-                len(self.motion_segment_times), max_segments,
-                device=self.device, dtype=torch.float32,
-            )
-            for motion_id, (features, times) in enumerate(
-                zip(self.motion_segment_features, self.motion_segment_times)
-            ):
-                count = features.shape[0]
-                self.motion_segment_features_padded[motion_id, :count] = features
-                self.motion_segment_times_padded[motion_id, :count] = times
-            self.motion_segment_valid = (
-                torch.arange(max_segments, device=self.device)[None, :]
-                < self.motion_segment_counts[:, None]
-            )
-            del self.motion_segment_features
-            del self.motion_segment_times
+            self.motion_features = torch.stack(self.motion_features)
         # Get the normalized motion weights
         self.motion_weights = torch.tensor(self.motion_weights, dtype=torch.float32, device=self.device)
         self.motion_weights = self.motion_weights / torch.sum(self.motion_weights)
@@ -252,8 +208,6 @@ class MotionDataTerm(ManagerTermBase):
                 raise ValueError("command_match_min_probability must be in [0, 1]")
             if self.cfg.command_match_velocity_scale <= 0.0 or self.cfg.command_match_yaw_scale <= 0.0:
                 raise ValueError("command matching scales must be positive")
-            if self.cfg.command_match_segment_duration <= 0.0:
-                raise ValueError("command_match_segment_duration must be positive")
             if self.cfg.command_match_current_weight < 0.0 or self.cfg.command_match_target_weight < 0.0:
                 raise ValueError("command match weights must be non-negative")
             if self.cfg.command_match_current_weight + self.cfg.command_match_target_weight <= 0.0:
@@ -465,16 +419,15 @@ class MotionDataTerm(ManagerTermBase):
         target_weight = self.cfg.command_match_target_weight
         return (current_weight * current + target_weight * target) / (current_weight + target_weight)
 
-    def motion_segment_probabilities(
+    def motion_probabilities(
         self,
         commands: torch.Tensor,
         current_velocity: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Return the normalized joint clip/segment distribution used in training."""
+        """Return command-matching probabilities based on each full motion's mean velocity."""
         commands = commands.to(device=self.device, dtype=torch.float32)
         if commands.ndim != 2 or commands.shape[1] < 3:
             raise ValueError(f"Expected commands with shape (N, >=3), got {tuple(commands.shape)}")
-        n = commands.shape[0]
         if current_velocity is not None:
             current_velocity = current_velocity.to(device=self.device, dtype=torch.float32)
             if current_velocity.shape != commands.shape:
@@ -484,100 +437,40 @@ class MotionDataTerm(ManagerTermBase):
             [self.cfg.command_match_velocity_scale, self.cfg.command_match_yaw_scale],
             device=self.device, dtype=torch.float32,
         )
-        features = self.motion_segment_features_padded
-        distance = torch.abs(target[:, None, None, :] - features[None, :, :, :])
+        features = self.motion_features
+        distance = torch.abs(target[:, None, :] - features[None, :, :])
         distance = (distance / scale).sum(dim=-1)
-        valid = self.motion_segment_valid[None, :, :]
-        per_segment_prior = self.motion_weights[:, None] / self.motion_segment_counts.float()[:, None]
         # Log-space normalization keeps the exploration floor at its configured
-        # mass even when a target is far from every demonstration segment.
-        logits = -distance / self.cfg.command_match_temperature + per_segment_prior.log()[None, :, :]
-        logits = logits.masked_fill(~valid, -torch.inf)
-        probabilities = torch.softmax(logits.reshape(n, -1), dim=1)
-        prior = per_segment_prior.expand(n, -1, -1)
-        prior = torch.where(valid, prior, torch.zeros_like(prior)).reshape(n, -1)
-        probabilities = probabilities / probabilities.sum(dim=1, keepdim=True).clamp_min(1.0e-8)
-        floor = self.cfg.command_match_min_probability
-        if floor > 0.0:
-            probabilities = (1.0 - floor) * probabilities + floor * prior
-        return probabilities.reshape(n, *features.shape[:2])
-
-    def _sample_time_in_segment(
-        self, motion_ids, segment_ids, min_time_offset=0.0, max_time_offset=0.0
-    ):
-        """Uniformly sample an anchor whose entire reference sequence stays inside its segment."""
-        if not min_time_offset <= 0.0 <= max_time_offset:
-            raise ValueError("Time offsets must bracket the anchor at zero")
-        starts = self.motion_segment_times_padded[motion_ids, segment_ids]
-        dt = self.motion_dt[motion_ids]
-        spans = torch.round(self.cfg.command_match_segment_duration / dt).clamp_min(1) * dt
-        ends = torch.minimum(starts + spans, self.motion_durations[motion_ids])
-        lower = starts - min_time_offset
-        upper = ends - max_time_offset
-        if torch.any(upper < lower - 1.0e-6):
-            raise ValueError("Motion segment is too short for the requested reference sequence")
-        return lower + torch.rand_like(starts) * (upper - lower).clamp_min(0.0)
-
-    def sample_motion_segments(
-        self, n: int, commands: torch.Tensor, current_velocity: torch.Tensor | None = None,
-        *, min_time_offset: float = 0.0, max_time_offset: float = 0.0,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Select a segment by average speed, then a random sequence anchor within it."""
-        if commands.shape[0] != n:
-            raise ValueError("Command batch size must equal n")
-        probabilities = self.motion_segment_probabilities(commands, current_velocity)
-        sampled = torch.multinomial(probabilities.flatten(1), num_samples=1, replacement=True).squeeze(1)
-        max_segments = probabilities.shape[2]
-        motion_ids = torch.div(sampled, max_segments, rounding_mode="floor")
-        segment_ids = sampled.remainder(max_segments)
-        times = self._sample_time_in_segment(
-            motion_ids, segment_ids, min_time_offset, max_time_offset
-        )
-        return motion_ids, times
-
-    def sample_segment_times(
-        self,
-        motion_ids: torch.Tensor,
-        commands: torch.Tensor,
-        current_velocity: torch.Tensor | None = None,
-        *, min_time_offset: float = 0.0, max_time_offset: float = 0.0,
-    ) -> torch.Tensor:
-        """Sample a sequence anchor in a command-matched segment within selected clips."""
-        commands = commands.to(device=self.device, dtype=torch.float32)
-        if current_velocity is not None:
-            current_velocity = current_velocity.to(device=self.device, dtype=torch.float32)
-        target = self._matching_target(commands, current_velocity)
-        scale = torch.tensor(
-            [self.cfg.command_match_velocity_scale, self.cfg.command_match_yaw_scale],
-            device=self.device, dtype=torch.float32,
-        )
-        features = self.motion_segment_features_padded[motion_ids]
-        valid = self.motion_segment_valid[motion_ids]
-        distance = torch.abs(target[:, None, :] - features)
-        distance = (distance / scale).sum(dim=-1)
-        logits = (-distance / self.cfg.command_match_temperature).masked_fill(~valid, -torch.inf)
+        # mass even when a target is far from every demonstration motion.
+        logits = -distance / self.cfg.command_match_temperature + self.motion_weights.log()[None, :]
         probabilities = torch.softmax(logits, dim=1)
         floor = self.cfg.command_match_min_probability
         if floor > 0.0:
-            prior = valid.float() / self.motion_segment_counts[motion_ids, None].float()
-            probabilities = (1.0 - floor) * probabilities + floor * prior
-        segment_ids = torch.multinomial(probabilities, num_samples=1, replacement=True).squeeze(1)
-        return self._sample_time_in_segment(
-            motion_ids, segment_ids, min_time_offset, max_time_offset
-        )
+            probabilities = (1.0 - floor) * probabilities + floor * self.motion_weights[None, :]
+        return probabilities
 
-    def sample_motions(self, n: int, commands: torch.Tensor | None = None) -> torch.Tensor:
+    def sample_motions(
+        self,
+        n: int,
+        commands: torch.Tensor | None = None,
+        current_velocity: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Sample a batch of motion IDs.
 
         Args:
             n (int): The number of motion IDs to sample.
+            commands (torch.Tensor | None): Command batch used for command matching.
+            current_velocity (torch.Tensor | None): Current velocity batch blended into the match target.
 
         Returns:
             torch.Tensor: A tensor of sampled motion IDs, shape (n,).
         """
         if self.cfg.sampling_mode == "static" or commands is None:
             return torch.multinomial(self.motion_weights, num_samples=n, replacement=True)
-        return self.sample_motion_segments(n, commands)[0]
+        if commands.shape[0] != n:
+            raise ValueError("Command batch size must equal n")
+        probabilities = self.motion_probabilities(commands, current_velocity)
+        return torch.multinomial(probabilities, num_samples=1, replacement=True).squeeze(1)
         
     def sample_times(self, motion_ids: torch.Tensor, truncate_time_start: float = None, truncate_time_end: float = None):
         """Sample time within the duration of the given motions.
@@ -600,7 +493,9 @@ class MotionDataTerm(ManagerTermBase):
         
         if truncate_time_start is not None:
             assert truncate_time_start >= 0, f"[MotionLoader] truncate_time_start must be non-negative, but got {truncate_time_start}."
-            time_start = torch.clamp(time_start + truncate_time_start, min=0.0, max=motion_durations)
+            time_start = torch.minimum(
+                (time_start + truncate_time_start).clamp_min(0.0), motion_durations
+            )
         
         if truncate_time_end is not None:
             assert truncate_time_end >= 0, f"[MotionLoader] truncate_time_end must be non-negative, but got {truncate_time_end}."
