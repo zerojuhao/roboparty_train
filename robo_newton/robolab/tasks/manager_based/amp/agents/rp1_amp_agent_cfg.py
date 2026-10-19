@@ -61,7 +61,6 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             data_augmentation_func=compute_symmetric_states,
         ),
         amp_cfg=RslRlAmpCfg(
-            turn_style_command_group="critic",
             disc_obs_buffer_size=100,
             grad_penalty_scale=10.0,
             disc_trunk_weight_decay=1.0e-4,

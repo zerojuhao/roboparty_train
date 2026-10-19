@@ -154,16 +154,6 @@ class BodyImpactJointPositionAction(JointPositionAction):
         super().process_actions(actions)
 
 
-class JointLimitedBodyImpactPositionAction(BodyImpactJointPositionAction):
-    """Clip absolute PD targets while preserving legacy action/history semantics."""
-
-    def process_actions(self, actions: torch.Tensor):
-        super().process_actions(actions)
-        # Physical joint ranges, not the narrower soft-limit reward ranges.
-        limits = as_torch_tensor(self._asset.data.joint_pos_limits)[:, self._joint_ids]
-        self._processed_actions = torch.clamp(self._processed_actions, min=limits[..., 0], max=limits[..., 1])
-
-
 def pufo_penalty_body_impact(
     env: ManagerBasedEnv,
     asset_cfg: SceneEntityCfg,

@@ -155,7 +155,7 @@ class PUFOCommandsCfg:
 @configclass
 class PUFOActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
-        class_type=mdp.rewards.JointLimitedBodyImpactPositionAction,
+        class_type=mdp.rewards.BodyImpactJointPositionAction,
         asset_name="robot", joint_names=[".*"], scale=0.4, use_default_offset=True
     )
 

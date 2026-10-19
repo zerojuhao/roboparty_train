@@ -81,11 +81,7 @@ class UFOCommandsCfg:
 @configclass
 class UFOActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
-        class_type=getattr(
-            getattr(mdp, "rewards", None),
-            "JointLimitedBodyImpactPositionAction",
-            mdp.JointPositionActionCfg,
-        ),
+        class_type=mdp.rewards.BodyImpactJointPositionAction,
         asset_name="robot", joint_names=[".*"], scale=0.4, use_default_offset=True,
     )
 

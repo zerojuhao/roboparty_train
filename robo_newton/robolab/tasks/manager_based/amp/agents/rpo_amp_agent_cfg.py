@@ -96,12 +96,6 @@ class RslRlAmpCfg:
     route_obs_group: str | None = None
     """Observation group selecting the discriminator route per environment."""
 
-    turn_style_reward_multiplier: float = 1.0
-    """Style reward multiplier for pure yaw commands; one disables shaping."""
-
-    turn_style_command_group: str | None = None
-    """Observation group containing velocity_commands, with flat or unflattened history."""
-
 
 @configclass
 class RslRlPpoAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):

@@ -176,8 +176,6 @@ class PPOAMP(PPO):
                 weights = torch.full_like(reward, weight)
                 style = weight * reward / weights
                 scores = weight * score / weights
-            if self.amp_cfg.get("turn_style_reward_multiplier", 1.0) != 1.0:
-                style = self._scale_turn_style_reward(style, obs)
             self._record_rollout_distribution("combined", style)
             return style, scores
 
@@ -198,8 +196,6 @@ class PPOAMP(PPO):
                 self.disc_buffers[name][0].append(policy_obs.detach())
                 self.disc_buffers[name][1].append(demo_obs.detach())
             style = style / weight_sum
-            if self.amp_cfg.get("turn_style_reward_multiplier", 1.0) != 1.0:
-                style = self._scale_turn_style_reward(style, obs)
             self._record_rollout_distribution("combined", style)
             return style, scores / weight_sum
 
@@ -233,21 +229,9 @@ class PPOAMP(PPO):
         if (weights == 0).any():
             raise RuntimeError("AMP routes do not cover every environment")
         style = style / weights
-        if self.amp_cfg.get("turn_style_reward_multiplier", 1.0) != 1.0:
-            style = self._scale_turn_style_reward(style, obs)
         if record_distribution is not None:
             record_distribution("combined", style)
         return style, scores / weights
-
-    def _scale_turn_style_reward(self, style: torch.Tensor, obs: TensorDict) -> torch.Tensor:
-        """Scale pure turns from the latest command, independently of discriminator inputs."""
-        group = self.amp_cfg["turn_style_command_group"]
-        start, stop = self.amp_cfg["turn_style_command_slice"]
-        # Slice the command term before reshaping: flat histories are term-major.
-        commands = obs[group][..., start:stop].reshape(obs[group].shape[0], -1, 3)[:, -1]
-        turning = (commands[:, 2].abs() > 0.1) & (commands[:, :2].norm(dim=-1) < 0.1)
-        multiplier = self.amp_cfg["turn_style_reward_multiplier"]
-        return style * torch.where(turning, multiplier, 1.0)
 
     def process_env_step(self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict) -> None:
         self.style_rewards, self.disc_score = self._collect_style_reward(obs)
@@ -354,17 +338,6 @@ class PPOAMP(PPO):
         amp_cfg = cfg["algorithm"]["amp_cfg"]
         groups = cfg["obs_groups"]
         routes = amp_cfg["discriminators"]
-        if amp_cfg.get("turn_style_reward_multiplier", 1.0) != 1.0:
-            group = amp_cfg["turn_style_command_group"]
-            manager = env.unwrapped.observation_manager
-            names = manager.active_terms[group]
-            dims = manager.group_obs_term_dim[group]
-            index = names.index("velocity_commands")
-            command_width = dims[index][-1]
-            if obs[group].ndim not in (2, 3) or command_width % 3 != 0:
-                raise ValueError("Turn style scaling requires a vector command term with (vx, vy, yaw) frames")
-            start = sum(dim[-1] for dim in dims[:index])
-            amp_cfg["turn_style_command_slice"] = [start, start + command_width]
         if len(routes) > 1 and not amp_cfg.get("route_obs_group") and not all(
             route.get("all_envs", False) for route in routes.values()
         ):
