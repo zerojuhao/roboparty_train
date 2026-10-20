@@ -86,59 +86,6 @@ def track_lin_vel_xy_exp(
     return reward
 
 
-def lateral_command_offset_l2(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    max_yaw_command: float = 0.1,
-    min_linear_command: float = 0.1,
-    std: float = 0.5,
-) -> torch.Tensor:
-    """Penalize accumulated lateral displacement with a smooth Huber penalty.
-
-    The command generator stores the pose at the start of each command segment. The
-    displacement is measured in that pose's heading frame, so the term is invariant
-    to the environment's initial yaw. The reward is evaluated every step, while the
-    displacement itself accumulates from the segment start. Turning commands are
-    excluded because their lateral displacement is intentional. The Huber form is
-    quadratic near zero for smooth shaping, then grows linearly after ``std`` so
-    large offsets remain distinguishable instead of saturating.
-    """
-    if std <= 0:
-        raise ValueError("std must be positive")
-
-    command_term = env.command_manager.get_term(command_name)
-    command = command_term.command
-    straight_motion = torch.abs(command[:, 2]) <= max_yaw_command
-    linear_speed = torch.linalg.norm(command[:, :2], dim=1)
-    moving = linear_speed >= min_linear_command
-    scaled_offset = torch.abs(command_term.lateral_offset_error) / std
-    offset_penalty = torch.where(
-        scaled_offset <= 1.0,
-        0.5 * torch.square(scaled_offset),
-        scaled_offset - 0.5,
-    )
-    return offset_penalty * (straight_motion & moving).float()
-
-
-def turn_command_offset_l2(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    max_yaw_command: float = 0.1,
-    min_linear_command: float = 0.1,
-) -> torch.Tensor:
-    """Penalize planar drift during in-place yaw commands.
-
-    A pure yaw segment has zero desired planar displacement. Measuring both
-    heading-frame axes prevents an in-place turn from slowly walking away,
-    while the command mask keeps this term separate from translation tracking.
-    """
-    command_term = env.command_manager.get_term(command_name)
-    command = command_term.command
-    turning = torch.abs(command[:, 2]) > max_yaw_command
-    stationary = torch.linalg.norm(command[:, :2], dim=1) < min_linear_command
-    return torch.sum(torch.square(command_term.planar_offset_error), dim=1) * (turning & stationary).float()
-
-
 def track_ang_vel_z_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -173,86 +120,44 @@ def ang_vel_xy_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntit
     return torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1)
 
 
-
-def asymmetric_pitch_roll_penalty(
-    projected_gravity: torch.Tensor,
-    forward_tolerance: float | torch.Tensor = 0.0,
-    backward_scale: float = 16.0,
-) -> torch.Tensor:
-    """Penalize tilt with a soft forward-lean deadzone (parkour-style).
-
-    Positive projected gravity on body x is forward lean. Forward tilt is
-    penalized only beyond ``forward_tolerance`` (radians); backward tilt is
-    scaled by ``backward_scale`` (parkour default 16); roll is unchanged.
-    Inside the forward deadzone the forward term is zero.
-    """
-    tolerance = torch.as_tensor(
-        forward_tolerance,
-        dtype=projected_gravity.dtype,
-        device=projected_gravity.device,
-    )
-    if torch.any((tolerance < 0.0) | (tolerance >= torch.pi / 2)):
-        raise ValueError("forward_tolerance must be in [0, pi/2).")
-    forward = torch.clamp(projected_gravity[..., 0], min=0.0)
-    backward = torch.clamp(-projected_gravity[..., 0], min=0.0)
-    forward_excess = torch.clamp(forward - torch.sin(tolerance), min=0.0)
-    roll = projected_gravity[..., 1]
-    return (
-        torch.square(forward_excess)
-        + torch.square(roll)
-        + float(backward_scale) * torch.square(backward)
-    )
-
-
-def lean_orientation_l2(
+def link_orientation(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     forward_tolerance: float = 0.0,
-    backward_scale: float = 16.0,
 ) -> torch.Tensor:
-    """Penalize configured body lean with a soft forward deadzone.
+    """Penalize roll and pitch of one link with a forward-lean deadzone.
 
-    Uses the configured bodies' projected gravity. Within ``forward_tolerance``
-    (radians) forward lean is free; excess forward lean, roll, and especially
-    backward lean (``backward_scale``) are squared. When multiple bodies are
-    configured, the largest per-body penalty is returned so adding a body does not
-    silently multiply the reward weight.
+    The projected gravity x component is positive for forward lean in the
+    standard x-forward, z-up link frame. Unlike parkour's version, this AMP
+    variant intentionally has no terrain-specific tolerance or terrain lookup.
     """
+    if not math.isfinite(forward_tolerance) or not 0.0 <= forward_tolerance < math.pi / 2:
+        raise ValueError("forward_tolerance must be finite and in [0, pi/2).")
+    if len(asset_cfg.body_ids) != 1:
+        raise ValueError("link_orientation requires exactly one body link.")
+
     asset: Articulation = env.scene[asset_cfg.name]
-    body_quat_w = _as_torch(asset.data.body_quat_w)[:, asset_cfg.body_ids]
-    gravity_w = torch.zeros_like(body_quat_w[..., :3])
-    gravity_w[..., 2] = -1.0
-    projected_gravity = math_utils.quat_apply_inverse(body_quat_w, gravity_w)
-    penalty = asymmetric_pitch_roll_penalty(
-        projected_gravity,
-        forward_tolerance=forward_tolerance,
-        backward_scale=backward_scale,
-    )
-    return penalty.amax(dim=-1) if penalty.ndim > 1 else penalty
+    link_quat = _as_torch(asset.data.body_quat_w)[:, asset_cfg.body_ids[0], :]
+    gravity_w = _as_torch(asset.data.GRAVITY_VEC_W)
+    if gravity_w.ndim == 1:
+        gravity_w = gravity_w.unsqueeze(0).expand(link_quat.shape[0], -1)
+    projected_gravity = math_utils.quat_apply_inverse(link_quat, gravity_w)
+
+    forward = torch.clamp(projected_gravity[:, 0], min=0.0)
+    backward = torch.clamp(-projected_gravity[:, 0], min=0.0)
+    forward_excess = torch.clamp(forward - math.sin(forward_tolerance), min=0.0)
+    roll = projected_gravity[:, 1]
+    return torch.square(forward_excess) + torch.square(roll) + 16.0 * torch.square(backward)
 
 
-
-
-def shoulder_roll_excess_l2(
+def link_ang_vel_xy_l2(
     env: ManagerBasedRLEnv,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg(
-        "robot", joint_names=["left_shoulder_roll_joint", "right_shoulder_roll_joint"]
-    ),
-    deadzone: float = 0.35,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalize |shoulder_roll| beyond a soft deadzone (demo ~+/-15-21 deg ~ 0.26-0.37 rad).
-
-    For each shoulder roll joint:
-        excess_i = relu(|q_i| - deadzone)
-    Returns sum_i excess_i^2 (soft L2 outside the band). Inside the deadzone
-    the term is zero so natural AMP-style arm carriage is not taxed. Reversible:
-    set weight=0 or remove the RewTerm.
-    """
+    """Penalize world-frame xy angular velocity of the selected link(s)."""
     asset: Articulation = env.scene[asset_cfg.name]
-    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
-    excess = torch.clamp(torch.abs(q) - float(deadzone), min=0.0)
-    return torch.sum(torch.square(excess), dim=1)
-
+    link_ang_vel_xy = _as_torch(asset.data.body_ang_vel_w)[:, asset_cfg.body_ids, :2]
+    return torch.sum(torch.square(link_ang_vel_xy), dim=(1, 2))
 
 
 
@@ -269,7 +174,7 @@ def high_speed_double_flight(
 
     If ``max_forward_lean`` (radians) is set, the reward is zeroed whenever the
     configured body's forward lean exceeds it. Forward lean uses the same
-    convention as ``lean_orientation_l2`` / ``asymmetric_pitch_roll_penalty``:
+    convention used for the forward-lean gate:
     configured-body projected gravity ``[:, 0] > 0`` is forward lean, compared against
     ``sin(max_forward_lean)``. ``None`` disables the gate (C20 behaviour).
 
@@ -342,53 +247,6 @@ def joint_deviation_l1(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = Scene
         - _as_torch(asset.data.default_joint_pos)[:, asset_cfg.joint_ids]
     )
     return torch.sum(torch.abs(angle), dim=1)
-
-
-def joint_position_range_l2(
-    env: ManagerBasedRLEnv,
-    lower_bounds: tuple[float, ...],
-    upper_bounds: tuple[float, ...],
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    command_name: str | None = None,
-    min_linear_command: float = 1.5,
-    angle_scale: float = 1.0,
-) -> torch.Tensor:
-    """Penalize absolute angles outside bounds, optionally above a commanded XY speed."""
-    if command_name is not None and (not math.isfinite(min_linear_command) or min_linear_command < 0):
-        raise ValueError("min_linear_command must be finite and nonnegative")
-    if not math.isfinite(angle_scale) or angle_scale <= 0.0:
-        raise ValueError("angle_scale must be finite and positive")
-    asset: Articulation = env.scene[asset_cfg.name]
-    positions = _as_torch(asset.data.joint_pos)[:, asset_cfg.joint_ids]
-    if len(lower_bounds) != positions.shape[1] or len(upper_bounds) != positions.shape[1]:
-        raise ValueError("Joint bounds must match the number of selected joints")
-    if any(
-        not math.isfinite(lower) or not math.isfinite(upper) or lower >= upper
-        for lower, upper in zip(lower_bounds, upper_bounds, strict=True)
-    ):
-        raise ValueError("Joint bounds must be finite with lower < upper")
-    lower = positions.new_tensor(lower_bounds)
-    upper = positions.new_tensor(upper_bounds)
-    excess = (lower - positions).clamp_min(0.0) + (positions - upper).clamp_min(0.0)
-    penalty = (excess / angle_scale).square().sum(dim=1)
-    if command_name is not None:
-        command = _as_torch(env.command_manager.get_command(command_name))
-        active = torch.linalg.norm(command[:, :2], dim=1) > min_linear_command
-        penalty *= active.to(penalty.dtype)
-    return penalty
-
-
-def paired_joints_mean_deviation_l1(
-    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
-) -> torch.Tensor:
-    """Penalize the shared offset of paired joints from their default positions.
-
-    This keeps symmetric paired joints centered around their nominal pose while still allowing
-    anti-phase motion, such as normal left/right arm swing.
-    """
-    asset: Articulation = env.scene[asset_cfg.name]
-    joint_deviation = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
-    return torch.abs(torch.mean(joint_deviation, dim=1))
 
 
 def joint_pos_limits(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
@@ -470,25 +328,6 @@ def link_close_y_gauss(
         -torch.sin(heading) * delta_xy[:, 0] + torch.cos(heading) * delta_xy[:, 1]
     )
     return 1.0 - torch.exp(-torch.clamp(threshold - distance_y, min=0.0) / std**2)
-
-
-def feet_distance_y(
-    env: ManagerBasedRLEnv, 
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
-    min: float = 0.2, 
-    max: float = 0.5
-) -> torch.Tensor:
-    assert len(asset_cfg.body_ids) == 2
-    asset: Articulation = env.scene[asset_cfg.name]
-    root_quat_w = _as_torch(asset.data.root_quat_w).unsqueeze(1).expand(-1, 2, -1)
-    root_pos_w = _as_torch(asset.data.root_pos_w).unsqueeze(1).expand(-1, 2, -1)
-    feet_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids]
-    feet_pos_b = math_utils.quat_apply_inverse(root_quat_w, feet_pos_w - root_pos_w)
-    distance = torch.abs(feet_pos_b[:, 0, 1] - feet_pos_b[:, 1, 1])
-    d_min = torch.clamp(distance - min, -0.5, 0)
-    d_max = torch.clamp(distance - max, 0, 0.5)
-    return (torch.exp(-torch.abs(d_min) * 100) + torch.exp(-torch.abs(d_max) * 100)) / 2
-
 
 def feet_stumble(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
@@ -589,44 +428,32 @@ def feet_orientation_l2(env: ManagerBasedRLEnv,
     feet_proj_g_xy_square = torch.sum(torch.square(feet_proj_g[:, :, :2]), dim=-1)  # shape: (N, M)
     
     return torch.sum(feet_proj_g_xy_square * in_contact, dim=-1)  # shape: (N, )
-    
-def stand_still_joint_deviation_l1(
+
+def stand_still(
     env: ManagerBasedRLEnv,
-    command_name: str,
-    command_threshold: float = 0.1,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    yaw_command_threshold: float = 0.1,
-    velocity_threshold: float = 0.1,
-    yaw_velocity_threshold: float = 0.1,
+    command_name: str = "base_velocity",
+    joint_pos_weight: float = 0.6,
+    joint_vel_weight: float = 0.05,
+    body_vel_weight: float = 0.35,
 ) -> torch.Tensor:
-    """Penalize default-pose offsets only under a stationary command and state.
-
-    Planar command/speed and yaw command/speed must each be strictly below their
-    thresholds, leaving braking and turning unconstrained until the robot stops.
-    """
-    for name, value in (
-        ("command_threshold", command_threshold),
-        ("yaw_command_threshold", yaw_command_threshold),
-        ("velocity_threshold", velocity_threshold),
-        ("yaw_velocity_threshold", yaw_velocity_threshold),
-    ):
-        if not math.isfinite(value) or value <= 0:
-            raise ValueError(f"{name} must be finite and positive")
-
-    asset: Articulation = env.scene[asset_cfg.name]
-    command = env.command_manager.get_command(command_name)
-    standing = (torch.linalg.vector_norm(command[:, :2], dim=1) < command_threshold) & (
-        torch.abs(command[:, 2]) < yaw_command_threshold
+    """Penalize joint position error from default on the articulation."""
+    # extract the used quantities (to enable type-hinting)
+    asset = env.scene["robot"]
+    cmd = (
+        torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) + torch.abs(env.command_manager.get_command(command_name)[:, 2])
     )
-    linear_speed = torch.linalg.vector_norm(_as_torch(asset.data.root_lin_vel_b)[:, :2], dim=1)
-    yaw_speed = torch.abs(_as_torch(asset.data.root_ang_vel_b)[:, 2])
-    stopped = (linear_speed < velocity_threshold) & (yaw_speed < yaw_velocity_threshold)
-    deviation = (
-        _as_torch(asset.data.joint_pos)[:, asset_cfg.joint_ids]
-        - _as_torch(asset.data.default_joint_pos)[:, asset_cfg.joint_ids]
+    body_lin_vel = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    body_ang_vel = torch.abs(asset.data.root_ang_vel_b[:, 2])
+    body_vel = body_ang_vel + body_lin_vel
+    pos_reward = joint_pos_weight *torch.sum(torch.abs(asset.data.joint_pos - asset.data.default_joint_pos), dim=1)
+    vel_reward = joint_vel_weight * torch.sum(torch.abs(asset.data.joint_vel), dim=1)
+    body_vel_reward = body_vel_weight * body_vel
+    reward = torch.where(
+        cmd > 0.1,
+        0.0,
+        pos_reward + vel_reward + body_vel_reward,
     )
-    return torch.sum(torch.abs(deviation), dim=1) * (standing & stopped)
-
+    return reward
 
 def joint_energy(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize the energy used by the robot's joints."""
@@ -663,15 +490,19 @@ def sound_suppression(
     sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg,
     contact_threshold: float = 1.0,
+    command_name: str | None = "base_velocity",
+    speed_gate: float | None = 1.5,
 ) -> torch.Tensor:
-    """Parkour's contact-foot vertical velocity/acceleration penalty.
+    """Penalize contact-foot vertical velocity and acceleration.
 
     This is an impact proxy, not a sound-pressure measurement. Sensor and robot
-    body indices are resolved separately. No command gate excludes running or
-    stopping, and airborne-foot motion is not penalized.
+    body indices are resolved separately. When ``speed_gate`` is set, the term
+    is disabled at or above that commanded XY speed.
     """
     if contact_threshold < 0.0:
         raise ValueError("contact_threshold must be nonnegative")
+    if speed_gate is not None and (not math.isfinite(speed_gate) or speed_gate < 0.0):
+        raise ValueError("speed_gate must be finite and nonnegative")
     asset: Articulation = env.scene[asset_cfg.name]
     velocity_z = _as_torch(asset.data.body_vel_w)[:, asset_cfg.body_ids, 2]
     acceleration_z = _as_torch(asset.data.body_acc_w)[:, asset_cfg.body_ids, 2]
@@ -681,43 +512,12 @@ def sound_suppression(
         raise ValueError("sound_suppression requires matching robot and sensor body selections")
     in_contact = torch.abs(force_z) > contact_threshold
     motion = velocity_z.square() + acceleration_z.square()
-    return torch.where(in_contact, motion, 0.0).sum(dim=1)
-
-
-def sound_suppression_acc_per_foot(
-    env: ManagerBasedRLEnv,
-    sensor_cfg: SceneEntityCfg,
-    command_name: str = "base_velocity",
-) -> torch.Tensor:
-    """
-    Compute per-foot acceleration penalty for sound suppression.
-
-    Penalize large vertical (z) accelerations when a foot is in contact with the ground.
-    """
-
-    asset = env.scene["robot"]
-
-    # shape: (Nenv, Nbody, 6)
-    body_acc = asset.data.body_acc_w
-
-    # shape: (Nenv, Nfeet)
-    foot_acc_z = body_acc[:, sensor_cfg.body_ids, 2]
-
-    contact_sensor = env.scene.sensors[sensor_cfg.name]
-    contact_force_z = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
-    in_contact = torch.abs(contact_force_z) > 1.0  # (Nenv, Nfeet)
-
-    acc_penalty = (foot_acc_z ** 2) * in_contact.float()
-    acc_penalty = torch.clamp(acc_penalty, max=50.0)
-
-    penalty = acc_penalty.sum(dim=1)
-    reward = penalty
-
-    cmd = env.command_manager.get_command(command_name)
-    cmd_speed = torch.norm(cmd[:, :2], dim=1)
-    reward = reward * (cmd_speed < 1.5).float()
-
-    return reward
+    penalty = torch.where(in_contact, motion, 0.0).sum(dim=1)
+    if command_name is not None and speed_gate is not None:
+        command = _as_torch(env.command_manager.get_command(command_name))
+        commanded_speed = torch.linalg.vector_norm(command[:, :2], dim=1)
+        penalty = penalty * (commanded_speed < speed_gate).to(penalty.dtype)
+    return penalty
 
 
 def undesired_contacts(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:

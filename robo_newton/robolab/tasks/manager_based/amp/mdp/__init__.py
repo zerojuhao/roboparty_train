@@ -36,4 +36,3 @@ from robolab.utils.newton_mdp_events import randomize_rigid_body_com
 from .observations import *
 from .rewards import *
 from .commands import *
-from .contact_slip import feet_contact_slip

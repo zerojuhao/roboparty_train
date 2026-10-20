@@ -187,7 +187,7 @@ def main() -> None:
         motion_dir = (run / motion_dir).resolve()
     motion_lib = MotionLibNPZ(
         {
-            "motion_file": str(motion_dir),
+            "motion_file": (str(motion_dir),),
             "step_dt": motion_cfg["step_dt"],
             "clip_seconds": 0.0,
             "min_clip_seconds": motion_cfg["min_clip_seconds"],

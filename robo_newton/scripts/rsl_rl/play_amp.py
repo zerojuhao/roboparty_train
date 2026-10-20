@@ -252,9 +252,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if args_cli.speed_ramp_max is not None:
         if args_cli.speed_ramp_max <= 0.0:
             raise ValueError("--speed_ramp_max must be positive")
-        command_cfg = getattr(env_cfg.commands, "single_axis_velocity", None)
+        command_cfg = getattr(env_cfg.commands, "base_velocity", None)
         if command_cfg is None:
-            raise ValueError("--speed_ramp_max requires a single_axis_velocity command")
+            raise ValueError("--speed_ramp_max requires a base_velocity command")
         command_cfg.resampling_time_range = (1.0e6, 1.0e6)
         command_cfg.rel_standing_envs = 0.0
         command_cfg.ranges.lin_vel_x = (0.0, 0.0)
@@ -381,7 +381,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     robot = env.unwrapped.scene["robot"]
     command_term = None
     if args_cli.speed_ramp_max is not None:
-        command_term = env.unwrapped.command_manager.get_term("single_axis_velocity")
+        command_term = env.unwrapped.command_manager.get_term("base_velocity")
         command_term.vel_command_b.zero_()
         command_term.is_standing_env.zero_()
     initial_joint_pos = robot.data.joint_pos.torch.clone()
@@ -419,7 +419,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # agent stepping
             actions = policy(obs, stochastic_output=True) if args_cli.stochastic_actions else policy(obs)
             if args_cli.eval_steps:
-                commanded = env.unwrapped.command_manager.get_command("single_axis_velocity").clone()
+                commanded = env.unwrapped.command_manager.get_command("base_velocity").clone()
             # env stepping
             obs, _, dones, _ = env.step(actions)
             # reset recurrent states for episodes that have terminated

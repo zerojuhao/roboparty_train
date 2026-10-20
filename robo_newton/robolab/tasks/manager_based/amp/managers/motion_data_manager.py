@@ -78,6 +78,7 @@ class MotionDataTerm(ManagerTermBase):
         self.joint_names = list(self._env.scene["robot"].joint_names)
         
         self.motion_weights_dict = self.cfg.motion_data_weights
+        self.motion_names = []
 
         self.motion_durations = []
         self.motion_fps = []
@@ -97,6 +98,7 @@ class MotionDataTerm(ManagerTermBase):
 
         # only load the motion data files that are in the motion weights dict
         for motion_name, motion_weight in self.motion_weights_dict.items():
+            self.motion_names.append(motion_name)
             # check if the motion file name is valid
             motion_file = f"{motion_name}.npz"
             if motion_file not in motion_files:
@@ -196,6 +198,20 @@ class MotionDataTerm(ManagerTermBase):
         # Get the normalized motion weights
         self.motion_weights = torch.tensor(self.motion_weights, dtype=torch.float32, device=self.device)
         self.motion_weights = self.motion_weights / torch.sum(self.motion_weights)
+        static_names = set(self.cfg.command_match_static_motion_names)
+        missing_static_names = static_names.difference(self.motion_names)
+        if missing_static_names:
+            raise ValueError(
+                "Static command-match motions are not configured in motion_data_weights: "
+                f"{sorted(missing_static_names)}"
+            )
+        if self.cfg.command_match_static_threshold < 0.0:
+            raise ValueError("command_match_static_threshold must be non-negative.")
+        self.static_motion_ids = torch.tensor(
+            [index for index, name in enumerate(self.motion_names) if name in static_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
         if self.cfg.sampling_mode not in ("static", "command_match"):
             raise ValueError(f"Unsupported motion sampling_mode: {self.cfg.sampling_mode}")
@@ -208,6 +224,10 @@ class MotionDataTerm(ManagerTermBase):
                 raise ValueError("command_match_min_probability must be in [0, 1]")
             if self.cfg.command_match_velocity_scale <= 0.0 or self.cfg.command_match_yaw_scale <= 0.0:
                 raise ValueError("command matching scales must be positive")
+            if self.cfg.command_match_direction_weight < 0.0:
+                raise ValueError("command_match_direction_weight must be non-negative")
+            if self.cfg.command_match_direction_threshold < 0.0:
+                raise ValueError("command_match_direction_threshold must be non-negative")
             if self.cfg.command_match_current_weight < 0.0 or self.cfg.command_match_target_weight < 0.0:
                 raise ValueError("command match weights must be non-negative")
             if self.cfg.command_match_current_weight + self.cfg.command_match_target_weight <= 0.0:
@@ -438,15 +458,77 @@ class MotionDataTerm(ManagerTermBase):
             device=self.device, dtype=torch.float32,
         )
         features = self.motion_features
-        distance = torch.abs(target[:, None, :] - features[None, :, :])
-        distance = (distance / scale).sum(dim=-1)
+        component_error = torch.abs(target[:, None, :] - features[None, :, :]) / scale
+        distance = component_error.sum(dim=-1)
+
+        # A single-axis command should not be matched by a motion whose main
+        # activity is on the other axis (for example, backward motion for a
+        # pure yaw command). Also penalize clips moving in the opposite signed
+        # direction on an active axis.
+        direction_weight = self.cfg.command_match_direction_weight
+        if direction_weight > 0.0:
+            command_axes = torch.stack((commands[:, 0], commands[:, 2]), dim=1)
+            direction_threshold = self.cfg.command_match_direction_threshold
+            command_active = command_axes.abs() >= direction_threshold
+            motion_active = features.abs() >= direction_threshold
+
+            inactive_axis_penalty = (
+                features.abs()[None, :, :] / scale[None, None, :]
+            ) * (~command_active[:, None, :]).to(features.dtype)
+            distance = distance + direction_weight * inactive_axis_penalty.sum(dim=-1)
+
+            opposite_direction = (
+                command_active[:, None, :]
+                & motion_active[None, :, :]
+                & (command_axes[:, None, :] * features[None, :, :] < 0.0)
+            )
+            distance = distance + direction_weight * opposite_direction.to(features.dtype).sum(dim=-1)
+        has_static_routing = (
+            self.static_motion_ids.numel() > 0 and self.cfg.command_match_static_threshold > 0.0
+        )
+        if has_static_routing:
+            command_magnitude = torch.maximum(
+                torch.linalg.vector_norm(commands[:, :2], dim=1), commands[:, 2].abs()
+            )
+            static_command = command_magnitude < self.cfg.command_match_static_threshold
+
+            # Remove static motions before the active-command softmax. Applying
+            # the exploration floor first would redistribute their mass back
+            # into active motions when the static candidates are removed.
+            allowed = torch.ones(
+                (commands.shape[0], self.motion_weights.shape[0]),
+                dtype=torch.bool,
+                device=self.device,
+            )
+            allowed[:, self.static_motion_ids] = static_command[:, None]
+        else:
+            static_command = torch.zeros(commands.shape[0], dtype=torch.bool, device=self.device)
+            allowed = torch.ones(
+                (commands.shape[0], self.motion_weights.shape[0]),
+                dtype=torch.bool,
+                device=self.device,
+            )
+
         # Log-space normalization keeps the exploration floor at its configured
         # mass even when a target is far from every demonstration motion.
         logits = -distance / self.cfg.command_match_temperature + self.motion_weights.log()[None, :]
-        probabilities = torch.softmax(logits, dim=1)
+        probabilities = torch.softmax(logits.masked_fill(~allowed, -torch.inf), dim=1)
         floor = self.cfg.command_match_min_probability
         if floor > 0.0:
-            probabilities = (1.0 - floor) * probabilities + floor * self.motion_weights[None, :]
+            prior = self.motion_weights[None, :] * allowed.to(self.motion_weights.dtype)
+            prior = prior / prior.sum(dim=1, keepdim=True).clamp_min(
+                torch.finfo(prior.dtype).eps
+            )
+            probabilities = (1.0 - floor) * probabilities + floor * prior
+
+        if has_static_routing:
+            static_prior = torch.zeros_like(probabilities)
+            static_prior[:, self.static_motion_ids] = self.motion_weights[self.static_motion_ids]
+            static_prior /= static_prior.sum(dim=1, keepdim=True).clamp_min(
+                torch.finfo(probabilities.dtype).eps
+            )
+
+            probabilities = torch.where(static_command[:, None], static_prior, probabilities)
         return probabilities
 
     def sample_motions(

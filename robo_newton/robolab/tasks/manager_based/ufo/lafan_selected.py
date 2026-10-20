@@ -1,4 +1,4 @@
-"""Shared motion-name selection used by UFO and PUFO.
+"""Shared motion-data selection used by UFO and PUFO.
 
 Filtering changes the training distribution without altering the source
 datasets on disk:
@@ -7,9 +7,17 @@ datasets on disk:
 * RP1 locomotion → ``data/motions/rp1/``
 * KEEP5 gestures → ``data/motions/rp1_action/``
 
-``MOTION_DIR`` in ``ufo_env_cfg`` / ``pufo_env_cfg`` is the tuple
-``(rp1_lafan, rp1, rp1_action)`` unless overridden by ``UFO_MOTION_DIR``.
+``MOTION_DIR`` uses the three dataset directories under ``robolab/data/motions``.
 """
+
+from pathlib import Path
+
+MOTION_ROOT = Path(__file__).resolve().parents[3] / "data" / "motions"
+MOTION_DIR = (
+    str(MOTION_ROOT / "rp1_lafan"),
+    str(MOTION_ROOT / "rp1"),
+    str(MOTION_ROOT / "rp1_action"),
+)
 
 # 40-clip LAFAN subset (rp1_lafan).
 LAFAN_MOTION_NAMES = (

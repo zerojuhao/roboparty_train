@@ -22,15 +22,47 @@ def validate_braking_duration_range(duration, name="braking_duration_range"):
         raise ValueError(f"{name} must be finite, positive and ordered.")
 
 
-class SingleAxisVelocityCommand(UniformVelocityCommand):
-    """Sample one non-degenerate velocity axis per environment.
+def _sample_uniform_with_abs_min(
+    lower: float, upper: float, count: int, device: torch.device, minimum: float
+) -> torch.Tensor:
+    """Sample uniformly from a range after removing its low-magnitude interval."""
+    if lower > upper:
+        raise ValueError("Command range lower bound must not exceed its upper bound.")
+    if minimum < 0.0:
+        raise ValueError("Minimum command magnitude must be non-negative.")
 
-    Axes with a zero-width range are ignored. This keeps a disabled lateral
-    command from turning an otherwise moving command into an all-zero sample.
+    negative_end = min(upper, -minimum)
+    negative_length = max(0.0, negative_end - lower)
+    positive_start = max(lower, minimum)
+    positive_length = max(0.0, upper - positive_start)
+    total_length = negative_length + positive_length
+    if total_length <= 0.0:
+        raise ValueError(
+            f"Command range ({lower}, {upper}) has no values with magnitude >= {minimum}."
+        )
+
+    sample = torch.rand(count, device=device) * total_length
+    negative = sample < negative_length
+    values = torch.empty(count, device=device)
+    values[negative] = lower + sample[negative]
+    values[~negative] = positive_start + (sample[~negative] - negative_length)
+    return values
+
+
+class FilteredUniformVelocityCommand(UniformVelocityCommand):
+    """Sample all velocity axes uniformly while excluding low magnitudes.
+
+    Each non-degenerate axis follows the original ``UniformVelocityCommand``
+    behavior.  The configured absolute-minimum thresholds only remove the
+    central low-speed interval from the corresponding axis.
     """
 
-    def __init__(self, cfg: "SingleAxisVelocityCommandCfg", env):
+    def __init__(self, cfg: "FilteredUniformVelocityCommandCfg", env):
         super().__init__(cfg, env)
+        for name in ("min_abs_lin_velocity", "min_abs_ang_velocity"):
+            value = getattr(cfg, name)
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative.")
         if not 0.0 <= cfg.stop_sequence_probability <= 1.0:
             raise ValueError("stop_sequence_probability must be in [0, 1].")
         if cfg.stop_min_speed <= 0.0:
@@ -69,19 +101,21 @@ class SingleAxisVelocityCommand(UniformVelocityCommand):
         )
         active_axes = [axis for axis, (lower, upper) in enumerate(ranges) if upper > lower]
         if not active_axes:
-            raise ValueError("SingleAxisVelocityCommand requires at least one non-degenerate range.")
+            raise ValueError("FilteredUniformVelocityCommand requires at least one non-degenerate range.")
 
         self.vel_command_b[env_ids] = 0.0
-        active_axes_tensor = torch.tensor(active_axes, device=self.device, dtype=torch.long)
-        axis = active_axes_tensor[torch.randint(len(active_axes), (len(env_ids),), device=self.device)]
         for index in active_axes:
-            selected_mask = axis == index
-            selected = env_ids[selected_mask]
-            if len(selected):
-                lower, upper = ranges[index]
-                self.vel_command_b[selected, index] = torch.empty(
-                    len(selected), device=self.device
-                ).uniform_(lower, upper)
+            lower, upper = ranges[index]
+            minimum = self.cfg.min_abs_ang_velocity if index == 2 else self.cfg.min_abs_lin_velocity
+            self.vel_command_b[env_ids, index] = _sample_uniform_with_abs_min(
+                lower, upper, len(env_ids), self.device, minimum
+            )
+        if self.cfg.heading_command:
+            heading_samples = torch.empty(len(env_ids), device=self.device)
+            self.heading_target[env_ids] = heading_samples.uniform_(*self.cfg.ranges.heading)
+            self.is_heading_env[env_ids] = (
+                heading_samples.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
+            )
         self.is_standing_env[env_ids] = (
             torch.rand(len(env_ids), device=self.device) <= self.cfg.rel_standing_envs
         )
@@ -214,8 +248,12 @@ class SingleAxisVelocityCommand(UniformVelocityCommand):
 
 
 @configclass
-class SingleAxisVelocityCommandCfg(UniformVelocityCommandCfg):
-    class_type: type[SingleAxisVelocityCommand] = SingleAxisVelocityCommand
+class FilteredUniformVelocityCommandCfg(UniformVelocityCommandCfg):
+    class_type: type[FilteredUniformVelocityCommand] = FilteredUniformVelocityCommand
+    min_abs_lin_velocity: float = 0.0
+    """Minimum magnitude for sampled linear velocity commands."""
+    min_abs_ang_velocity: float = 0.0
+    """Minimum magnitude for sampled angular velocity commands."""
     stop_sequence_probability: float = 0.0
     stop_min_speed: float = 3.0
     stop_cruise_time_range: tuple[float, float] = (4.0, 6.0)

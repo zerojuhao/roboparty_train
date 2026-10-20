@@ -29,23 +29,12 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os
-from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 import robolab.tasks.manager_based.amp.mdp as mdp
-from robolab.tasks.manager_based.amp.managers import MotionDataTermCfg
-from robolab.tasks.manager_based.amp.amp_env_cfg import AmpEnvCfg, MotionDataCfg
-
-import isaaclab.terrains as terrain_gen
-
-##
-# Pre-defined configs
-##
-
+from robolab.tasks.manager_based.amp.amp_env_cfg import AmpEnvCfg, RewardsCfg
 from robolab.assets.robots.roboparty import RPO_CFG
-from robolab import ROBOLAB_ROOT_DIR
 from robolab.utils.data_paths import motion_data_dir
 
 # The motion loader selects and reorders NPZ key-body tracks by these names.
@@ -57,105 +46,10 @@ KEY_BODY_NAMES = [
     "left_elbow_yaw_link",
     "right_elbow_yaw_link"
 ]
-ANIMATION_TERM_NAME = "animation"
-AMP_NUM_STEPS = 3
-
-@configclass
-class RPOAmpRewards():
-    """Reward terms for the MDP."""
-
-    # -- Task
-    track_lin_vel_xy_exp = RewTerm(
-        func=mdp.track_lin_vel_xy_exp,
-        weight=0,
-        params={"command_name": "base_velocity", "std": 0.5},
-    )
-    track_ang_vel_z_exp = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0, params={"command_name": "base_velocity", "std": 0.5}
-    )
-    
-    # -- Alive
-    alive = RewTerm(func=mdp.is_alive, weight=0)
-    
-    # -- Base Link
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=0)
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=0)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=0)
-
-    # -- Joint
-    joint_vel_l2 = RewTerm(func=mdp.joint_vel_l2, weight=0)
-    joint_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=0)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=0)
-    smoothness_1 = RewTerm(func=mdp.smoothness_1, weight=0)
-    joint_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0)
-    joint_energy = RewTerm(func=mdp.joint_energy, weight=0)
-    joint_regularization = RewTerm(func=mdp.joint_deviation_l1, weight=0)
-    arm_pitch_mean_offset = RewTerm(
-        func=mdp.paired_joints_mean_deviation_l1,
-        weight=0,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[".*_arm_pitch_joint"],
-            )
-        },
-    )
-    joint_torques_l2 = RewTerm(
-        func=mdp.joint_torques_l2,
-        weight=0.0,
-    )
-        
-    # -- Feet
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-        },
-    )
-
-    feet_distance_y = RewTerm(
-        func=mdp.feet_distance_y,
-        weight=0.1,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                body_names=["left_ankle_roll_link", "right_ankle_roll_link"],
-                preserve_order=True,
-            ),
-            "min": 0.14,
-            "max": 0.50,
-        },
-    )
-    
-    sound_suppression = RewTerm(
-        func=mdp.sound_suppression_acc_per_foot,
-        weight=0,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=".*_ankle_roll_link",
-            ),
-        },
-    )
-
-    # -- other
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1,
-        params={
-            "threshold": 1,
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces", body_names="^(?!.*ankle_roll_link$).*$"
-            ),
-        },
-    )
-
 
 @configclass
 class RPOAmpEnvCfg(AmpEnvCfg):
-    rewards: RPOAmpRewards = RPOAmpRewards()
+    rewards: RewardsCfg = RewardsCfg()
 
     def __post_init__(self):
         # post init of parent
@@ -165,15 +59,6 @@ class RPOAmpEnvCfg(AmpEnvCfg):
         # Scene
         # ------------------------------------------------------
         self.scene.robot = RPO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        
-        # plane terrain
-        self.scene.terrain.terrain_type = "plane"
-        self.scene.terrain.terrain_generator = None
-
-        # RPO's URDF has a single torso link instead of RP1's waist chain.
-        self.events.randomize_rigid_body_com.params["asset_cfg"] = SceneEntityCfg(
-            "robot", body_names="torso_link"
-        )
 
         # ------------------------------------------------------
         # motion data
@@ -199,14 +84,10 @@ class RPOAmpEnvCfg(AmpEnvCfg):
         # ------------------------------------------------------
         # animation
         # ------------------------------------------------------
-        self.animation.animation.num_steps_to_use = AMP_NUM_STEPS
 
         # ------------------------------------------------------
         # Observations
         # ------------------------------------------------------
-                
-        # discriminator observations
-        
         self.observations.disc.key_body_pos_b.params = {
             "asset_cfg": SceneEntityCfg(
                 name="robot", 
@@ -214,50 +95,29 @@ class RPOAmpEnvCfg(AmpEnvCfg):
                 preserve_order=True
             )
         }
-        self.observations.disc.history_length = AMP_NUM_STEPS
         
         # ------------------------------------------------------
         # Events
         # ------------------------------------------------------
-
-        # ------------------------------------------------------
-        # Rewards
-        # ------------------------------------------------------
-        # task
-        self.rewards.track_lin_vel_xy_exp.weight = 1.25
-        self.rewards.track_ang_vel_z_exp.weight = 1.25
-        self.rewards.alive.weight = 0.15
-        
-        # base
-        # self.rewards.lin_vel_z_l2.weight = -0.1
-        self.rewards.ang_vel_xy_l2.weight = -0.1
-        self.rewards.flat_orientation_l2.weight = -1.2
-        
-        # joint
-        self.rewards.joint_vel_l2.weight = -2e-4
-        self.rewards.joint_acc_l2.weight = -2.5e-7
-        self.rewards.action_rate_l2.weight = -0.01
-        self.rewards.joint_pos_limits.weight = -1.0
-        self.rewards.joint_energy.weight = -1e-4
-        self.rewards.joint_torques_l2.weight = -1e-5
-        self.rewards.arm_pitch_mean_offset.weight = -0.1
-        
-        # feet
-        self.rewards.feet_slide.weight = -0.1
-        self.rewards.sound_suppression.weight = -5e-5
-        self.rewards.feet_distance_y.weight = 0.05
-
-
-        self.rewards.undesired_contacts.weight = -10.0
-        self.rewards.undesired_contacts.params["sensor_cfg"] = SceneEntityCfg(
-            "contact_forces",
-            body_names="^(?!.*ankle_roll_link$).*$",
+        # RPO's URDF has a single torso link instead of RP1's waist chain.
+        self.events.randomize_rigid_body_com.params["asset_cfg"] = SceneEntityCfg(
+            "robot", body_names="torso_link"
         )
         
         # ------------------------------------------------------
+        # Rewards
+        # ------------------------------------------------------
+        # base
+        self.rewards.pelvis_orientation_l2.params["asset_cfg"] = SceneEntityCfg(
+            "robot", body_names="base_link"
+        )
+        self.rewards.pelvis_ang_vel_xy_l2.params["asset_cfg"] = SceneEntityCfg(
+            "robot", body_names="base_link"
+        )
+                
+        # ------------------------------------------------------
         # Commands
         # ------------------------------------------------------
-        
         self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 2.5)
         self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.5, 1.5)
@@ -265,10 +125,7 @@ class RPOAmpEnvCfg(AmpEnvCfg):
         # ------------------------------------------------------
         # Curriculum
         # ------------------------------------------------------
-        
-        self.terminations.base_contact.params["sensor_cfg"].body_names = [
-            ".*_thigh_.*_link", "base_link", ".*_arm_.*_link", ".*_elbow_.*_link",
-        ]
+
             
             
 @configclass
@@ -288,5 +145,3 @@ class RPOAmpEnvCfg_PLAY(RPOAmpEnvCfg):
 
         # disable randomization for play
         self.observations.policy.enable_corruption = False
-        # remove random pushing
-        self.events.push_robot = None

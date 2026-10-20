@@ -1538,9 +1538,15 @@ class FbCprRunner:
     def load(self, path, load_optimizer=True):
         payload = torch.load(path, map_location="cpu", weights_only=False)
         world_size = torch.distributed.get_world_size() if self.is_distributed else 1
+        allow_parallelism_change = os.environ.get("ROBO_ALLOW_RESUME_PARALLELISM_CHANGE", "0") == "1"
         for key, expected in (("world_size", world_size), ("num_envs", self.num_envs)):
             if load_optimizer and key in payload and payload[key] != expected:
-                raise ValueError(f"Checkpoint {key}={payload[key]} does not match {expected}")
+                if allow_parallelism_change and key in {"world_size", "num_envs"}:
+                    if self.is_main_process:
+                        print(f"[RECOVERY] Resume {key} changed from checkpoint={payload[key]} to current={expected}; "
+                              "retain model/optimizer and rebuild incompatible replay", flush=True)
+                else:
+                    raise ValueError(f"Checkpoint {key}={payload[key]} does not match {expected}")
         saved_rescale = payload.get("action_rescale")
         if saved_rescale is not None and float(saved_rescale) != self.action_rescale:
             raise ValueError(
@@ -1592,10 +1598,15 @@ class FbCprRunner:
                 manifest = json.loads((replay_dir / "manifest.json").read_text())
                 if manifest != {"kind": "fbcpr_replay", "world_size": world_size,
                                 "env_iterations": self.env_iterations}:
-                    raise ValueError("Replay manifest does not match the model checkpoint")
-                load_replay(self.replay["train"], replay_dir / f"rank_{self.gpu_global_rank}",
-                            rank=self.gpu_global_rank, world_size=world_size, env_iterations=self.env_iterations)
-                self.replay["train"].close_trajectory()
+                    available = False
+                    if self.is_main_process:
+                        print("[RECOVERY] Replay snapshot parallelism or iteration metadata changed; "
+                              "retain model/optimizer and collect fresh replay", flush=True)
+                else:
+                    load_replay(self.replay["train"], replay_dir / f"rank_{self.gpu_global_rank}",
+                                rank=self.gpu_global_rank, world_size=world_size,
+                                env_iterations=self.env_iterations)
+                    self.replay["train"].close_trajectory()
             except Exception as exc:
                 error = f"rank {self.gpu_global_rank} replay load: {type(exc).__name__}: {exc}"
         self._checkpoint_check_errors(error)

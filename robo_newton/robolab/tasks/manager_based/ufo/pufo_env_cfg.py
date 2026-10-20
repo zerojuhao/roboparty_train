@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
-
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -28,7 +26,6 @@ from isaaclab_newton.sensors.ray_caster.legacy_ray_caster import LegacyRayCaster
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from robolab.utils.data_paths import motion_data_dir
 from robolab.assets.robots.roboparty import PR1_LINKS, RP1_UFO_CFG
 from robolab.sensors import NoisyGroupedRayCasterCameraCfg, get_link_prim_targets
 from robolab.utils.noise import (
@@ -47,23 +44,9 @@ from .pufo_terrain_cfg import PUFO_TERRAIN_CFG, PUFO_TILE_SIZE
 from .mdp.pufo_terrain_importer import PUFOTerrainImporter
 from robolab.sensors.terrain_contact import TerrainContactSensorCfg
 from .mdp.pufo_physics import PUFOMJWarpSolverCfg
-from .lafan_selected import MOTION_NAMES
+from .lafan_selected import MOTION_DIR, MOTION_NAMES
 from .mdp.pufo_reset import reset_pufo_from_motion
 from robolab.terrains.terrain_importer_cfg import TerrainImporterCfg as FiledTerrainImporterCfg
-
-
-# Default: LAFAN + RP1 locomotion + KEEP5 (same as UFO).
-_MOTION_DIR_ENV = os.environ.get("UFO_MOTION_DIR") or os.environ.get("UFO_MOTION_MANIFEST")
-# Order: LAFAN → RP1 locomotion → KEEP5 action (clearest dataset grouping).
-MOTION_DIR = (
-    _MOTION_DIR_ENV
-    if _MOTION_DIR_ENV
-    else (
-        motion_data_dir("rp1_lafan"),
-        motion_data_dir("rp1"),
-        motion_data_dir("rp1_action"),
-    )
-)
 
 
 @configclass

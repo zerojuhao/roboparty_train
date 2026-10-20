@@ -40,7 +40,9 @@ class MotionLibNPZ:
         self._robot = robot
         self._env = env
 
-        self.motion_dir = resolve_motion_directory(motion_lib_cfg["motion_file"])
+        self.motion_dir = tuple(
+            resolve_motion_directory(entry) for entry in motion_lib_cfg["motion_file"]
+        )
         paths = motion_clip_paths(self.motion_dir, motion_lib_cfg.get("motion_names"))
         target_joints = target_bodies = None
 

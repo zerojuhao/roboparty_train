@@ -137,7 +137,7 @@ def main() -> None:
     if not motion_dir.is_absolute():
         motion_dir = (run / motion_dir).resolve()
     motion_lib = MotionLibNPZ({
-        "motion_file": str(motion_dir), "step_dt": motion_cfg["step_dt"],
+        "motion_file": (str(motion_dir),), "step_dt": motion_cfg["step_dt"],
         "clip_seconds": 0.0, "min_clip_seconds": motion_cfg["min_clip_seconds"], "motion_names": [args.motion],
     }, num_envs=1, device="cpu")
     policy_terms = env["observations"]["policy"]

@@ -11,8 +11,6 @@ dict-obs state/history, context commands, and privileged state):
 
 from __future__ import annotations
 
-import os
-
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
@@ -31,28 +29,12 @@ from isaaclab_newton.physics import NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from robolab.utils.data_paths import motion_data_dir
 from robolab.assets.robots.roboparty import RP1_UFO_CFG
 from robolab.sensors.terrain_contact import TerrainContactSensorCfg
 
 from . import mdp
 from .mdp.pufo_physics import PUFOMJWarpSolverCfg
-from .lafan_selected import MOTION_NAMES
-
-# Default: LAFAN + RP1 locomotion + KEEP5.  UFO_MOTION_DIR /
-# UFO_MOTION_MANIFEST still overrides to a single directory when set.
-_MOTION_DIR_ENV = os.environ.get("UFO_MOTION_DIR") or os.environ.get("UFO_MOTION_MANIFEST")
-# Order: LAFAN → RP1 locomotion → KEEP5 action (clearest dataset grouping).
-MOTION_DIR = (
-    _MOTION_DIR_ENV
-    if _MOTION_DIR_ENV
-    else (
-        motion_data_dir("rp1_lafan"),
-        motion_data_dir("rp1"),
-        motion_data_dir("rp1_action"),
-    )
-)
-
+from .lafan_selected import MOTION_DIR, MOTION_NAMES
 
 @configclass
 class UFOSceneCfg(InteractiveSceneCfg):
