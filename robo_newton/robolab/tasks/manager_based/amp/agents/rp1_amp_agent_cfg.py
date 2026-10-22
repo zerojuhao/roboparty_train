@@ -14,7 +14,7 @@ from .rpo_amp_agent_cfg import RslRlAmpCfg, RslRlPpoAmpAlgorithmCfg
 class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
     class_name = "OnPolicyRunner"
     num_steps_per_env = 24
-    max_iterations = 10000
+    max_iterations = 30000
     save_interval = 500
     experiment_name = "rp1_amp"
     wandb_project = "rp1_amp"
@@ -71,14 +71,14 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
                 hidden_dims=[256, 128],
                 activation="elu",
                 style_reward_scale=2.0,
-                task_style_lerp=0.3,
+                task_style_lerp=0.4,
             ),
             discriminators={
                 "general": {
                     "all_envs": True,
                     "policy_obs_set": "discriminator",
                     "demonstration_obs_set": "discriminator_demonstration",
-                    "amp_discriminator": {"hidden_dims": [256, 128]},
+                    "amp_discriminator": {"hidden_dims": [128, 64]},
                 },
             },
             loss_type="LSGAN",

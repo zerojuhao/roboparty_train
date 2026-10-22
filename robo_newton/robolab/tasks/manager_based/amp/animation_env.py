@@ -159,6 +159,13 @@ class AnimationEnv(ManagerBasedRLEnv):
         else:
             self.animation_manager.reset(env_ids)
             super()._reset_idx(env_ids)
+        # EventTerm reset_from_ref runs inside super()._reset_idx. Under
+        # command_match that is before the clip is resampled, so re-apply RSI
+        # from the matched frame.
+        from .mdp.events import reset_from_ref
+
+        for term_name in self.animation_manager.active_terms:
+            reset_from_ref(self, env_ids, animation=term_name)
         
 
 

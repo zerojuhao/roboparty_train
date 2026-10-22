@@ -13,6 +13,7 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import ManagerBasedEnv
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 from isaaclab.utils import math as math_utils
+from robolab.utils.tensors import resolve_env_ids
 
 
 class _RandomizeRigidBodyComNewton(ManagerTermBase):
@@ -34,10 +35,7 @@ class _RandomizeRigidBodyComNewton(ManagerTermBase):
         if self.default_com_pos is None:
             self.default_com_pos = self.asset.data.body_com_pos_b.torch.clone()
 
-        if env_ids is None:
-            env_ids = torch.arange(env.scene.num_envs, device=self.asset.device)
-        else:
-            env_ids = env_ids.to(self.asset.device)
+        env_ids = resolve_env_ids(env_ids, env.scene.num_envs, self.asset.device)
 
         if self.asset_cfg.body_ids == slice(None):
             body_ids = torch.arange(self.asset.num_bodies, dtype=torch.int, device=self.asset.device)

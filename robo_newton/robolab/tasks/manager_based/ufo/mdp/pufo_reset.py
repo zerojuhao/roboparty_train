@@ -7,7 +7,7 @@ import warp as wp
 
 from .events import TERRAIN_RESET_CLEARANCE
 from ..motion.torch_utils import my_quat_rotate, quat_from_angle_axis, quat_mul
-from robolab.utils.tensors import as_torch_tensor
+from robolab.utils.tensors import as_torch_tensor, resolve_env_ids
 
 
 def sample_reset_states(
@@ -24,7 +24,7 @@ def sample_reset_states(
     while the motion command/z pairing still points at the sampled clip frame. This
     targets deploy-style default→hold-frame0 gaps without changing the expert z path.
     """
-    count, device = len(env_ids), origins.device
+    count, device = env_ids.numel() if torch.is_tensor(env_ids) else len(env_ids), origins.device
     root = torch.zeros(count, 13, device=device)
     root[:, :2] = origins[env_ids, :2]
     root[:, 2] = motion["rg_pos_t"][env_ids, 0, 2]
@@ -79,14 +79,16 @@ def correct_terrain_penetration(env, env_ids, root, clearance=0.05, penetration_
         raise ValueError("Reset contact clearance must be finite and non-negative")
     if not math.isfinite(penetration_scale) or penetration_scale < 1:
         raise ValueError("Reset penetration scale must be finite and at least one")
-    if len(env_ids) == 0:
+    if torch.is_tensor(env_ids) and env_ids.numel() == 0:
+        return
+    if not torch.is_tensor(env_ids) and len(env_ids) == 0:
         return
     solver = NewtonManager._solver
     if solver is None or not hasattr(solver, "mjw_data"):
         raise RuntimeError("PUFO contact-aware reset requires the Newton MuJoCo Warp backend")
     terrain = env.scene.terrain
     from robolab.terrains.native_importer import validate_terrain_colliders
-    validate_terrain_colliders(env)
+    validate_terrain_colliders(env, env_ids)
     robot = env.scene["robot"]
     if not hasattr(env, "_pufo_reset_lift"):
         env._pufo_reset_lift = torch.zeros(env.num_envs, device=env.device)
@@ -131,9 +133,9 @@ def reset_pufo_from_motion(
     arm_joint_indices=None,
     hold_motion_on_standing=True,
 ):
-    if len(env_ids) == 0:
+    env_ids = resolve_env_ids(env_ids, env.num_envs, env.device)
+    if env_ids.numel() == 0:
         return
-    env_ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
     robot = env.scene["robot"]
     motion = env.command_manager.get_term(command_name).get_motion_state()
     root, joints, velocities, lying, standing = sample_reset_states(

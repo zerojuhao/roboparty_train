@@ -11,6 +11,7 @@ from isaaclab.envs.mdp.events import _randomize_prop_by_op
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import RayCaster
 from isaaclab.sensors.ray_caster import MultiMeshRayCaster
+from robolab.utils.tensors import resolve_env_ids
 
 if TYPE_CHECKING:
     from isaaclab.sensors import Camera, RayCasterCamera
@@ -79,7 +80,8 @@ def randomize_ray_offsets(
             and values are tuples representing the range for each component.
         - distribution: (str) "uniform" or "log_uniform" or "gaussian", determines the distribution of the randomization.
     """
-    num_env_ids = env.scene.num_envs if env_ids is None else len(env_ids)
+    env_ids = resolve_env_ids(env_ids, env.scene.num_envs, env.device)
+    num_env_ids = env_ids.numel()
     # extract the used quantities (to enable type-hinting)
     sensor: RayCaster | MultiMeshRayCaster = env.scene[asset_cfg.name]
     ray_starts = sensor.ray_starts[env_ids]  # (num_envs, num_rays, 3)
@@ -231,7 +233,8 @@ def push_by_setting_velocity_per_terrain(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ):
     """Push robot with per-sub-terrain velocity sampling ranges (world frame)."""
-    if len(env_ids) == 0:
+    env_ids = resolve_env_ids(env_ids, env.num_envs, env.device)
+    if env_ids.numel() == 0:
         return
 
     asset: RigidObject | Articulation = env.scene[asset_cfg.name]

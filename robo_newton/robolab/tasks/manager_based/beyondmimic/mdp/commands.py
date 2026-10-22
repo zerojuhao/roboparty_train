@@ -46,6 +46,7 @@ from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.utils import configclass
 from robolab.utils.motion_npz import FULL_BODY_FIELDS, load_motion, name_indices
 from robolab.utils.newton_motion_fk import fill_full_body_tracks
+from robolab.utils.tensors import resolve_env_ids
 import numpy as np
 from isaaclab.utils.math import (
     quat_apply,
@@ -305,8 +306,9 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_top1_prob"][:] = pmax
         self.metrics["sampling_top1_bin"][:] = imax.float() / self.bin_count
 
-    def _resample_command(self, env_ids: Sequence[int]):
-        if len(env_ids) == 0:
+    def _resample_command(self, env_ids: Sequence[int] | slice | None):
+        env_ids = resolve_env_ids(env_ids, self.num_envs, self.device)
+        if env_ids.numel() == 0:
             return
         self._adaptive_sampling(env_ids)
         # Reset motion_ended state for resampled envs

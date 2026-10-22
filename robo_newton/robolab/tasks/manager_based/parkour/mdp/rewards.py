@@ -516,27 +516,23 @@ def track_lin_vel_xy_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
-    # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    # compute the error
     lin_vel_error = torch.sum(
-        torch.square(env.command_manager.get_command(command_name)[:, :2] - asset.data.root_lin_vel_b[:, :2]),
+        torch.square(env.command_manager.get_command(command_name)[:, :2] - asset.data.root_lin_vel_b.torch[:, :2]),
         dim=1,
     )
-    reward = torch.exp(-lin_vel_error / std**2)
-    return reward
+    return torch.exp(-lin_vel_error / std**2)
 
 
 def track_ang_vel_z_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     """Reward tracking of angular velocity commands (yaw) using exponential kernel."""
-    # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    # compute the error
-    ang_vel_error = torch.square(env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b[:, 2])
-    reward = torch.exp(-ang_vel_error / std**2)
-    return reward
+    ang_vel_error = torch.square(
+        env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b.torch[:, 2]
+    )
+    return torch.exp(-ang_vel_error / std**2)
 
 
 def volume_points_penetration(

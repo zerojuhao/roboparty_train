@@ -44,8 +44,10 @@ from isaaclab_rl.rsl_rl import (  # noqa:F401
     RslRlRndCfg,
     RslRlSymmetryCfg,
 )
+from isaaclab.physics import PhysxAutoCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_ov.physics import OvPhysxCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 import isaaclab.sim as sim_utils
@@ -253,9 +255,11 @@ class EventCfg:
 
 @configclass
 class PhysicsPresetCfg(PresetCfg):
-    isaacsim_physx: PhysxCfg = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
-    newton_mjwarp: NewtonCfg = NewtonCfg(solver_cfg=MJWarpSolverCfg())
-    default: NewtonCfg = newton_mjwarp
+    isaacsim_physx = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    ovphysx = OvPhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    physx = PhysxAutoCfg(isaacsim_physx=isaacsim_physx, ovphysx=ovphysx)
+    newton_mjwarp = NewtonCfg(solver_cfg=MJWarpSolverCfg())
+    default = newton_mjwarp
 
 
 @configclass
@@ -263,9 +267,10 @@ class BaseEnvCfg(DirectRLEnvCfg):
     viewer: ViewerCfg = ViewerCfg()
     decimation: int = 4
     sim: SimulationCfg = SimulationCfg(
-        dt=0.005, 
-        render_interval=decimation, 
+        dt=0.005,
+        render_interval=decimation,
         physics=PhysicsPresetCfg(),
+        use_newton_actuators=False,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",

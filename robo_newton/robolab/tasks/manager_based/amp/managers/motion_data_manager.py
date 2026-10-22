@@ -32,7 +32,7 @@
 from __future__ import annotations
 
 import os
-import enum
+import numpy as np
 import torch
 from prettytable import PrettyTable
 from typing import TYPE_CHECKING
@@ -50,11 +50,6 @@ if TYPE_CHECKING:
 from robolab.utils.math import vel_forward_diff, ang_vel_from_quat_diff, quat_slerp, linear_interpolate, calc_frame_blend
 from robolab.utils.motion_npz import load_motion, name_indices, resolve_name_patterns
 from robolab.utils.tensors import as_torch_tensor
-
-
-class LoopMode(enum.Enum):
-    CLAMP = 0
-    WRAP = 1
 
 
 class MotionDataTerm(ManagerTermBase):
@@ -85,7 +80,6 @@ class MotionDataTerm(ManagerTermBase):
         self.motion_dt = []
         self.motion_num_frames = []
         self.motion_weights = []
-        self.motion_loop_modes = []
         self.motion_features = []
         
         self.root_pos_w = []
@@ -111,6 +105,13 @@ class MotionDataTerm(ManagerTermBase):
             # files contain only six cached key bodies, while RP1 now requests
             # every non-root link and computes missing positions from FK below.
             motion_raw_data = load_motion(motion_path, joint_names=self.joint_names)
+            src_fps = float(motion_raw_data["fps"].reshape(-1)[0])
+            if self.cfg.resample_fps is not None and abs(src_fps - float(self.cfg.resample_fps)) > 1e-6:
+                motion_raw_data = self._resample_motion_raw(motion_raw_data, float(self.cfg.resample_fps))
+                print(
+                    f"[Motion Data Manager] Resampled {motion_file}: {src_fps:g} Hz -> "
+                    f"{self.cfg.resample_fps:g} Hz ({len(motion_raw_data['root_pos_w'])} frames)"
+                )
             requested_key_body_names = self.cfg.key_body_names
             if requested_key_body_names is None:
                 requested_key_body_names = motion_raw_data["key_body_names"].tolist()
@@ -131,13 +132,11 @@ class MotionDataTerm(ManagerTermBase):
             if num_frames < 2:
                 raise ValueError(f"[MotionLoader] Motion has only {num_frames} frames, cannot compute velocity.")
             duration = dt * (num_frames - 1)
-            loop_mode = int(motion_raw_data["loop_mode"].item())
-            
+
             self.motion_durations.append(duration)
             self.motion_fps.append(fps)
             self.motion_dt.append(dt)
             self.motion_num_frames.append(num_frames)
-            self.motion_loop_modes.append(loop_mode)
             self.motion_weights.append(motion_weight)
             
             # Get the motion data
@@ -160,9 +159,7 @@ class MotionDataTerm(ManagerTermBase):
             root_vel_b = math_utils.quat_apply_inverse(root_quat, root_vel_w)
             root_ang_vel_b = math_utils.quat_apply_inverse(root_quat, root_ang_vel_w)
             if self.cfg.sampling_mode == "command_match":
-                self.motion_features.append(
-                    torch.stack((root_vel_b[:, 0].mean(), root_ang_vel_b[:, 2].mean()))
-                )
+                self.motion_features.append(self._command_match_feature(root_vel_b, root_ang_vel_b))
             
             # dof position, shape (num_frames, num_dofs)
             dof_pos = torch.from_numpy(motion_raw_data["joint_pos"]).to(self.device).float()
@@ -192,7 +189,6 @@ class MotionDataTerm(ManagerTermBase):
         self.motion_dt = torch.tensor(self.motion_dt, dtype=torch.float32, device=self.device)
         self.motion_durations = torch.tensor(self.motion_durations, dtype=torch.float32, device=self.device)
         self.motion_num_frames = torch.tensor(self.motion_num_frames, dtype=torch.int32, device=self.device)
-        self.motion_loop_modes = torch.tensor(self.motion_loop_modes, dtype=torch.int32, device=self.device)
         if self.cfg.sampling_mode == "command_match":
             self.motion_features = torch.stack(self.motion_features)
         # Get the normalized motion weights
@@ -232,6 +228,10 @@ class MotionDataTerm(ManagerTermBase):
                 raise ValueError("command match weights must be non-negative")
             if self.cfg.command_match_current_weight + self.cfg.command_match_target_weight <= 0.0:
                 raise ValueError("command match weights cannot both be zero")
+            if self.cfg.command_match_cruise_speed_threshold < 0.0:
+                raise ValueError("command_match_cruise_speed_threshold must be non-negative")
+            if not 0.0 <= self.cfg.command_match_cruise_min_fraction <= 1.0:
+                raise ValueError("command_match_cruise_min_fraction must be in [0, 1]")
         
         # Some other information
         self.num_dofs = self.dof_pos[0].shape[1]
@@ -275,17 +275,48 @@ class MotionDataTerm(ManagerTermBase):
             float: The duration of the motion in seconds.
         """
         return self.motion_durations[motion_ids]
-        
-    def get_motion_loop_modes(self, motion_ids: torch.Tensor) -> torch.Tensor:
-        """Get the loop mode of a specific motion.
 
-        Args:
-            motion_id (torch.Tensor): A tensor of motion IDs for which to get the loop mode.
+    @staticmethod
+    def _resample_motion_raw(data: dict, target_fps: float) -> dict:
+        """Uniformly resample a loaded clip to ``target_fps`` (lerp + slerp)."""
+        src_fps = float(np.asarray(data["fps"]).reshape(-1)[0])
+        n_src = len(data["root_pos_w"])
+        duration = (n_src - 1) / src_fps
+        n_dst = int(np.floor(duration * target_fps + 1e-6)) + 1
+        t_src = np.arange(n_src) / src_fps
+        t_dst = np.minimum(np.arange(n_dst) / target_fps, t_src[-1])
+        i0 = np.clip(np.searchsorted(t_src, t_dst, side="right") - 1, 0, n_src - 2)
+        i1 = i0 + 1
+        alpha = ((t_dst - t_src[i0]) * src_fps).astype(np.float32)
 
-        Returns:
-            int: The loop mode of the motion.
-        """
-        return self.motion_loop_modes[motion_ids]
+        def lerp(x):
+            x = np.asarray(x, dtype=np.float32)
+            a = alpha.reshape((-1,) + (1,) * (x.ndim - 1))
+            return (1.0 - a) * x[i0] + a * x[i1]
+
+        def slerp(q):
+            q = np.asarray(q, dtype=np.float32)
+            q0, q1 = q[i0], q[i1]
+            dot = np.sum(q0 * q1, axis=-1, keepdims=True)
+            q1 = np.where(dot < 0.0, -q1, q1)
+            dot = np.abs(dot).clip(-1.0, 1.0)
+            a = alpha.reshape((-1,) + (1,) * (q.ndim - 1))
+            theta = np.arccos(dot)
+            sin_t = np.sin(theta)
+            small = sin_t < 1e-6
+            w0 = np.where(small, 1.0 - a, np.sin((1.0 - a) * theta) / np.where(small, 1.0, sin_t))
+            w1 = np.where(small, a, np.sin(a * theta) / np.where(small, 1.0, sin_t))
+            out = w0 * q0 + w1 * q1
+            return out / np.linalg.norm(out, axis=-1, keepdims=True).clip(1e-8, None)
+
+        out = dict(data)
+        for key, value in data.items():
+            arr = np.asarray(value)
+            if arr.ndim == 0 or arr.shape[0] != n_src or arr.dtype.kind not in "fc":
+                continue
+            out[key] = slerp(arr) if key in ("root_quat_w", "body_quat_w") else lerp(arr)
+        out["fps"] = np.asarray(float(target_fps))
+        return out
 
     def _load_or_compute_key_body_pos_w(
         self,
@@ -428,13 +459,28 @@ class MotionDataTerm(ManagerTermBase):
         key_body_pos_w.requires_grad_(False)
         return key_body_pos_w
 
+    def _command_match_feature(
+        self, root_vel_b: torch.Tensor, root_ang_vel_b: torch.Tensor
+    ) -> torch.Tensor:
+        """Mean body-frame ``(vx, vy, wz)``, optionally gated to moving frames."""
+        vx = root_vel_b[:, 0]
+        vy = root_vel_b[:, 1]
+        wz = root_ang_vel_b[:, 2]
+        cruise = torch.linalg.norm(root_vel_b[:, :2], dim=-1) >= self.cfg.command_match_cruise_speed_threshold
+        if (
+            cruise.any()
+            and cruise.to(dtype=vx.dtype).mean() >= self.cfg.command_match_cruise_min_fraction
+        ):
+            vx, vy, wz = vx[cruise], vy[cruise], wz[cruise]
+        return torch.stack((vx.mean(), vy.mean(), wz.mean()))
+
     def _matching_target(
         self, commands: torch.Tensor, current_velocity: torch.Tensor | None = None
     ) -> torch.Tensor:
-        target = torch.stack((commands[:, 0], commands[:, 2]), dim=1)
+        target = commands[:, :3]
         if current_velocity is None:
             return target
-        current = torch.stack((current_velocity[:, 0], current_velocity[:, 2]), dim=1)
+        current = current_velocity[:, :3]
         current_weight = self.cfg.command_match_current_weight
         target_weight = self.cfg.command_match_target_weight
         return (current_weight * current + target_weight * target) / (current_weight + target_weight)
@@ -444,7 +490,7 @@ class MotionDataTerm(ManagerTermBase):
         commands: torch.Tensor,
         current_velocity: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Return command-matching probabilities based on each full motion's mean velocity."""
+        """Return command-matching probabilities based on each motion's cruise velocity."""
         commands = commands.to(device=self.device, dtype=torch.float32)
         if commands.ndim != 2 or commands.shape[1] < 3:
             raise ValueError(f"Expected commands with shape (N, >=3), got {tuple(commands.shape)}")
@@ -454,7 +500,11 @@ class MotionDataTerm(ManagerTermBase):
                 raise ValueError("Current velocity must have the same shape as commands")
         target = self._matching_target(commands, current_velocity)
         scale = torch.tensor(
-            [self.cfg.command_match_velocity_scale, self.cfg.command_match_yaw_scale],
+            [
+                self.cfg.command_match_velocity_scale,
+                self.cfg.command_match_velocity_scale,
+                self.cfg.command_match_yaw_scale,
+            ],
             device=self.device, dtype=torch.float32,
         )
         features = self.motion_features
@@ -462,12 +512,12 @@ class MotionDataTerm(ManagerTermBase):
         distance = component_error.sum(dim=-1)
 
         # A single-axis command should not be matched by a motion whose main
-        # activity is on the other axis (for example, backward motion for a
-        # pure yaw command). Also penalize clips moving in the opposite signed
-        # direction on an active axis.
+        # activity is on another axis (for example, sidestep or backward motion
+        # for a pure yaw command). Also penalize clips moving in the opposite
+        # signed direction on an active axis.
         direction_weight = self.cfg.command_match_direction_weight
         if direction_weight > 0.0:
-            command_axes = torch.stack((commands[:, 0], commands[:, 2]), dim=1)
+            command_axes = commands[:, :3]
             direction_threshold = self.cfg.command_match_direction_threshold
             command_active = command_axes.abs() >= direction_threshold
             motion_active = features.abs() >= direction_threshold
@@ -594,19 +644,11 @@ class MotionDataTerm(ManagerTermBase):
         sample_times = time_start + phase * valid_range
         
         return sample_times
-        
-    def calc_motion_phase(self, motion_ids, times):
-        motion_durations = self.motion_durations[motion_ids]
-        loop_modes = self.motion_loop_modes[motion_ids]
-        phase = calc_phase(times, motion_durations, loop_modes)
-        return phase
-    
+
     def _calc_frame_blend(self, motion_ids: torch.Tensor, times: torch.Tensor):
         num_frames = self.motion_num_frames[motion_ids]
-        dt = self.motion_dt[motion_ids]
         motion_start_indices = self.motion_start_indices[motion_ids]
-        
-        phase = self.calc_motion_phase(motion_ids, times)
+        phase = torch.clip(times / self.motion_durations[motion_ids], 0.0, 1.0)
         
         frame_idx0 = (phase * (num_frames - 1).float()).long()
         frame_idx1 = torch.minimum(frame_idx0 + 1, num_frames - 1)
@@ -772,20 +814,3 @@ class MotionDataManager(ManagerBase):
             # add class to dict
             self._terms[term_name] = term
             self._term_cfgs[term_name] = term_cfg
-
-
-@torch.jit.script
-def calc_phase(times: torch.Tensor, motion_duration: torch.Tensor, loop_mode: torch.Tensor) -> torch.Tensor:
-    phase = times / motion_duration
-        
-    loop_wrap_mask = (loop_mode == int(LoopMode.WRAP.value))
-    phase_wrap = phase[loop_wrap_mask]
-    phase_wrap = phase_wrap - torch.floor(phase_wrap)
-    phase[loop_wrap_mask] = phase_wrap
-        
-    phase = torch.clip(phase, 0.0, 1.0)
-
-    return phase
-
-        
-        

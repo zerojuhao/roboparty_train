@@ -205,7 +205,6 @@ class RPORoughEnvCfg(RPOFlatEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.state_space = 326
-        self.sim.use_newton_actuators = False
         self.sim.physics.default.solver_cfg.use_mujoco_contacts = False
         self.sim.physics.default.solver_cfg.iterations = 200
         self.scene_context.height_scanner.enable_height_scan = True

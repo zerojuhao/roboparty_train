@@ -88,6 +88,7 @@ class AnimationTerm(ManagerTermBase):
         self.motion_ids = torch.zeros(self.num_envs, device=env.device, dtype=torch.long)
         self.motion_fetch_time = torch.zeros((self.num_envs, self.num_steps), device=env.device, dtype=torch.float32)
         self.motion_durations = torch.zeros(self.num_envs, device=env.device, dtype=torch.float32)
+        self._match_command = None
 
         self.reset(torch.arange(self.num_envs))
         self._fetch_motion_data()
@@ -122,6 +123,13 @@ class AnimationTerm(ManagerTermBase):
             root_ang_vel_b = root_ang_vel_b.torch
         current = torch.cat((root_lin_vel_b[:, :2], root_ang_vel_b[:, 2:3]), dim=1)
         return command[env_ids].detach(), current[env_ids].detach()
+
+    def _env_index(self, env_ids: Sequence[int] | slice | torch.Tensor | None) -> torch.Tensor:
+        if env_ids is None or env_ids == slice(None):
+            return torch.arange(self.num_envs, device=self._env.device)
+        if isinstance(env_ids, slice):
+            return torch.arange(self.num_envs, device=self._env.device)[env_ids]
+        return env_ids
 
     def _resample_motion_ids(
         self,
@@ -162,40 +170,51 @@ class AnimationTerm(ManagerTermBase):
             )
         self._fetch_motion_data(env_ids)
 
-    def reset(self, env_ids: Sequence[int] | None = None):
-        if env_ids is None:
-            return
-
+    def reset(self, env_ids: Sequence[int] | slice | None = None):
+        env_ids = self._env_index(env_ids)
         context = self._sampling_context(env_ids)
         self._resample_motion_ids(env_ids, context=context)
+        if context is not None:
+            self._store_match_command(env_ids, context[0])
+
+    def _store_match_command(self, env_ids: torch.Tensor, commands: torch.Tensor):
+        if self._match_command is None or self._match_command.shape[-1] != commands.shape[-1]:
+            self._match_command = torch.zeros(
+                self.num_envs, commands.shape[-1], device=self._env.device, dtype=commands.dtype
+            )
+        self._match_command[env_ids] = commands
+
+    def _advance_fetch_time(self, env_ids: torch.Tensor, dt: float):
+        if env_ids.numel() == 0:
+            return
+        self.motion_fetch_time[env_ids, 0] += dt
+        if self.num_steps > 1:
+            self.motion_fetch_time[env_ids, 1:] = (
+                self.motion_fetch_time[env_ids, 0:1] + self.step_indices[1:].float() * dt
+            )
 
     def update(self, dt: float):
-        command_match_resampled = False
+        sequential = False
+        resampled = None
         if self.motion_data_term.cfg.sampling_mode == "command_match":
             env_ids = torch.arange(self.num_envs, device=self._env.device)
             context = self._sampling_context(env_ids)
             if context is not None:
+                sequential = True
                 commands, current = context
-                # The body velocity changes every control step, so the motion
-                # distribution must be recomputed every step.
-                sampled_ids = self.motion_data_term.sample_motions(
-                    self.num_envs, commands=commands, current_velocity=current
-                )
-                self.motion_ids[:] = sampled_ids
-                self.motion_durations[:] = self.motion_data_term.get_motion_durations(sampled_ids)
-                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
-                    sampled_ids,
-                    truncate_time_start=-self.sample_min_time_offset,
-                    truncate_time_end=self.sample_max_time_offset,
-                )
-                if self.num_steps > 1:
-                    self.motion_fetch_time[:, 1:] = (
-                        self.motion_fetch_time[:, 0:1]
-                        + self.step_indices[1:].float() * dt
-                    )
-                command_match_resampled = True
+                command_changed = torch.zeros(self.num_envs, dtype=torch.bool, device=self._env.device)
+                if self._match_command is not None and self._match_command.shape[-1] == commands.shape[-1]:
+                    command_changed = (commands - self._match_command).abs().amax(dim=-1) > 1e-6
+                horizon = max(0, self.num_steps - 1) * dt
+                remaining = (self.motion_durations - horizon).clamp(min=0.0)
+                expired = self.motion_fetch_time[:, 0] >= remaining
+                need = command_changed | expired
+                if need.any():
+                    resampled = env_ids[need]
+                    self._resample_motion_ids(resampled, context=(commands[need], current[need]))
+                self._store_match_command(env_ids, commands)
 
-        if self.cfg.random_fetch and not command_match_resampled:
+        if self.cfg.random_fetch and not sequential:
             context = self._sampling_context(torch.arange(self.num_envs, device=self._env.device))
             if context is not None:
                 self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
@@ -211,22 +230,22 @@ class AnimationTerm(ManagerTermBase):
                 self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
                     self.motion_ids, truncate_time_start=self.num_steps * dt
                 )
-            
             if self.num_steps > 1:
                 self.motion_fetch_time[:, 1:] = self.motion_fetch_time[:, 0:1] + self.step_indices[1:].float() * dt
-            
+
+        if sequential or not self.cfg.random_fetch:
+            keep = torch.ones(self.num_envs, dtype=torch.bool, device=self._env.device)
+            if resampled is not None:
+                keep[resampled] = False
+            self._advance_fetch_time(torch.arange(self.num_envs, device=self._env.device)[keep], dt)
+
         self._fetch_motion_data()
-        
-        # Advance time
-        if not self.cfg.random_fetch and not command_match_resampled:
-            self.motion_fetch_time += dt # only effective when random_fetch is False
-            
+
         if self.cfg.enable_visualization:
             self._visualize()
             
-    def _fetch_motion_data(self, env_ids: Sequence[int] | None = None):
-        if env_ids is None:
-            env_ids = torch.arange(self.num_envs, device=self._env.device)
+    def _fetch_motion_data(self, env_ids: Sequence[int] | slice | None = None):
+        env_ids = self._env_index(env_ids)
         
         # Flatten for batch processing
         num_queries = len(env_ids) * self.num_steps
@@ -383,10 +402,9 @@ class AnimationManager(ManagerBase):
         for term in self._terms.values():
             term.update(dt)
 
-    def reset(self, env_ids: Sequence[int] | None = None) -> dict[str, torch.Tensor]:
+    def reset(self, env_ids: Sequence[int] | slice | None = None) -> dict[str, torch.Tensor]:
         if env_ids is None:
-            return {}
-        # reset all terms
+            env_ids = slice(None)
         for term in self._terms.values():
             term.reset(env_ids)
         return {}

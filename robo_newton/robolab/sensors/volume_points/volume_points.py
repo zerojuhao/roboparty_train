@@ -131,7 +131,7 @@ class VolumePoints(SensorBase):
     def _refresh_volume_points(self, env_ids: Sequence[int] | None = None) -> None:
         """Refresh the volume points data. If env_ids is None, refresh all environments."""
 
-        state = NewtonManager.get_state()
+        state = NewtonManager.get_state_0()
         body_indices = self._newton_body_indices[env_ids]
         body_poses = wp.to_torch(state.body_q)[body_indices]
         body_vels = wp.to_torch(state.body_qd)[body_indices]

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Export a PUFO checkpoint for rp1 real-robot deployment (CPU only, no simulator).
 
-Same assets as play_pufo.py without launching Isaac: networks and the tracking context are rebuilt
-from the run's saved params (agent.yaml / env.yaml), the checkpoint and training's own motion
-library / expert-trajectory code, so observation scales, joints and depth settings follow the run.
+Networks and the tracking context are rebuilt from the run's saved params
+(agent.yaml / env.yaml), the checkpoint and training's own motion library /
+expert-trajectory code, so observation scales, joints and depth settings follow the run.
 
 Written to ``<run>/exported/``:
     pbfm_actor.onnx    (state, last_action, history_actor, heading, velocity_command, z, depth_latent) -> actions
@@ -32,7 +32,6 @@ from types import SimpleNamespace
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(ROOT / "rsl_rl"), str(ROOT / "robo_newton")]
 
 import numpy as np
 import onnxruntime as ort

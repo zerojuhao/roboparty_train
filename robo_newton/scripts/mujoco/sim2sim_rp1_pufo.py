@@ -23,7 +23,6 @@ import xml.etree.ElementTree as ET
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(ROOT / "rsl_rl"), str(ROOT / "robo_newton")]
 DATA_ROOT = ROOT / "robo_newton/robolab/data"
 
 import cv2

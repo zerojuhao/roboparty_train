@@ -13,6 +13,7 @@ from isaaclab.managers import CommandTerm
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.terrains import TerrainImporter
 from isaaclab.utils.math import quat_apply_inverse, wrap_to_pi, yaw_quat
+from robolab.utils.tensors import resolve_env_ids
 
 from .command_math import (
     apply_abs_deadband,
@@ -240,7 +241,8 @@ class PoseVelocityCommand(CommandTerm):
             torch.exp(-angular_vel_error / self.cfg.ang_vel_metrics_std**2) / self._env.max_episode_length
         )
 
-    def _resample_command(self, env_ids: Sequence[int]):
+    def _resample_command(self, env_ids: Sequence[int] | slice | None):
+        env_ids = resolve_env_ids(env_ids, self.num_envs, self.device)
         # Select a random patch outside the reached radius. If no such patch
         # exists, the farthest patch still guarantees the best available target.
         candidate_targets = self.valid_targets[

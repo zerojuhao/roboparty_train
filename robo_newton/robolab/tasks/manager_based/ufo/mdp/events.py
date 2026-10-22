@@ -10,7 +10,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import math as math_utils
 
 from ..motion.torch_utils import my_quat_rotate, quat_from_angle_axis, quat_mul
-from robolab.utils.tensors import as_torch_tensor
+from robolab.utils.tensors import as_torch_tensor, resolve_env_ids
 
 TERRAIN_RESET_CLEARANCE = 0.05
 
@@ -65,8 +65,9 @@ def _align_reset_root_to_terrain(env: ManagerBasedRLEnv, env_ids, root_states: t
 
 
 def reset_root_state_from_motion(env: ManagerBasedRLEnv, env_ids, command_name: str):
+    env_ids = resolve_env_ids(env_ids, env.num_envs, env.device)
     command = env.command_manager.get_term(command_name)
-    if len(env_ids) == 0:
+    if env_ids.numel() == 0:
         return
     motion_res = command.get_motion_state()
     root_pos = motion_res["rg_pos_t"][env_ids, 0, :]
@@ -110,10 +111,8 @@ def randomize_camera_installation(
 ):
     """Sample one fixed camera installation error per environment."""
     sensor = env.scene[asset_cfg.name]
-    if env_ids is None:
-        env_ids = torch.arange(env.num_envs, device=env.device)
-    env_ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
-    count = len(env_ids)
+    env_ids = resolve_env_ids(env_ids, env.num_envs, env.device)
+    count = env_ids.numel()
     nominal_pos = torch.tensor(sensor.cfg.offset.pos, device=env.device).expand(count, -1)
     nominal_quat = math_utils.convert_camera_frame_orientation_convention(
         torch.tensor([sensor.cfg.offset.rot], device=env.device),
@@ -138,8 +137,9 @@ def reset_joint_state_from_motion(
     joint_pos_range: tuple[float, float] = (0.0, 0.0),
 ):
     """Reset to the motion frame with fresh position noise, keeping the reference zero fixed."""
+    env_ids = resolve_env_ids(env_ids, env.num_envs, env.device)
     command = env.command_manager.get_term(command_name)
-    if len(env_ids) == 0:
+    if env_ids.numel() == 0:
         return
     motion_res = command.get_motion_state()
     dof_pos = motion_res["dof_pos"][env_ids]

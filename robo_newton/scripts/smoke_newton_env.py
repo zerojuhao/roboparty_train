@@ -2,6 +2,8 @@
 
 import argparse
 import importlib
+import sys
+from pathlib import Path
 
 
 def observation_tensors(observations, prefix=""):
@@ -31,34 +33,16 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--require_kit", action="store_true", help="Initialize Kit for URDF asset conversion.")
     args = parser.parse_args()
-
-    app = None
-    if args.require_kit:
-        # Kit must own USD initialization before task modules import pxr.
-        from isaaclab.app import AppLauncher
-        app = AppLauncher({"device": args.device, "visualizer": "none"}).app
-    exit_code = 0
-    try:
-        run_smoke(args)
-    except Exception:
-        import traceback
-        exit_code = 1
-        traceback.print_exc()
-        raise
-    finally:
-        if app is not None:
-            app.close(exit_code=exit_code)
+    run_smoke(args)
 
 
 def run_smoke(args):
     import gymnasium as gym
     import torch
-    if args.require_kit:
-        import warp as wp
-        wp.config.enable_backward = False
-        import robolab.tasks  # noqa: F401
-    else:
-        import train_newton  # noqa: F401
+    from robolab.utils.kitless_runtime import configure_kitless_runtime
+
+    configure_kitless_runtime()
+    import robolab.tasks  # noqa: F401
     from isaaclab.app.sim_launcher import launch_simulation
 
     module_name, class_name = gym.spec(args.task).kwargs["env_cfg_entry_point"].split(":")
@@ -96,7 +80,7 @@ def run_smoke(args):
                 expected = env.unwrapped.scene.terrain.collision_counts
                 assert actual == expected, f"Terrain collider mismatch: {actual}, expected {expected}"
                 from robolab.terrains.native_importer import validate_terrain_colliders
-                validate_terrain_colliders(env.unwrapped)
+                validate_terrain_colliders(env.unwrapped, None)
                 terrain = env.unwrapped.scene.terrain
                 assert terrain.stair_edge_validation["tiles"] == len(terrain.terrain_generator.stair_collision_tiles)
                 print(f"PARKOUR solver colliders verified: {actual}", flush=True)

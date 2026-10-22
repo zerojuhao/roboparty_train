@@ -48,7 +48,6 @@ RPO_CFG = ArticulationCfg(
         asset_path=f"{ISAAC_DATA_DIR}/robots/rpo/urdf/rpo.urdf",
         fix_base=False,
         activate_contact_sensors=True,
-        replace_cylinders_with_capsules=True,
         joint_drive = sim_utils.UrdfConverterCfg.JointDriveCfg(
             gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)
         ),
@@ -169,7 +168,6 @@ RP1_24DOF_CFG = ArticulationCfg(
         asset_path=f"{ISAAC_DATA_DIR}/robots/rp1/urdf/rp1_24dof.urdf",
         fix_base=False,
         activate_contact_sensors=True,
-        replace_cylinders_with_capsules=True,
         joint_drive = sim_utils.UrdfConverterCfg.JointDriveCfg(
             gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)
         ),
@@ -189,7 +187,8 @@ RP1_24DOF_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.85),
+        # Default joints at 0.85 leave ~7.5 cm of air under the foot capsules.
+        pos=(0.0, 0.0, 0.78),
         joint_pos={
             "left_hip_pitch_joint": -0.1,
             "left_knee_joint": -0.3,

@@ -41,13 +41,16 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.physics import PhysxAutoCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_ov.physics import OvPhysxCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
@@ -256,10 +259,11 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 1.7),
-            "dynamic_friction_range": (0.3, 1.7),
-            "restitution_range": (0.0, 0.0),
+            "static_friction_range": (0.3, 1.6),
+            "dynamic_friction_range": (0.3, 1.6),
+            "restitution_range": (0.05, 0.5),
             "num_buckets": 64,
+            "make_consistent": True,
         },
     )
     randomize_rigid_body_com = EventTerm(
@@ -301,65 +305,103 @@ class EventCfg:
     )
 
     # reset
-    reset_base=EventTerm(
+    reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+            "pose_range": {
+                "x": (-0.0, 0.0),
+                "y": (-0.0, 0.0),
+                "yaw": (-3.14, 3.14),
+            },
             "velocity_range": {
-                "x": (-0.2, 0.2),
-                "y": (-0.2, 0.2),
-                "z": (-0.2, 0.2),
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
                 "roll": (-0.2, 0.2),
                 "pitch": (-0.2, 0.2),
                 "yaw": (-0.2, 0.2),
             },
         },
     )
-
-    reset_robot_joints=EventTerm(
-        func=mdp.reset_joints_by_scale,
+    reset_from_ref = EventTerm(
+        func=mdp.reset_from_ref,
         mode="reset",
         params={
-            "position_range": (0.8, 1.2),
-            "velocity_range": (0.0, 0.0),
+            "animation": ANIMATION_TERM_NAME,
         },
     )
-    
-    # push_robot = EventTerm(
-    #     func=mdp.push_by_setting_velocity,
-    #     mode="interval",
-    #     interval_range_s=(5.0, 10.0),
-    #     params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-1.0, 1.0)}},
+    # reset_robot_joints = EventTerm(
+    #     func=mdp.reset_joints_by_scale,
+    #     mode="reset",
+    #     params={
+    #         "position_range": (0.8, 1.2),
+    #         "velocity_range": (0.0, 0.0),
+    #     },
     # )
+    
+    push_robot = EventTerm(
+        func=mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(5.0, 10.0),
+        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-1.0, 1.0)}},
+    )
     
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # -- task
+    # -- tracking
     track_lin_vel_xy_exp = RewTerm(
-        func=mdp.track_lin_vel_xy_exp, weight=1.0,
-        params={
-            "command_name": "base_velocity", "std": math.sqrt(0.25),
-            "braking_reward_scale": 1.0, "braking_min_speed": 0.2, "braking_max_command": 0.1,
-        }
+        func=mdp.track_lin_vel_xy_exp, weight=2.0,
+        params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
     track_ang_vel_z_exp = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_ang_vel_z_exp, weight=2.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
     is_alive = RewTerm(func=mdp.is_alive, weight=1.0)
-    
-    # -- penalties
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
-    stand_still = RewTerm(func=mdp.stand_still, weight=-1.0)
+
+    # -- gait
+    feet_air_time_positive_biped = RewTerm(
+        func=mdp.feet_air_time_positive_biped, weight=1.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
+            "command_name": "base_velocity", "threshold": 0.3,
+        },
+    )
+    yaw_turn_foot_air_time = RewTerm(
+        func=mdp.yaw_turn_foot_air_time, weight=2.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+            "command_name": "base_velocity",
+            "lin_vel_max": 0.3,
+            "ang_vel_min": 0.3,
+            "target_height": 0.05,
+            "target_air_time": 0.3,
+            "height_std": 0.03,
+            "air_std": 0.15,
+        },
+    )
+    high_speed_double_flight = RewTerm(
+        func=mdp.high_speed_double_flight, weight=5.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
+            "command_name": "base_velocity", "speed_gate": 1.5, "max_flight_time": 0.30,
+            "max_forward_lean": math.radians(15.0),
+            "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
+        },
+    )
+
+    # -- posture
+    stand_still = RewTerm(func=mdp.stand_still, weight=-0.1)
     # lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-1.0)
     pelvis_orientation_l2 = RewTerm(
         func=mdp.link_orientation,
-        weight=-6.0,
+        weight=-1.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
-            "forward_tolerance": math.radians(5.0),
+            "forward_tolerance": math.radians(15.0),
         },
     )
     pelvis_ang_vel_xy_l2 = RewTerm(
@@ -367,22 +409,21 @@ class RewardsCfg:
         weight=-0.01,
         params={"asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link")},
     )
-    joint_vel_l2 = RewTerm(func=mdp.joint_vel_l2, weight=-2e-4)
-    joint_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1e-5)
-    joint_energy = RewTerm(func=mdp.joint_energy, weight=-1e-4)
-    joint_torque_saturation_l2 = RewTerm(
-        func=mdp.joint_torque_saturation_l2,
-        weight=-0.1,
+    hip_yaw_deviation_l1 = RewTerm(
+        func=mdp.joint_deviation_l1, weight=-0.1,
         params={
-            "limit_ratio": 0.95,
-            "use_substep_peak": True,
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+            "asset_cfg": SceneEntityCfg(
+                "robot", joint_names=["left_hip_yaw_joint", "right_hip_yaw_joint"],
+            ),
+            "command_name": "base_velocity",
+            "ang_vel_gate": 0.3,
         },
     )
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
+
+    # -- contact
     feet_slide = RewTerm(
         func=mdp.feet_slide,
-        weight=-0.5,
+        weight=-0.1,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
@@ -422,20 +463,12 @@ class RewardsCfg:
             ),
             "contact_threshold": 1.0,
             "command_name": "base_velocity",
-            "speed_gate": 1.2,
-        },
-    )
-    hip_yaw_deviation_l1 = RewTerm(
-        func=mdp.joint_deviation_l1, weight=-0.1,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot", joint_names=["left_hip_yaw_joint", "right_hip_yaw_joint"],
-            ),
+            "speed_gate": 1.5,
         },
     )
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
-        weight=-10.0,
+        weight=-1.0,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces", body_names="^(?!.*ankle_roll_link$).*$"
@@ -443,23 +476,23 @@ class RewardsCfg:
             "threshold": 1.0,
         },
     )
+
+    # -- regularization
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    joint_vel_l2 = RewTerm(func=mdp.joint_vel_l2, weight=-2e-4)
+    joint_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1e-5)
+    joint_energy = RewTerm(func=mdp.joint_energy, weight=-1e-4)
+    joint_torque_saturation_l2 = RewTerm(
+        func=mdp.joint_torque_saturation_l2,
+        weight=-0.1,
+        params={
+            "limit_ratio": 0.95,
+            "use_substep_peak": True,
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+        },
+    )
+    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-10.0)
-    feet_air_time = RewTerm(
-        func=mdp.feet_air_time_positive_biped, weight=1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
-            "command_name": "base_velocity", "threshold": 0.3, "turn_reward_scale": 0.5,
-        },
-    )
-    high_speed_double_flight = RewTerm(
-        func=mdp.high_speed_double_flight, weight=4.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
-            "command_name": "base_velocity", "speed_gate": 1.5, "max_flight_time": 0.30,
-            "max_forward_lean": math.radians(15.0),
-            "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
-        },
-    )
 
 
 @configclass
@@ -513,7 +546,7 @@ class AnimationCfg:
         ], 
         num_steps_to_use=3, 
         random_initialize=True,
-        random_fetch=True,
+        random_fetch=False,
         enable_visualization=False,
     )
     animation_in_place_turn: AnimTerm | None = None
@@ -526,8 +559,10 @@ class AnimationCfg:
 
 @configclass
 class PhysicsPresetCfg(PresetCfg):
-    isaacsim_physx: PhysxCfg = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
-    newton_mjwarp: NewtonCfg = NewtonCfg(
+    isaacsim_physx = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    ovphysx = OvPhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    physx = PhysxAutoCfg(isaacsim_physx=isaacsim_physx, ovphysx=ovphysx)
+    newton_mjwarp = NewtonCfg(
         solver_cfg=MJWarpSolverCfg(
             cone="pyramidal",
             impratio=1.0,
@@ -538,7 +573,7 @@ class PhysicsPresetCfg(PresetCfg):
         ),
         num_substeps=1,
     )
-    default: NewtonCfg = newton_mjwarp
+    default = newton_mjwarp
 
 
 @configclass
@@ -547,6 +582,7 @@ class AmpEnvCfg(AnimationEnvCfg):
 
     motion_dataset_contract: str = "roboparty_motion_v1_urdf"
 
+    sim: SimulationCfg = SimulationCfg(physics=PhysicsPresetCfg())
     # scene
     scene: AmpSceneCfg = AmpSceneCfg(num_envs=8192, env_spacing=2.5)
     # Basic settings
@@ -572,7 +608,8 @@ class AmpEnvCfg(AnimationEnvCfg):
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physics = PhysicsPresetCfg()
+        # Custom RoboParty actuators are not Newton-native; keep the host path.
+        self.sim.use_newton_actuators = False
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         if self.scene.contact_forces is not None:

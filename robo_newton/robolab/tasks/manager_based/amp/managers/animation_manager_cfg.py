@@ -57,7 +57,12 @@ class AnimationTermCfg:
     """Whether to randomly initialize the starting point in the motion data term."""
     
     random_fetch: bool = False
-    """Whether to randomly fetch the motion data at each step."""
+    """Whether to randomly fetch the motion data at each step.
+
+    Ignored when the motion term uses ``command_match``: that path always plays
+    the matched clip sequentially and only resamples on reset, command change,
+    or when fewer than ``num_steps_to_use`` frames remain. Clips never wrap.
+    """
     
     enable_visualization: bool = True
     """Whether to enable visualization for this animation term."""

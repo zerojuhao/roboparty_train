@@ -828,7 +828,7 @@ class EventCfg:
 
     validate_terrain_collision = EventTerm(func=validate_terrain_colliders, mode="startup")
 
-    physics_material = EventTerm(
+    randomize_rigid_body_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
         params={
@@ -840,17 +840,6 @@ class EventCfg:
             "make_consistent": True,
         },
     )
-
-    add_base_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
-            "mass_distribution_params": (-1.0, 1.0),
-            "operation": "add",
-        },
-    )
-
     randomize_rigid_body_com = EventTerm(
         func=mdp.randomize_rigid_body_com,
         mode="startup",
@@ -859,19 +848,15 @@ class EventCfg:
             "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.03, 0.03)}, # 0.02
         },
     )
-
     scale_link_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg(
-                "robot", body_names=["left_.*_link", "right_.*_link"]
-            ),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
             "mass_distribution_params": (0.9, 1.1),
             "operation": "scale",
         },
     )
-
     scale_actuator_gains = EventTerm(
         func=mdp.randomize_actuator_gains,
         mode="startup",
@@ -882,7 +867,6 @@ class EventCfg:
             "operation": "scale",
         },
     )
-
     scale_joint_parameters = EventTerm(
         func=mdp.randomize_joint_parameters,
         mode="startup",
@@ -914,7 +898,6 @@ class EventCfg:
             },
         },
     )
-
     register_virtual_obstacles = EventTerm(
         func=mdp.register_virtual_obstacle_to_sensor,
         mode="startup",
@@ -922,7 +905,6 @@ class EventCfg:
             "sensor_cfgs": SceneEntityCfg("feet_volume_points"),
         },
     )
-
     register_virtual_obstacles_knee = EventTerm(
         func=mdp.register_virtual_obstacle_to_sensor,
         mode="startup",
@@ -930,16 +912,6 @@ class EventCfg:
             "sensor_cfgs": SceneEntityCfg("knee_volume_points"),
         },
     )
-
-    # reset_robot_joints = EventTerm(
-    #     func=mdp.reset_joints_by_offset,
-    #     mode="reset",
-    #     params={
-    #         "position_range": (-0.15, 0.15),
-    #         "velocity_range": (0.0, 0.0),
-    #     },
-    # )
-
     reset_robot_joints=EventTerm(
         func=mdp.reset_joints_by_scale,
         mode="reset",

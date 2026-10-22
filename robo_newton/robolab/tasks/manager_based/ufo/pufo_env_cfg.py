@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.physics import PhysxAutoCfg
+from isaaclab.sim import SimulationCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -23,6 +25,7 @@ from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 import isaaclab.sim as sim_utils
 from isaaclab_newton.physics import NewtonCfg
 from isaaclab_newton.sensors.ray_caster.legacy_ray_caster import LegacyRayCaster
+from isaaclab_ov.physics import OvPhysxCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
@@ -146,7 +149,7 @@ class PUFOCommandsCfg:
 @configclass
 class PUFOActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
-        class_type=mdp.rewards.BodyImpactJointPositionAction,
+        class_type=mdp.BodyImpactJointPositionAction,
         asset_name="robot", joint_names=[".*"], scale=0.4, use_default_offset=True
     )
 
@@ -243,7 +246,7 @@ class PUFOObservationsCfg:
 @configclass
 class PUFOEventCfg:
     resample_motion = EventTerm(
-        func=mdp.events.resample_motion_for_reset,
+        func=mdp.resample_motion_for_reset,
         mode="reset",
         params={"command_name": "motion"},
     )
@@ -256,7 +259,7 @@ class PUFOEventCfg:
         },
     )
     randomize_camera_installation = EventTerm(
-        func=mdp.events.randomize_camera_installation,
+        func=mdp.randomize_camera_installation,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("camera"),
@@ -307,7 +310,7 @@ class PUFOEventCfg:
         },
     )
     push_robot = EventTerm(
-        func=mdp.events.push_robot_by_setting_base_velocity,
+        func=mdp.push_robot_by_setting_base_velocity,
         mode="interval",
         interval_range_s=(1.0, 3.0),
         params={
@@ -326,33 +329,33 @@ class PUFOEventCfg:
 @configclass
 class PUFORewardsCfg:
     penalty_action_rate = RewTerm(
-        func=mdp.rewards.penalty_action_rate,
+        func=mdp.penalty_action_rate,
         weight=-0.2,
     )
     # Keep the Parkour foot penalty; strengthen action changes and acceleration
     # while retaining the previous 10x joint-speed penalty.
     sound_suppression_acc_per_foot = RewTerm(
-        func=mdp.rewards.sound_suppression_acc_per_foot,
+        func=mdp.sound_suppression_acc_per_foot,
         weight=-5e-3,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
     )
     joint_acc_l2 = RewTerm(
-        func=mdp.rewards.joint_acc_l2,
+        func=mdp.joint_acc_l2,
         weight=-1e-6,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
     joint_vel_l2 = RewTerm(
-        func=mdp.rewards.joint_vel_l2,
+        func=mdp.joint_vel_l2,
         weight=-1e-3,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
     limits_dof_pos = RewTerm(
-        func=mdp.rewards.limits_dof_pos,
+        func=mdp.limits_dof_pos,
         weight=-10.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
     penalty_body_impact = RewTerm(
-        func=mdp.rewards.pufo_penalty_body_impact,
+        func=mdp.pufo_penalty_body_impact,
         weight=-1.0,
         params={
             "asset_cfg": SceneEntityCfg(
@@ -373,7 +376,7 @@ class PUFORewardsCfg:
         },
     )
     penalty_slippage = RewTerm(
-        func=mdp.rewards.pufo_penalty_slippage,
+        func=mdp.pufo_penalty_slippage,
         weight=-4.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
@@ -381,12 +384,12 @@ class PUFORewardsCfg:
         },
     )
     penalty_ankle_roll = RewTerm(
-        func=mdp.rewards.penalty_ankle_roll,
+        func=mdp.penalty_ankle_roll,
         weight=-1.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*ankle_roll.*")},
     )
     feet_stumble = RewTerm(
-        func=mdp.rewards.pufo_feet_stumble,
+        func=mdp.pufo_feet_stumble,
         weight=-2.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
     )
@@ -394,9 +397,9 @@ class PUFORewardsCfg:
 
 @configclass
 class PUFOTerminationsCfg:
-    time_out = DoneTerm(func=mdp.terminations.time_out, time_out=True)
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
     terrain_boundary = DoneTerm(
-        func=mdp.terminations.terrain_out_of_bounds, time_out=True,
+        func=mdp.terrain_out_of_bounds, time_out=True,
         params={"safety_margin": 0.5},
     )
 
@@ -404,7 +407,7 @@ class PUFOTerminationsCfg:
 @configclass
 class PUFOCurriculumCfg:
     terrain_levels = CurrTerm(
-        func=mdp.curriculums.terrain_levels_by_global_step,
+        func=mdp.terrain_levels_by_global_step,
         params={
             "start_step": 0,
             "interval": 19_200_000,
@@ -417,8 +420,10 @@ class PUFOCurriculumCfg:
 
 @configclass
 class PUFOPhysicsPresetCfg(PresetCfg):
-    isaacsim_physx: PhysxCfg = PhysxCfg()
-    newton_mjwarp: NewtonCfg = NewtonCfg(
+    isaacsim_physx = PhysxCfg()
+    ovphysx = OvPhysxCfg()
+    physx = PhysxAutoCfg(isaacsim_physx=isaacsim_physx, ovphysx=ovphysx)
+    newton_mjwarp = NewtonCfg(
         solver_cfg=PUFOMJWarpSolverCfg(
             cone="pyramidal",
             impratio=1.0,
@@ -435,7 +440,7 @@ class PUFOPhysicsPresetCfg(PresetCfg):
         num_substeps=2,
         debug_mode=False,
     )
-    default: NewtonCfg = newton_mjwarp
+    default = newton_mjwarp
 
 
 @configclass
@@ -457,6 +462,7 @@ class PUFOPlaneSceneCfg(PUFOSceneCfg):
 
 @configclass
 class PUFOEnvCfg(ManagerBasedRLEnvCfg):
+    sim: SimulationCfg = SimulationCfg(physics=PUFOPhysicsPresetCfg())
     scene: PUFOSceneCfg = PUFOSceneCfg()
     commands: PUFOCommandsCfg = PUFOCommandsCfg()
     actions: PUFOActionsCfg = PUFOActionsCfg()
@@ -475,7 +481,6 @@ class PUFOEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 10.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
-        self.sim.physics = PUFOPhysicsPresetCfg().default
         self.sim.use_newton_actuators = False
 
 

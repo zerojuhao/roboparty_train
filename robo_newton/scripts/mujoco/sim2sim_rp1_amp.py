@@ -30,7 +30,6 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "robo_newton"))
 from robolab.utils.command_path import command_path_features
 from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
 
@@ -488,6 +487,10 @@ def main() -> None:
     command_group.add_argument("--yaw-rate", type=float)
     command_group.add_argument("--forward-speed", type=float)
     command_group.add_argument(
+        "--cmd", nargs=3, type=float, metavar=("VX", "VY", "YAW"),
+        help="Fixed body-frame command [vx, vy, yaw].",
+    )
+    command_group.add_argument(
         "--sequence", type=str,
         help='JSON list of command segments, e.g. [{"kind":"vx","value":0.7,"duration":4}]',
     )
@@ -515,7 +518,7 @@ def main() -> None:
                 parser.error("each sequence segment needs kind=vx|yaw, finite value, and positive duration")
         args.duration = float(sum(float(segment["duration"]) for segment in sequence))
     max_speed = args.max_speed
-    if sequence is None and args.yaw_rate is None and args.forward_speed is None and max_speed is None:
+    if sequence is None and args.yaw_rate is None and args.forward_speed is None and args.cmd is None and max_speed is None:
         max_speed = 3.6
     if args.duration <= 0 or (max_speed is not None and max_speed < 0) or args.camera_distance <= 0:
         parser.error("duration and camera distance must be positive; max speed must be nonnegative")
@@ -554,6 +557,8 @@ def main() -> None:
         parser.error("yaw rate must be finite")
     if sequence is None and args.forward_speed is not None and not np.isfinite(args.forward_speed):
         parser.error("forward speed must be finite")
+    if sequence is None and args.cmd is not None and not all(np.isfinite(args.cmd)):
+        parser.error("cmd components must be finite")
     if args.width % 2 or args.height % 2:
         parser.error("video width and height must be even")
 
@@ -570,6 +575,9 @@ def main() -> None:
     elif args.forward_speed is not None:
         recording_suffix = f"vx_{args.forward_speed:g}"
         command_description = f"fixed forward speed {args.forward_speed:g} m/s"
+    elif args.cmd is not None:
+        recording_suffix = f"cmd_{args.cmd[0]:g}_{args.cmd[1]:g}_{args.cmd[2]:g}"
+        command_description = f"fixed command vx={args.cmd[0]:g} vy={args.cmd[1]:g} yaw={args.cmd[2]:g}"
     else:
         recording_suffix = f"ramp_0_to_{max_speed:g}"
         command_description = f"linear ramp 0 to {max_speed:g} m/s"
@@ -632,6 +640,9 @@ def main() -> None:
             elif args.yaw_rate is not None:
                 command_value = args.yaw_rate
                 policy_command = np.array([0.0, 0.0, command_value], dtype=np.float32)
+            elif args.cmd is not None:
+                policy_command = np.asarray(args.cmd, dtype=np.float32)
+                command_value = args.cmd[0]
             else:
                 if args.forward_speed is not None:
                     command_value = args.forward_speed
@@ -672,6 +683,12 @@ def main() -> None:
                 command_text = f"command yaw {command_value:+4.2f} rad/s"
                 measured_text = f"actual yaw  {actual_yaw:+4.2f} rad/s"
                 auxiliary_text = f"XY offset {np.linalg.norm(state['root_position_w'][:2]):5.3f} m"
+            elif args.cmd is not None:
+                measured_value = actual_vx
+                auxiliary_value = actual_yaw
+                command_text = f"cmd vx {args.cmd[0]:+4.2f} yaw {args.cmd[2]:+4.2f}"
+                measured_text = f"act vx {actual_vx:+4.2f} yaw {actual_yaw:+4.2f}"
+                auxiliary_text = f"heading {np.rad2deg(float(state['heading_rad'])):+6.1f} deg"
             else:
                 measured_value = actual_vx
                 auxiliary_value = float(estimated_velocity[0])
@@ -691,6 +708,12 @@ def main() -> None:
                         f"t={seconds:4.1f}s cmd_yaw={command_value:+4.2f} "
                         f"actual_yaw={actual_yaw:+5.2f} drift={linear_drift:4.2f} "
                         f"height={root_height:.3f}", flush=True,
+                    )
+                elif args.cmd is not None:
+                    print(
+                        f"t={seconds:4.1f}s cmd=({args.cmd[0]:+.2f},{args.cmd[1]:+.2f},{args.cmd[2]:+.2f}) "
+                        f"vx={actual_vx:+5.2f} yaw={actual_yaw:+5.2f} height={root_height:.3f}",
+                        flush=True,
                     )
                 else:
                     print(
@@ -781,6 +804,11 @@ def main() -> None:
                     np.sqrt(np.mean((values[:, 3] - values[:, 2]) ** 2))
                 ),
             })
+            if args.cmd is not None:
+                report["cmd"] = [float(x) for x in args.cmd]
+                report["mean_actual_yaw_rps"] = float(yaw_velocity.mean())
+                report["yaw_tracking_mae_rps"] = float(np.abs(yaw_velocity - args.cmd[2]).mean())
+                report.pop("velocity_estimator_rmse_x_mps", None)
             if args.deceleration_seconds is not None:
                 report["cruise"] = speed_phase_metrics(values, telemetry, cruise_start, cruise_end, fallen_at)
                 report["standing"] = speed_phase_metrics(

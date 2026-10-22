@@ -74,7 +74,7 @@ class RoboPartyActuator(DelayedPDActuator):
 
     def reset(self, env_ids=None):
         super().reset(env_ids)
-        if env_ids is None:
+        if env_ids is None or env_ids == slice(None):
             self._rfi_noise.zero_()
         else:
             self._rfi_noise[env_ids] = 0.0
@@ -89,12 +89,14 @@ class RoboPartyActuator(DelayedPDActuator):
                 2.0 * torch.rand_like(self._rfi_noise) - 1.0
             ) * self.cfg.rfi_lim * self.effort_limit
             self.computed_effort += self._rfi_noise
-            self.applied_effort = self._clip_effort(self.computed_effort)
+            self.applied_effort = self._clip_effort(self.computed_effort, joint_vel)
             control_action.joint_efforts = self.applied_effort
         return control_action
 
-    def _clip_effort(self, effort: torch.Tensor) -> torch.Tensor:
-        joint_vel_abs = self._joint_vel.abs()
+    def _clip_effort(self, effort: torch.Tensor, joint_vel: torch.Tensor | None = None) -> torch.Tensor:
+        if joint_vel is None:
+            joint_vel = self._joint_vel
+        joint_vel_abs = joint_vel.abs()
         slope = -self.effort_limit / (self.velocity_limit - self._keep_velocity)
         rolloff_effort = slope * (joint_vel_abs - self._keep_velocity) + self.effort_limit
         drive_limit = torch.where(
@@ -104,8 +106,8 @@ class RoboPartyActuator(DelayedPDActuator):
         )
         # The speed envelope limits motoring, not braking. Symmetric clipping
         # would remove all damping above no-load speed, including reverse torque.
-        upper = torch.where(self._joint_vel >= 0.0, drive_limit, self.effort_limit)
-        lower = torch.where(self._joint_vel <= 0.0, -drive_limit, -self.effort_limit)
+        upper = torch.where(joint_vel >= 0.0, drive_limit, self.effort_limit)
+        lower = torch.where(joint_vel <= 0.0, -drive_limit, -self.effort_limit)
         return torch.clip(effort, min=lower, max=upper)
 
 

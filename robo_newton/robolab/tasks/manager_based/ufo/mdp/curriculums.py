@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 
 from isaaclab.envs import ManagerBasedRLEnv
+from robolab.utils.tensors import resolve_env_ids
 
 
 def terrain_levels_by_global_step(
@@ -25,7 +26,7 @@ def terrain_levels_by_global_step(
     if not 0.0 <= easy_fraction <= 1.0:
         raise ValueError("easy_fraction must be in [0, 1].")
 
-    env_ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
+    env_ids = resolve_env_ids(env_ids, env.num_envs, env.device)
     global_step = max(0, int(getattr(env, "_ufo_global_step", 0)) - start_step)
     maximum = min(
         terrain.terrain_origins.shape[0] - 1,

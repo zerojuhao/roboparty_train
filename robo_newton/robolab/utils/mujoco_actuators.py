@@ -7,8 +7,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import torch
 
-from isaaclab.actuators._compat import _resolve_limit_aliases
 from isaaclab.actuators.actuator_base import resolve_joint_parameter
+from isaaclab.actuators.actuator_compat import resolve_limit_aliases
 from isaaclab.utils.types import ArticulationActions
 from robolab.assets.robots.roboparty_actuators import RoboPartyActuator, RoboPartyActuatorCfg
 
@@ -29,7 +29,7 @@ class RoboPartyMujocoActuator:
         if "RoboPartyActuator" not in str(values.pop("class_type", "")):
             raise ValueError("RP1 sim2sim requires a RoboPartyActuator configuration")
         cfg = RoboPartyActuatorCfg(**values)
-        _resolve_limit_aliases("sim2sim", cfg, self.names, warn_deprecated=False)
+        resolve_limit_aliases("sim2sim", cfg, self.names, warn_deprecated=False)
         if nominal:
             cfg.min_delay = cfg.max_delay = 0
             cfg.rfi_lim = 0.0

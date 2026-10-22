@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.physics import PhysxAutoCfg
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sim import SimulationCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -26,6 +28,7 @@ from isaaclab.managers import SceneEntityCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab_newton.physics import NewtonCfg
+from isaaclab_ov.physics import OvPhysxCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
@@ -71,7 +74,7 @@ class UFOCommandsCfg:
 @configclass
 class UFOActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
-        class_type=mdp.rewards.BodyImpactJointPositionAction,
+        class_type=mdp.BodyImpactJointPositionAction,
         asset_name="robot", joint_names=[".*"], scale=0.4, use_default_offset=True,
     )
 
@@ -128,17 +131,17 @@ class UFOObservationsCfg:
 @configclass
 class UFOEventCfg:
     resample_motion = EventTerm(
-        func=mdp.events.resample_motion_for_reset,
+        func=mdp.resample_motion_for_reset,
         mode="reset",
         params={"command_name": "motion"},
     )
     reset_root_state = EventTerm(
-        func=mdp.events.reset_root_state_from_motion,
+        func=mdp.reset_root_state_from_motion,
         mode="reset",
         params={"command_name": "motion"},
     )
     reset_joint_state = EventTerm(
-        func=mdp.events.reset_joint_state_from_motion,
+        func=mdp.reset_joint_state_from_motion,
         mode="reset",
         params={"command_name": "motion", "joint_pos_range": (0.0, 0.0)},
     )
@@ -181,7 +184,7 @@ class UFOEventCfg:
         },
     )
     push_robot = EventTerm(
-        func=mdp.events.push_robot_by_setting_base_velocity,
+        func=mdp.push_robot_by_setting_base_velocity,
         mode="interval",
         interval_range_s=(1.0, 3.0),
         params={
@@ -200,31 +203,31 @@ class UFOEventCfg:
 @configclass
 class UFORewardsCfg:
     penalty_action_rate = RewTerm(
-        func=mdp.rewards.penalty_action_rate,
+        func=mdp.penalty_action_rate,
         weight=-0.2,
     )
     sound_suppression_acc_per_foot = RewTerm(
-        func=mdp.rewards.sound_suppression_acc_per_foot,
+        func=mdp.sound_suppression_acc_per_foot,
         weight=-5e-3,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
     )
     joint_acc_l2 = RewTerm(
-        func=mdp.rewards.joint_acc_l2,
+        func=mdp.joint_acc_l2,
         weight=-1e-6,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
     joint_vel_l2 = RewTerm(
-        func=mdp.rewards.joint_vel_l2,
+        func=mdp.joint_vel_l2,
         weight=-1e-3,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
     limits_dof_pos = RewTerm(
-        func=mdp.rewards.limits_dof_pos,
+        func=mdp.limits_dof_pos,
         weight=-10.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*")},
     )
     penalty_body_impact = RewTerm(
-        func=mdp.rewards.pufo_penalty_body_impact,
+        func=mdp.pufo_penalty_body_impact,
         weight=-1.0,
         params={
             "asset_cfg": SceneEntityCfg(
@@ -245,7 +248,7 @@ class UFORewardsCfg:
         },
     )
     penalty_slippage = RewTerm(
-        func=mdp.rewards.pufo_penalty_slippage,
+        func=mdp.pufo_penalty_slippage,
         weight=-4.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
@@ -253,25 +256,27 @@ class UFORewardsCfg:
         },
     )
     penalty_ankle_roll = RewTerm(
-        func=mdp.rewards.penalty_ankle_roll,
+        func=mdp.penalty_ankle_roll,
         weight=-1.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*ankle_roll.*")},
     )
     feet_stumble = RewTerm(
-        func=mdp.rewards.pufo_feet_stumble,
+        func=mdp.pufo_feet_stumble,
         weight=-2.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link")},
     )
 
 @configclass
 class UFOTerminationsCfg:
-    time_out = DoneTerm(func=mdp.terminations.time_out, time_out=True)
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
 
 @configclass
 class PhysicsPresetCfg(PresetCfg):
-    isaacsim_physx: PhysxCfg = PhysxCfg()
-    newton_mjwarp: NewtonCfg = NewtonCfg(
+    isaacsim_physx = PhysxCfg()
+    ovphysx = OvPhysxCfg()
+    physx = PhysxAutoCfg(isaacsim_physx=isaacsim_physx, ovphysx=ovphysx)
+    newton_mjwarp = NewtonCfg(
         solver_cfg=PUFOMJWarpSolverCfg(
             cone="pyramidal",
             impratio=1.0,
@@ -286,11 +291,12 @@ class PhysicsPresetCfg(PresetCfg):
         num_substeps=2,
         debug_mode=False,
     )
-    default: NewtonCfg = newton_mjwarp
+    default = newton_mjwarp
 
 
 @configclass
 class UFOEnvCfg(ManagerBasedRLEnvCfg):
+    sim: SimulationCfg = SimulationCfg(physics=PhysicsPresetCfg())
     scene: UFOSceneCfg = UFOSceneCfg()
     commands: UFOCommandsCfg = UFOCommandsCfg()
     actions: UFOActionsCfg = UFOActionsCfg()
@@ -307,7 +313,6 @@ class UFOEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 10.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
-        self.sim.physics = PhysicsPresetCfg().default
         # The custom RoboParty actuator config is not Newton-native; use the
         # host-executed actuator path while keeping Newton as the physics solver.
         self.sim.use_newton_actuators = False

@@ -27,7 +27,7 @@ _original_attach = None
 GUARD_REVISION = "epa-face-v2"
 VALIDATED_VERSIONS = {
     "mujoco": "3.12.0", "mujoco-warp": "3.12.0",
-    "warp-lang": "1.17.0", "newton": "1.6.0",
+    "warp-lang": "1.17.0", "newton": "1.6.1",
 }
 _SOURCE_HASHES = {
     "collision_gjk": "fe2741a492f4e108a776aeb64c67dacf518845b16087209a6b9edda6367affdb",

@@ -53,52 +53,26 @@ def _as_torch(value) -> torch.Tensor:
 
 
 def track_lin_vel_xy_exp(
-    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    use_braking_reference: bool = False,
-    braking_reward_scale: float = 1.0,
-    braking_min_speed: float = 0.2,
-    braking_max_command: float = 0.1,
+    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """Reward xy tracking with optional lower pressure during an abrupt stop."""
-    if not math.isfinite(braking_reward_scale) or braking_reward_scale <= 0.0:
-        raise ValueError("braking_reward_scale must be finite and positive.")
-    if braking_min_speed < 0.0 or braking_max_command < 0.0:
-        raise ValueError("braking speed and command thresholds must be non-negative.")
-    # extract the used quantities (to enable type-hinting)
+    """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
     asset: RigidObject = env.scene[asset_cfg.name]
-    command = (env.command_manager.get_term(command_name).tracking_command
-               if use_braking_reference else env.command_manager.get_command(command_name))
-    # compute the error
     lin_vel_error = torch.sum(
-        torch.square(
-            command[:, :2] - _as_torch(asset.data.root_lin_vel_b)[:, :2]
-        ),
+        torch.square(env.command_manager.get_command(command_name)[:, :2] - asset.data.root_lin_vel_b.torch[:, :2]),
         dim=1,
     )
-    reward = torch.exp(-lin_vel_error / std**2)
-    reward *= torch.clamp(-_as_torch(asset.data.projected_gravity_b)[:, 2], 0, 0.7) / 0.7
-    if braking_reward_scale != 1.0:
-        actual_speed = torch.linalg.vector_norm(_as_torch(asset.data.root_lin_vel_b)[:, :2], dim=1)
-        braking = (
-            torch.linalg.vector_norm(command[:, :2], dim=1) <= braking_max_command
-        ) & (actual_speed > braking_min_speed)
-        reward = torch.where(braking, reward * braking_reward_scale, reward)
-    return reward
+    return torch.exp(-lin_vel_error / std**2)
 
 
 def track_ang_vel_z_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     """Reward tracking of angular velocity commands (yaw) using exponential kernel."""
-    # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    # compute the error
     ang_vel_error = torch.square(
-        env.command_manager.get_command(command_name)[:, 2] - _as_torch(asset.data.root_ang_vel_b)[:, 2]
+        env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b.torch[:, 2]
     )
-    reward = torch.exp(-ang_vel_error / std**2)
-    reward *= torch.clamp(-_as_torch(asset.data.projected_gravity_b)[:, 2], 0, 0.7) / 0.7
-    return reward
+    return torch.exp(-ang_vel_error / std**2)
 
 
 def is_alive(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -239,14 +213,29 @@ def joint_acc_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntity
     return torch.sum(torch.square(asset.data.joint_acc[:, asset_cfg.joint_ids]), dim=1)
 
 
-def joint_deviation_l1(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """Penalize joint positions that deviate from the default one."""
+def joint_deviation_l1(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str | None = None,
+    ang_vel_gate: float | None = None,
+) -> torch.Tensor:
+    """Penalize joint positions that deviate from the default one.
+
+    If ``command_name`` and ``ang_vel_gate`` are set, the penalty is zero when
+    the commanded yaw rate magnitude is at least ``ang_vel_gate``.
+    """
     asset: Articulation = env.scene[asset_cfg.name]
     angle = (
         _as_torch(asset.data.joint_pos)[:, asset_cfg.joint_ids]
         - _as_torch(asset.data.default_joint_pos)[:, asset_cfg.joint_ids]
     )
-    return torch.sum(torch.abs(angle), dim=1)
+    penalty = torch.sum(torch.abs(angle), dim=1)
+    if command_name is None or ang_vel_gate is None:
+        return penalty
+    if ang_vel_gate < 0.0:
+        raise ValueError("ang_vel_gate must be non-negative")
+    yaw_cmd = torch.abs(env.command_manager.get_command(command_name)[:, 2])
+    return penalty * (yaw_cmd < float(ang_vel_gate)).to(penalty.dtype)
 
 
 def joint_pos_limits(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
@@ -329,6 +318,7 @@ def link_close_y_gauss(
     )
     return 1.0 - torch.exp(-torch.clamp(threshold - distance_y, min=0.0) / std**2)
 
+
 def feet_stumble(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
@@ -367,7 +357,6 @@ def feet_air_time_positive_biped(
     command_name: str, 
     threshold: float, 
     sensor_cfg: SceneEntityCfg,
-    turn_reward_scale: float = 1.0,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     ) -> torch.Tensor:
     """Reward long steps taken by the feet for bipeds.
@@ -377,7 +366,6 @@ def feet_air_time_positive_biped(
 
     If the commands are small (i.e. the agent is not supposed to take a step), then the reward is zero.
     """
-    asset: Articulation = env.scene["robot"]
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     # compute the reward
     air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
@@ -388,14 +376,51 @@ def feet_air_time_positive_biped(
     reward = torch.min(torch.where(single_stance.unsqueeze(-1), in_mode_time, 0.0), dim=1)[0]
     reward = torch.clamp(reward, max=threshold)
     command = env.command_manager.get_command(command_name)
-    linear_command = torch.linalg.norm(command[:, :2], dim=1) > 0.1
-    active_command = torch.linalg.norm(command[:, :3], dim=1) > 0.1
-    # Keep a small part of the stepping incentive for turns, while avoiding the
-    # full single-support pressure that produced high-knee hopping turns.
-    turn_command = active_command & ~linear_command
-    command_scale = torch.where(turn_command, turn_reward_scale, active_command.float())
-    reward *= command_scale
+    reward *= (torch.linalg.norm(command[:, :3], dim=1) > 0.1).float()
     return reward
+
+
+def _in_place_yaw_gate(
+    env: ManagerBasedRLEnv, command_name: str, lin_vel_max: float, ang_vel_min: float
+) -> torch.Tensor:
+    cmd = env.command_manager.get_command(command_name)
+    return (torch.linalg.norm(cmd[:, :2], dim=1) < float(lin_vel_max)) & (
+        torch.abs(cmd[:, 2]) >= float(ang_vel_min)
+    )
+
+
+def yaw_turn_foot_air_time(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    lin_vel_max: float = 0.3,
+    ang_vel_min: float = 0.3,
+    target_height: float = 0.06,
+    target_air_time: float = 0.3,
+    height_std: float = 0.03,
+    air_std: float = 0.15,
+) -> torch.Tensor:
+    """In-place yaw: two-sided exp peaked at 6 cm and 0.3 s.
+
+    ``exp(-((x-t)/s)^2)`` is 1 at the target. ``s = t/2`` makes the floor and
+    the overshoot about 0.018 instead of 0.37, so shuffling cannot farm the
+    term. Height is relative to the other foot. Double flight is zero.
+    """
+    if target_height <= 0.0 or target_air_time <= 0.0 or height_std <= 0.0 or air_std <= 0.0:
+        raise ValueError("yaw-turn height/air targets and stds must be positive")
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+    in_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
+    foot_z = _as_torch(asset.data.body_pos_w)[:, asset_cfg.body_ids, 2]
+    clearance = (foot_z - foot_z.flip(1)).clamp(min=0.0)
+    air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    height_rew = torch.exp(-((clearance - target_height) / height_std).square())
+    air_rew = torch.exp(-((air_time - target_air_time) / air_std).square())
+    reward = (height_rew * air_rew).max(dim=1).values
+    return reward * in_contact.any(dim=1).float() * _in_place_yaw_gate(
+        env, command_name, lin_vel_max, ang_vel_min
+    ).float()
 
 
 def smoothness_1(env: ManagerBasedRLEnv) -> torch.Tensor:

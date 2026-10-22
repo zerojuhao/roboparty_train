@@ -20,10 +20,18 @@ class PUFOTerrainImporter(NewtonTerrainImporter):
 
         actual = super().validate_solver_geometry(model)
         # Probe both sides of stair edges, where a coarse heightfield smears treads.
-        data = mujoco.MjData(model)
-        mujoco.mj_forward(model, data)
+        # Match collision_validation: only static terrain, not robot geoms on the live model.
+        import copy
+
+        probe_model = copy.copy(model)
+        probe_model.geom_group[:] = (probe_model.geom_bodyid == 0).astype(np.int32)
+        groups = np.array([0, 1, 0, 0, 0, 0], dtype=np.uint8)
+        data = mujoco.MjData(probe_model)
+        mujoco.mj_kinematics(probe_model, data)
+        mujoco.mj_comPos(probe_model, data)
         errors = []
         names = list(self.cfg.terrain_generator.sub_terrains)
+        geom = np.empty(1, dtype=np.int32)
         for name in ("low_stairs_up", "low_stairs_down"):
             if name not in names:
                 continue
@@ -35,8 +43,8 @@ class PUFOTerrainImporter(NewtonTerrainImporter):
                        (xy <= self.authored_boxes[:, 1, :2])).all(-1)
                 expected = self.authored_boxes[hit, 1, 2].max()
                 origin = np.array([*xy, 10.])
-                distance = mujoco.mj_ray(model, data, origin, np.array([0., 0., -1.]),
-                                         None, True, -1, np.empty(1, dtype=np.int32))
+                distance = mujoco.mj_ray(probe_model, data, origin, np.array([0., 0., -1.]),
+                                         groups, True, -1, geom)
                 errors.append(abs((origin[2] - distance) - expected) if distance >= 0 else np.inf)
         max_error = max(errors, default=0.)
         if max_error > 1e-4:

@@ -583,6 +583,16 @@ class FbCprRunner:
         observations, reward, dones, infos = result
         observations = {name: value.to(self.device) for name, value in observations.items()}
         self._check_finite_rollout(observations, f"next_obs@env_iter={self.env_iterations}", before)
+        if isinstance(infos, dict) and infos.get("final_obs") is not None:
+            def clone_tree(value):
+                if torch.is_tensor(value):
+                    return value.detach().clone()
+                if isinstance(value, dict):
+                    return {key: clone_tree(item) for key, item in value.items()}
+                return value
+
+            infos = dict(infos)
+            infos["final_obs"] = clone_tree(infos["final_obs"])
         if self.replay["train"].transition_outcomes:
             final_obs = infos.get("final_obs") if isinstance(infos, dict) else None
             error = None

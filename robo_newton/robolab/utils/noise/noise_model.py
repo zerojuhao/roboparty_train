@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Sequence
 from torchvision.transforms import GaussianBlur
 
 from robolab.utils.buffers import AsyncDelayBuffer
+from robolab.utils.tensors import resolve_env_ids
 
 
 def torch_rand_float(lower: float, upper: float, shape: tuple[int, ...], device: str) -> torch.Tensor:
@@ -333,9 +334,7 @@ class LatencyNoiseModel(ImageNoiseModel):
         self._resample_delays(torch.arange(num_envs, device=device))
 
     def __call__(self, data, cfg, env_ids: torch.Tensor | Sequence[int]):
-        # convert env_ids to tensor
-        if isinstance(env_ids, Sequence):
-            env_ids = torch.tensor(env_ids, device=self.device)
+        env_ids = resolve_env_ids(env_ids, self.num_envs, self.device)
 
         if data.shape[0] != len(env_ids):
             raise RuntimeError(

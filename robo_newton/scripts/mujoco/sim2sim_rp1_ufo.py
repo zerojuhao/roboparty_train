@@ -22,7 +22,6 @@ import xml.etree.ElementTree as ET
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(ROOT / "rsl_rl"), str(ROOT / "robo_newton")]
 
 import cv2
 import imageio_ffmpeg

@@ -50,8 +50,6 @@ RP1_GENERAL_MOTION_DATA_WEIGHTS = {
     "stairs_climbing_down_loop_R_102__A301_M": 1,
     "stairs_climbing_down_stop_R_103__A301": 1,
     "stairs_climbing_up_start_R_001__A300": 1,
-    "come_down_50cm_box_R_002__A300": 1,
-    "come_up_50cm_box_R_001__A300": 1,
     "stairs_climbing_down_loop_R_001__A300": 1,
     "stairs_climbing_down_stop_R_001__A300": 1,
     "stairs_climbing_jog_down_loop_R_001__A300": 1,
@@ -171,7 +169,6 @@ class RP1ParkourEnvCfg(ParkourEnvCfg):
 
         self.terminations.base_contact.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names=["waist_yaw_link"])
 
-        self.events.add_base_mass.params["asset_cfg"] = SceneEntityCfg("robot", body_names=["base_link", "waist_yaw_link"])
         self.events.randomize_rigid_body_com.params["asset_cfg"] = SceneEntityCfg("robot", body_names=["base_link", "waist_yaw_link"])
 
 

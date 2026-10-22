@@ -124,7 +124,6 @@ class RPOParkourRoughEnvCfg(ParkourEnvCfg):
 
         self.terminations.base_contact.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names=["torso_link"])
         
-        self.events.add_base_mass.params["asset_cfg"] = SceneEntityCfg("robot", body_names=["base_link", "torso_link"])
         self.events.randomize_rigid_body_com.params["asset_cfg"] = SceneEntityCfg("robot", body_names=["base_link", "torso_link"])
         self.events.push_robot = None
                     

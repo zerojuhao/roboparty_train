@@ -45,8 +45,10 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.physics import PhysxAutoCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
 
 ##
@@ -55,6 +57,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_ov.physics import OvPhysxCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_tasks.utils import PresetCfg
 
@@ -374,8 +377,10 @@ class CurriculumCfg:
 
 @configclass
 class PhysicsPresetCfg(PresetCfg):
-    isaacsim_physx: PhysxCfg = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
-    newton_mjwarp: NewtonCfg = NewtonCfg(
+    isaacsim_physx = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    ovphysx = OvPhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    physx = PhysxAutoCfg(isaacsim_physx=isaacsim_physx, ovphysx=ovphysx)
+    newton_mjwarp = NewtonCfg(
         solver_cfg=MJWarpSolverCfg(
             cone="pyramidal",
             impratio=1.0,
@@ -386,7 +391,7 @@ class PhysicsPresetCfg(PresetCfg):
         ),
         num_substeps=1,
     )
-    default: NewtonCfg = newton_mjwarp
+    default = newton_mjwarp
 
 
 @configclass
@@ -395,6 +400,7 @@ class BeyondMimicEnvCfg(ManagerBasedRLEnvCfg):
 
     motion_dataset_contract: str = "roboparty_motion_v1_urdf"
 
+    sim: SimulationCfg = SimulationCfg(physics=PhysicsPresetCfg())
     # Scene settings
     scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=2.5)
     # Basic settings
@@ -416,7 +422,7 @@ class BeyondMimicEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physics = PhysicsPresetCfg()
+        self.sim.use_newton_actuators = False
         # viewer settings
         self.viewer.eye = (1.5, 1.5, 1.5)
         self.viewer.origin_type = "asset_root"

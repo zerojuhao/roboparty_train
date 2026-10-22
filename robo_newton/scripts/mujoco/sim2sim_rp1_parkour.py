@@ -21,7 +21,6 @@ from collections import deque
 from typing import Any, ClassVar
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "robo_newton"))
 
 import cv2
 import glfw

@@ -18,19 +18,15 @@ Source directories are ordinary tracked directories, not Git submodules. Isaac L
 
 ## Installation
 
-The current environment uses Linux, NVIDIA GPUs, Python 3.12, and a Newton-capable Isaac Lab 3.0 checkout. Follow the [SDK installation guide](https://isaac-sim.github.io/IsaacLab/v3.0.0-EA/source/setup/installation/index.html). This repository does not pin or distribute the SDK checkout; arbitrary newer upstream revisions are not guaranteed compatible.
+The current environment uses Linux, NVIDIA GPUs, Python 3.12, and the official Isaac Lab 3.0 `uv` checkout. Follow the [SDK installation guide](https://isaac-sim.github.io/IsaacLab/release/3.0.0/source/setup/installation/index.html). Place an unmodified `v3.0.0` tree at `IsaacLab-3.0/` next to this repository. Do not patch Isaac Lab; task and algorithm changes belong in `robo_newton` and `rsl_rl`.
 
-[requirements-physics.txt](robo_newton/requirements-physics.txt) pins MuJoCo 3.12.0, mujoco-warp 3.12.0, Warp 1.17.0, and Newton 1.6.0. Do not upgrade without collision regressions. Use this repository's RSL-RL fork.
-
-In the activated Isaac Lab Python environment:
+The repo-root `pyproject.toml` depends on `isaaclab-dev[ov,importers]`, editable `robo-newton`, and this repository's `rsl-rl-lib`. Put the virtualenv on a data disk so `uv run` from the repo root finds the packages without `PYTHONPATH` or script path hacks.
 
 ```bash
-git clone https://github.com/zerojuhao/roboparty_train.git
-cd roboparty_train
-python -m pip install -r robo_newton/requirements-physics.txt
-python -m pip install -e ./robo_newton -e ./rsl_rl
-export PYTHONPATH="$PWD/rsl_rl:$PWD/robo_newton${PYTHONPATH:+:$PYTHONPATH}"
-export ROBO_TRAIN_LOG_ROOT="$PWD/logs/rsl_rl"
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
+cd /path/to/roboparty_train
+uv sync
 ```
 
 The repository includes the robot assets and unified datasets below. A checkout therefore has the expected runtime paths before importing task configurations or starting training.
@@ -79,20 +75,23 @@ Motion data does not inherit the source-code license. [Ubisoft LAFAN1](https://g
 
 ## Training
 
-Use `robo_newton/scripts/train_newton.py` as the portable entry point from any working directory. It dispatches to the RSL-RL `train.py` backend and sets project/data paths. Common task IDs: `RP1-AMP`, `RP1-Parkour`, `RP1-SSR`, `RP1-UFO`, `RP1-PUFO`, `RPO-AMP`, `RPO-Parkour`.
+Train from the repository root. The entry point is `robo_newton/scripts/rsl_rl/train.py`. Common task IDs: `RP1-AMP`, `RP1-Parkour`, `RP1-SSR`, `RP1-UFO`, `RP1-PUFO`, `RPO-AMP`, `RPO-Parkour`.
 
 ```bash
-python robo_newton/scripts/train_newton.py --rl_library rsl_rl \
+export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
+uv run python robo_newton/scripts/rsl_rl/train.py \
   --task RP1-AMP --num_envs 1024 --device cuda:0 \
-  --visualizer none --logger tensorboard
+  --visualizer none --logger tensorboard physics=newton_mjwarp
 ```
 
 Multi-GPU example (`num_envs` per worker):
 
 ```bash
-python -m torch.distributed.run --standalone --nproc_per_node=8 \
-  robo_newton/scripts/train_newton.py --rl_library rsl_rl --task RP1-PUFO \
-  --num_envs 1024 --device cuda --distributed --visualizer none --logger tensorboard
+export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
+uv run python -m torch.distributed.run --standalone --nproc_per_node=8 \
+  robo_newton/scripts/rsl_rl/train.py --task RP1-PUFO \
+  --num_envs 1024 --device cuda --distributed --visualizer none --logger tensorboard \
+  physics=newton_mjwarp
 ```
 
 Resume compatible runs with `--resume --load_run RUN --checkpoint model_N.pt`. The URDF migration changes AMP discriminator inputs, including upper-body inputs. Legacy AMP/Parkour/SSR/BeyondMimic checkpoints are rejected until explicitly migrated; equal tensor dimensions do not imply compatible joint semantics. Start a new run for the new convention. Running processes are not migrated automatically.
@@ -104,15 +103,10 @@ RP1 UFO and PUFO use the same selected 40-clip LAFAN motion subset. UFO remains 
 Use absolute checkpoint paths to avoid ambiguity between log roots:
 
 ```bash
-python robo_newton/scripts/rsl_rl/play_amp.py \
-  --task RP1-AMP-Play --num_envs 1 \
-  --checkpoint /path/to/run/model_N.pt --visualizer none
-
-python robo_newton/scripts/rsl_rl/play_parkour.py \
-  --task RP1-Parkour-Play --num_envs 1 \
-  --checkpoint /path/to/run/model_N.pt --exportonnx --visualizer none
-
-python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
+export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
+uv run python robo_newton/scripts/rsl_rl/export_amp_deploy.py --checkpoint /path/to/run/model_N.pt
+uv run python robo_newton/scripts/rsl_rl/export_parkour_deploy.py --checkpoint /path/to/run/model_N.pt
+uv run python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
   --load_run /path/to/pufo_run --checkpoint model_N.pt --motion dance1_subject2
 ```
 
@@ -132,13 +126,12 @@ Paths below are relative to `robo_newton/scripts/`. Standalone diagnostic tools 
 
 | Entry | Purpose and Status |
 | --- | --- |
-| `rsl_rl/train.py`, `rsl_rl/play*.py`, `rsl_rl/export_pufo_deploy.py` | Main training, task-specific evaluation, and policy export. Keep. |
+| `rsl_rl/train.py`, `rsl_rl/play.py`, `rsl_rl/export_*_deploy.py` | Main training, simulation playback, and CPU policy export. Keep. |
 | `smoke_newton_env.py` | Creates, resets, and steps an environment without PPO; checks finite outputs and optional Parkour colliders, PUFO contacts, and compact depth replay. Keep for regressions. |
 | `tools/export_mujoco_physics.py` | Regenerates collision/contact/solver JSON from a nominal compiled model. Not required on each run, but needed after physics-asset changes. Keep. |
-| `tools/list_envs.py` | Lists registered task IDs. Useful, though currently starts AppLauncher. |
+| `tools/list_envs.py` | Lists registered RoboLab task IDs without launching Kit. |
 | `tools/visualize_robot.py`, `tools/visualize_terrain.py`, `tools/visualize_depth_domain_randomization.py` | Inspect robot joint/link order, terrain, and camera noise. Keep as optional diagnostics; these use AppLauncher-based scenes. |
 | `bind_gpu_local_rank.py` | Optional torchrun wrapper binding each worker to CPUs local to its GPU. Requires explicit `CUDA_VISIBLE_DEVICES` and Linux NUMA topology. |
-| `train_newton.py`, `play_newton.py` | Thin Isaac Lab CLI wrappers, not equivalents of all custom runner features. `smoke_newton_env.py` imports `train_newton.py` for kitless initialization; do not remove it in isolation. |
 | `mujoco/sim2sim_*.py` | Deployment checks with task-specific observation/action contracts. Keep the entry matching the policy; older RPO variants need a separate compatibility audit before consolidation. |
 
 CPU regression tests for motion loading and RP1 sim2sim:
@@ -150,7 +143,8 @@ MUJOCO_GL=egl python -m pytest -q robo_newton/robolab/utils/tests
 The sim2sim integration tests require local robot assets; some motion checks skip if the data bundle is absent. A GPU environment smoke test is separate from these unit tests:
 
 ```bash
-python robo_newton/scripts/smoke_newton_env.py \
+export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
+uv run python robo_newton/scripts/smoke_newton_env.py \
   --task RP1-AMP --num_envs 2 --steps 4 --device cuda:0
 ```
 

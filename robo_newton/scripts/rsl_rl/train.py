@@ -36,16 +36,15 @@
 
 """Script to train RL agent with RSL-RL."""
 
-"""Launch Isaac Sim Simulator first."""
-
 import argparse
 import os
 import sys
 from pathlib import Path
 
-from isaaclab.app import AppLauncher
+from robolab.utils.kitless_runtime import configure_kitless_runtime, parse_isaaclab_cli, run_resolved_task
 
-# local imports
+_REPO_ROOT = configure_kitless_runtime()
+
 import cli_args  # isort: skip
 
 # add argparse arguments
@@ -113,19 +112,10 @@ parser.add_argument(
 parser.add_argument("--export_io_descriptors", action="store_true", default=False, help="Export IO descriptors.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
-# append AppLauncher cli args
-AppLauncher.add_app_launcher_args(parser)
-args_cli, hydra_args = parser.parse_known_args()
+args_cli = parse_isaaclab_cli(parser)
 
-# Resolve project-local paths before task modules are imported. This keeps the
-# existing train.py --task interface usable from any working directory.
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if args_cli.data_root is not None:
     os.environ["ROBO_TRAIN_DATA_ROOT"] = str(Path(args_cli.data_root).expanduser().resolve())
-elif "ROBO_TRAIN_DATA_ROOT" not in os.environ:
-    local_data = _PROJECT_ROOT / "robo_newton" / "robolab" / "data"
-    if local_data.is_dir():
-        os.environ["ROBO_TRAIN_DATA_ROOT"] = str(local_data)
 if args_cli.motion_dir is not None:
     os.environ["UFO_MOTION_DIR"] = str(Path(args_cli.motion_dir).expanduser().resolve())
 
@@ -133,40 +123,11 @@ if args_cli.motion_dir is not None:
 if int(os.getenv("WORLD_SIZE", "1")) > 1:
     args_cli.distributed = True
 
-# always enable cameras to record video
-if args_cli.video:
-    args_cli.enable_cameras = True
-
-# clear out sys.argv for Hydra
-sys.argv = [sys.argv[0]] + hydra_args
-
-# launch omniverse app
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
-
-"""Check for minimum supported RSL-RL version."""
-
-import importlib.metadata as metadata
-import platform
-
 from packaging import version
 
-# check minimum supported rsl-rl version
-RSL_RL_VERSION = "3.0.1"
-installed_version = metadata.version("rsl-rl-lib")
-if version.parse(installed_version) < version.parse(RSL_RL_VERSION):
-    if platform.system() == "Windows":
-        cmd = [r".\isaaclab.bat", "-p", "-m", "pip", "install", f"rsl-rl-lib=={RSL_RL_VERSION}"]
-    else:
-        cmd = ["./isaaclab.sh", "-p", "-m", "pip", "install", f"rsl-rl-lib=={RSL_RL_VERSION}"]
-    print(
-        f"Please install the correct version of RSL-RL.\nExisting version is: '{installed_version}'"
-        f" and required version is: '{RSL_RL_VERSION}'.\nTo install the correct version, run:"
-        f"\n\n\t{' '.join(cmd)}\n"
-    )
-    exit(1)
+from isaaclab_rl.rsl_rl import check_rsl_rl_version
 
-"""Rest everything follows."""
+installed_version = check_rsl_rl_version()
 
 import logging
 import re
@@ -187,18 +148,16 @@ from isaaclab.envs import (
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_yaml
 
+from isaaclab.app import launch_simulation
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 
 import isaaclab_tasks  # noqa: F401
-from isaaclab_tasks.utils.hydra import hydra_task_config
 
 logger = logging.getLogger(__name__)
 
-import robolab.tasks
-# PLACEHOLDER: Extension template (do not remove this comment)
+import robolab.tasks  # noqa: F401
 
-
-DEFAULT_RSL_RL_LOG_ROOT = str(_PROJECT_ROOT / "logs" / "rsl_rl")
+DEFAULT_RSL_RL_LOG_ROOT = str(_REPO_ROOT / "logs" / "rsl_rl")
 
 
 def _rsl_rl_log_root(experiment_name: str) -> str:
@@ -484,6 +443,11 @@ def _run_tracking_eval_worker(request_path):
     # This payload is generated locally by the training runner, not an external checkpoint.
     request = torch.load(request_path, map_location="cpu", weights_only=False)
     cfg = request["train_cfg"]
+    with launch_simulation(request["env_cfg"], args_cli):
+        _run_tracking_eval(request, cfg)
+
+
+def _run_tracking_eval(request, cfg):
     env = gym.make("RP1-PUFO-EVAL", cfg=request["env_cfg"])
     runner = None
     try:
@@ -568,18 +532,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "Please use GPU device (e.g., --device cuda) for distributed training."
         )
 
-    # multi-gpu training configuration
+    # multi-gpu training configuration; launch_simulation already bound each rank's device
     if args_cli.distributed:
-        env_cfg.sim.device = f"cuda:{app_launcher.local_rank}"
-        agent_cfg.device = f"cuda:{app_launcher.local_rank}"
-
-        # set seed to have diversity in different threads
-        seed = agent_cfg.seed + app_launcher.local_rank
+        agent_cfg.device = env_cfg.sim.device
+        seed = agent_cfg.seed + int(os.getenv("LOCAL_RANK", "0"))
         env_cfg.seed = seed
         agent_cfg.seed = seed
 
-    # AppLauncher only sets global_rank when distributed=True
-    global_rank = getattr(app_launcher, "global_rank", 0)
+    global_rank = int(os.getenv("RANK", "0")) if args_cli.distributed else 0
 
     # specify directory for logging experiments
     log_root_path = _rsl_rl_log_root(agent_cfg.experiment_name)
@@ -730,14 +690,9 @@ if __name__ == "__main__":
         if args_cli.tracking_eval_request:
             _run_tracking_eval_worker(args_cli.tracking_eval_request)
         else:
-            hydra_task_config(args_cli.task, args_cli.agent)(main)()
+            run_resolved_task(args_cli, main)
     except BaseException:
-        # Kit may terminate Python on close(), so report startup/reset failures first.
         import traceback
         traceback.print_exc()
         sys.stderr.flush()
         raise
-    finally:
-        # Kit may terminate Python here; do not turn a failed diagnostic/train
-        # process into exit code zero before torchrun can observe the failure.
-        simulation_app.close(exit_code=1 if sys.exc_info()[0] is not None else 0)

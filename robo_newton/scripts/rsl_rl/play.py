@@ -36,10 +36,12 @@
 
 import argparse
 import sys
+from pathlib import Path
 
-from isaaclab.app import AppLauncher
+from robolab.utils.kitless_runtime import configure_kitless_runtime, parse_isaaclab_cli, run_resolved_task, sim_is_running
 
-# local imports
+configure_kitless_runtime()
+
 import cli_args  # isort: skip
 
 # add argparse arguments
@@ -55,30 +57,13 @@ parser.add_argument("--push_robot", action='store_true', help="Push robot during
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument(
-    "--export-only",
-    action="store_true",
-    help="Export the policy ONNX files (including PUFO backward context) and skip simulation.",
-)
-parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
-# append AppLauncher cli args
-AppLauncher.add_app_launcher_args(parser)
-args_cli, hydra_args = parser.parse_known_args()
-# always enable cameras to record video
-if args_cli.video:
-    args_cli.enable_cameras = True
-
-# clear out sys.argv for Hydra
-sys.argv = [sys.argv[0]] + hydra_args
-
-# launch omniverse app
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
+args_cli = parse_isaaclab_cli(parser)
 
 """Check for installed RSL-RL version."""
 
@@ -94,7 +79,6 @@ import gymnasium as gym
 import os
 import time
 import torch
-import copy
 
 from rsl_rl.runners import DistillationRunner, FbCprRunner, OnPolicyRunner
 from rsl_rl.runners.fbcpr_runner import default_rsl_rl_log_root
@@ -109,133 +93,12 @@ from isaaclab.envs import (
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 
-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx, handle_deprecated_rsl_rl_cfg
+from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab.markers import VisualizationMarkers
 
 import isaaclab_tasks  # noqa: F401
-from isaaclab_tasks.utils import get_checkpoint_path
-from isaaclab_tasks.utils.hydra import hydra_task_config
-
-import robolab.tasks
-
-class TorchAttnEncPolicyExporter(torch.nn.Module):
-    """Exporter of actor-critic into JIT file."""
-
-    def __init__(self, policy, normalizer=None):
-        super().__init__()
-        # copy policy parameters
-        self.actor = copy.deepcopy(policy.actor)
-        self.encoder = copy.deepcopy(policy.encoder)
-        self.num_actor_obs = policy.num_actor_obs
-        self.enable_critic_estimation = policy.enable_critic_estimation
-        self.enable_obs_encoder = policy.enable_obs_encoder
-        self.single_actor_obs_dim = policy.single_actor_obs_dim
-        if self.enable_critic_estimation:
-            self.estimator = copy.deepcopy(policy.estimator)
-        if self.enable_obs_encoder:
-            self.actor_obs_encoder = copy.deepcopy(policy.actor_obs_encoder)
-        # copy normalizer if exists
-        if normalizer:
-            self.normalizer = copy.deepcopy(normalizer)
-        else:
-            self.normalizer = torch.nn.Identity()
-
-    def forward(self, x):
-        prop_obs = self.normalizer(x[:, :self.num_actor_obs])
-        perception_obs = x[:, self.num_actor_obs:]
-        if self.enable_obs_encoder:
-            esti_obs = self.actor_obs_encoder(prop_obs)
-            enc_obs = torch.cat([prop_obs[:, -self.single_actor_obs_dim:], esti_obs], dim=-1)
-        else:
-            esti_obs = prop_obs
-            enc_obs = prop_obs[:, -self.single_actor_obs_dim:]
-        if self.enable_critic_estimation:
-            critic_pred = self.estimator(esti_obs)
-            enc_obs = torch.cat([enc_obs, critic_pred], dim=-1)
-        embedding, *_ = self.encoder(enc_obs, perception_obs)
-        if self.enable_critic_estimation or self.enable_obs_encoder:
-            obs = torch.cat([enc_obs, embedding], dim=-1)
-        else:
-            obs = torch.cat([prop_obs, embedding], dim=-1)
-        return self.actor(obs)
-
-    @torch.jit.export
-    def reset(self):
-        pass
-
-    def reset_memory(self):
-        self.hidden_state[:] = 0.0
-        if hasattr(self, "cell_state"):
-            self.cell_state[:] = 0.0
-
-    def export(self, path, filename):
-        os.makedirs(path, exist_ok=True)
-        path = os.path.join(path, filename)
-        self.to("cpu")
-        traced_script_module = torch.jit.script(self)
-        traced_script_module.save(path)
-
-
-class OnnxAttnEncPolicyExporter(torch.nn.Module):
-    """Exporter of actor-critic into ONNX file."""
-
-    def __init__(self, policy, normalizer=None, verbose=False):
-        super().__init__()
-        self.verbose = verbose
-        # copy policy parameters
-        self.actor = copy.deepcopy(policy.actor)
-        self.encoder = copy.deepcopy(policy.encoder)
-        self.num_actor_obs = policy.num_actor_obs
-        self.enable_critic_estimation = policy.enable_critic_estimation
-        self.enable_obs_encoder = policy.enable_obs_encoder
-        self.single_actor_obs_dim = policy.single_actor_obs_dim
-        self.map_size = policy.map_size
-        if self.enable_critic_estimation:
-            self.estimator = copy.deepcopy(policy.estimator)
-        if self.enable_obs_encoder:
-            self.actor_obs_encoder = copy.deepcopy(policy.actor_obs_encoder)
-        # copy normalizer if exists
-        if normalizer:
-            self.normalizer = copy.deepcopy(normalizer)
-        else:
-            self.normalizer = torch.nn.Identity()
-
-    def forward(self, x):
-        prop_obs = self.normalizer(x[:, :self.num_actor_obs])
-        perception_obs = x[:, self.num_actor_obs:]
-        if self.enable_obs_encoder:
-            esti_obs = self.actor_obs_encoder(prop_obs)
-            enc_obs = torch.cat([prop_obs[:, -self.single_actor_obs_dim:], esti_obs], dim=-1)
-        else:
-            esti_obs = prop_obs
-            enc_obs = prop_obs[:, -self.single_actor_obs_dim:]
-        if self.enable_critic_estimation:
-            critic_pred = self.estimator(esti_obs)
-            enc_obs = torch.cat([enc_obs, critic_pred], dim=-1)
-        embedding, *_ = self.encoder(enc_obs, perception_obs)
-        if self.enable_critic_estimation or self.enable_obs_encoder:
-            obs = torch.cat([enc_obs, embedding], dim=-1)
-        else:
-            obs = torch.cat([prop_obs, embedding], dim=-1)
-        return self.actor(obs)
-
-    def export(self, path, filename):
-        self.to("cpu")
-        self.eval()
-        opset_version = 18  # was 11, but it caused problems with linux-aarch, and 18 worked well across all systems.
-        obs = torch.zeros(1, self.num_actor_obs + self.map_size[0]*self.map_size[1])
-        torch.onnx.export(
-            self,
-            obs,
-            os.path.join(path, filename),
-            export_params=True,
-            opset_version=opset_version,
-            verbose=self.verbose,
-            input_names=["obs"],
-            output_names=["actions"],
-            dynamic_axes={},
-        )
+import robolab.tasks  # noqa: F401
 
 def visualize_attention(map_scan, root_pose, output_attn, visualizer):
     root_pos = root_pose[:, :3]  # shape (B, 3)
@@ -254,7 +117,6 @@ def visualize_attention(map_scan, root_pose, output_attn, visualizer):
         attention_indices[color_mask] = i
     visualizer.visualize(translations=map_scan_world.view(-1, 3), marker_indices=attention_indices)
 
-@hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     # grab task name for checkpoint path
     task_name = args_cli.task.split(":")[-1]
@@ -361,42 +223,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # obtain the trained policy for inference
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    if not os.path.exists(export_model_dir):
-        os.makedirs(export_model_dir, exist_ok=True)
-    if isinstance(runner, FbCprRunner):
-        exported = runner.export_policy_to_onnx(export_model_dir)
-        print(f"[INFO]: PUFO ONNX exported: {exported}")
-    else:
-        # Extract the neural network module.  The try-except keeps support for
-        # both the current and legacy Isaac Lab runner layouts.
-        try:
-            policy_nn = runner.alg.policy
-        except AttributeError:
-            policy_nn = runner.alg.actor_critic
-        if hasattr(policy_nn, "actor_obs_normalizer"):
-            normalizer = policy_nn.actor_obs_normalizer
-        elif hasattr(policy_nn, "student_obs_normalizer"):
-            normalizer = policy_nn.student_obs_normalizer
-        else:
-            normalizer = None
-
-    if not isinstance(runner, FbCprRunner) and hasattr(env_cfg, "attn_enc"):
-        torch_policy_exporter = TorchAttnEncPolicyExporter(policy_nn, normalizer)
-        torch_policy_exporter.export(path=export_model_dir, filename="policy.pt")
-        onnx_policy_exporter = OnnxAttnEncPolicyExporter(policy_nn, normalizer, verbose=False)
-        onnx_policy_exporter.export(path=export_model_dir, filename="policy.onnx")
-    elif not isinstance(runner, FbCprRunner):
-        export_policy_as_jit(policy_nn, normalizer, path=export_model_dir, filename="policy.pt")
-        export_policy_as_onnx(
-            policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx"
-        )
-
-    if args_cli.export_only:
-        print(f"[INFO]: Export-only complete: {export_model_dir}")
-        env.close()
-        return
-
     if not args_cli.headless:
         from robolab.utils.keyboard import Keyboard
         keyboard = Keyboard(env)  # noqa:F841
@@ -407,7 +233,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     obs = env.get_observations()
     timestep = 0
     # simulate environment
-    while simulation_app.is_running():
+    while sim_is_running(env):
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
@@ -446,7 +272,4 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
 
 if __name__ == "__main__":
-    # run the main function
-    main()
-    # close sim app
-    simulation_app.close()
+    run_resolved_task(args_cli, main)

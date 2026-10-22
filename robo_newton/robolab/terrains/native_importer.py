@@ -202,7 +202,7 @@ class NewtonTerrainImporter(TerrainImporter):
         return actual
 
 
-def validate_terrain_colliders(env, env_ids=None):
+def validate_terrain_colliders(env, env_ids):
     """One-time solver validation, after scene construction and before rollout."""
     terrain = env.scene.terrain
     if not getattr(terrain, "_native_collision", False) or getattr(terrain, "_collision_validated", False):
