@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -15,16 +17,114 @@ from isaaclab.terrains import TerrainImporter
 from isaaclab.utils.math import quat_apply_inverse, wrap_to_pi, yaw_quat
 from robolab.utils.tensors import resolve_env_ids
 
-from .command_math import (
-    apply_abs_deadband,
-    clamp_to_ranges,
-    heading_slowdown_scale,
-    sample_uniform_with_deadband,
-    select_distant_target_indices,
-    signed_target_heading_offset,
-    signed_target_linear_velocity,
-    target_distance_reached,
-)
+def sample_uniform(ranges: torch.Tensor) -> torch.Tensor:
+    """Sample one value uniformly from each [low, high] range."""
+    if ranges.ndim != 2 or ranges.shape[1] != 2:
+        raise ValueError("ranges must have shape (batch, 2).")
+    if torch.any(ranges[:, 1] < ranges[:, 0]):
+        raise ValueError("range upper bounds must be greater than or equal to lower bounds.")
+    return ranges[:, 0] + torch.rand(
+        len(ranges), device=ranges.device, dtype=ranges.dtype
+    ) * (ranges[:, 1] - ranges[:, 0])
+
+
+def clamp_to_ranges(values: torch.Tensor, ranges: torch.Tensor) -> torch.Tensor:
+    """Clamp each scalar value to its corresponding lower and upper bounds."""
+    if values.ndim != 1 or ranges.shape != (len(values), 2):
+        raise ValueError("values and ranges must have shapes (batch,) and (batch, 2).")
+    if torch.any(ranges[:, 1] < ranges[:, 0]):
+        raise ValueError("range upper bounds must be greater than or equal to lower bounds.")
+    return torch.maximum(torch.minimum(values, ranges[:, 1]), ranges[:, 0])
+
+
+def target_distance_reached(
+    target_xy: torch.Tensor,
+    root_xy: torch.Tensor,
+    distance_threshold: float,
+) -> torch.Tensor:
+    """Return whether each root is within the inclusive distance threshold of its target."""
+    if distance_threshold < 0.0:
+        raise ValueError("distance_threshold must be non-negative.")
+    return torch.norm(target_xy - root_xy, dim=1) <= distance_threshold
+
+
+def signed_target_heading_offset(
+    axis: torch.Tensor,
+    signed_speed: torch.Tensor,
+) -> torch.Tensor:
+    """Return the body-heading offset that points the selected signed body axis at a target.
+
+    Axis values are ``1`` for body x and ``2`` for body y. A zero speed has no
+    offset; the caller should hold the current heading while that command is idle.
+    """
+    if axis.shape != signed_speed.shape:
+        raise ValueError("axis and signed_speed must have matching shapes.")
+    if torch.any((axis != 1) & (axis != 2)):
+        raise ValueError("axis values must be 1 (x) or 2 (y).")
+
+    offset = torch.zeros_like(signed_speed)
+    offset[(axis == 1) & (signed_speed < 0.0)] = math.pi
+    offset[(axis == 2) & (signed_speed > 0.0)] = -0.5 * math.pi
+    offset[(axis == 2) & (signed_speed < 0.0)] = 0.5 * math.pi
+    return offset
+
+
+def signed_target_linear_velocity(
+    axis: torch.Tensor,
+    signed_speed: torch.Tensor,
+    target_distance: torch.Tensor,
+    velocity_stiffness: float,
+) -> torch.Tensor:
+    """Compute axis-aligned signed commands with distance-based magnitude."""
+    if not (
+        axis.shape
+        == signed_speed.shape
+        == target_distance.shape
+    ):
+        raise ValueError("signed-target inputs must have matching shapes.")
+    if torch.any((axis != 1) & (axis != 2)):
+        raise ValueError("axis values must be 1 (x) or 2 (y).")
+    if velocity_stiffness < 0.0:
+        raise ValueError("velocity_stiffness must be non-negative.")
+
+    magnitude = torch.minimum(
+        target_distance.clamp_min(0.0) * velocity_stiffness,
+        signed_speed.abs(),
+    )
+    command = torch.zeros(len(axis), 2, device=axis.device, dtype=signed_speed.dtype)
+    command[axis == 1, 0] = signed_speed[axis == 1].sign() * magnitude[axis == 1]
+    command[axis == 2, 1] = signed_speed[axis == 2].sign() * magnitude[axis == 2]
+    return command
+
+
+def select_distant_target_indices(
+    targets_xy: torch.Tensor,
+    root_xy: torch.Tensor,
+    distance_threshold: float,
+    random_scores: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Choose a random target beyond the threshold, or the farthest if none qualify."""
+    if distance_threshold < 0.0:
+        raise ValueError("distance_threshold must be non-negative.")
+    if targets_xy.ndim != 3 or targets_xy.shape[-1] != 2:
+        raise ValueError("targets_xy must have shape (batch, targets, 2).")
+    if root_xy.shape != (targets_xy.shape[0], 2):
+        raise ValueError("root_xy must have shape (batch, 2).")
+    if targets_xy.shape[1] == 0:
+        raise ValueError("targets_xy must contain at least one candidate per batch.")
+    if random_scores is None:
+        random_scores = torch.rand(
+            targets_xy.shape[:2], device=targets_xy.device, dtype=targets_xy.dtype
+        )
+    elif random_scores.shape != targets_xy.shape[:2]:
+        raise ValueError("random_scores must have shape (batch, targets).")
+
+    distances = torch.norm(targets_xy - root_xy.unsqueeze(1), dim=-1)
+    valid = distances > distance_threshold
+    random_choice = random_scores.masked_fill(~valid, float("-inf")).argmax(dim=1)
+    farthest_choice = distances.argmax(dim=1)
+    return torch.where(valid.any(dim=1), random_choice, farthest_choice)
+
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -47,13 +147,6 @@ class PoseVelocityCommand(CommandTerm):
         """
         # initialize the base class
         super().__init__(cfg, env)
-        full_speed_angle, stop_angle = self.cfg.heading_slowdown_range
-        if full_speed_angle < 0.0 or stop_angle <= full_speed_angle:
-            raise ValueError(
-                "heading_slowdown_range must satisfy 0 <= full_speed_angle < stop_angle."
-            )
-        if self.cfg.random_velocity_deadband < 0.0:
-            raise ValueError("random_velocity_deadband must be non-negative.")
         # obtain the robot and terrain assets
         # -- robot
         self.robot: Articulation = env.scene[cfg.asset_name]
@@ -290,9 +383,7 @@ class PoseVelocityCommand(CommandTerm):
                 self.lin_vel_x_range[signed_target_env_ids],
                 self.lin_vel_y_range[signed_target_env_ids],
             )
-            self.signed_target_speed[signed_target_env_ids] = sample_uniform_with_deadband(
-                speed_range, self.cfg.random_velocity_deadband
-            )
+            self.signed_target_speed[signed_target_env_ids] = sample_uniform(speed_range)
 
     def _resample_random_velocity(self, env_ids: torch.Tensor):
         """Sample terrain-specific random velocity commands for the selected environments."""
@@ -308,11 +399,6 @@ class PoseVelocityCommand(CommandTerm):
         self.random_ang_vel_z[env_ids] = self.random_ang_vel_z_range[env_ids, 0] + torch.rand(
             count, device=self.device
         ) * (self.random_ang_vel_z_range[env_ids, 1] - self.random_ang_vel_z_range[env_ids, 0])
-
-        deadband = self.cfg.random_velocity_deadband
-        self.random_lin_vel_x[env_ids] = apply_abs_deadband(self.random_lin_vel_x[env_ids], deadband)
-        self.random_lin_vel_y[env_ids] = apply_abs_deadband(self.random_lin_vel_y[env_ids], deadband)
-        self.random_ang_vel_z[env_ids] = apply_abs_deadband(self.random_ang_vel_z[env_ids], deadband)
 
     def _update_command(self):
         """Re-target the position command to the current root state."""
@@ -391,23 +477,15 @@ class PoseVelocityCommand(CommandTerm):
         else:
             max_forward_speed = torch.clamp(self.max_command_b[:, 0], min=0.0)
             forward_speed = torch.minimum(torch.clamp(vx, min=0.0), max_forward_speed)
-            full_speed_angle, stop_angle = self.cfg.heading_slowdown_range
-            speed_scale = heading_slowdown_scale(
-                self.heading_command_w, full_speed_angle, stop_angle
-            )
-            self.vel_command_b[:, 0] = forward_speed * speed_scale
+            self.vel_command_b[:, 0] = forward_speed
             self.vel_command_b[:, 1] = 0.0
 
         if signed_target_env_ids.numel() > 0:
-            full_speed_angle, stop_angle = self.cfg.heading_slowdown_range
             self.vel_command_b[signed_target_env_ids, :2] = signed_target_linear_velocity(
                 self.signed_target_axis[signed_target_env_ids],
                 self.signed_target_speed[signed_target_env_ids],
                 target_dist[signed_target_env_ids],
-                self.heading_command_w[signed_target_env_ids],
                 self.cfg.velocity_control_stiffness,
-                full_speed_angle,
-                stop_angle,
             )
 
         self.vel_command_b[:] *= (target_dist > self.cfg.target_dis_threshold).unsqueeze(-1)

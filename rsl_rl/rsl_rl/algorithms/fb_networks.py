@@ -326,14 +326,13 @@ class ResidualActor(nn.Module):
         seq += [Block(hidden_dim, action_dim, None, layer_norm)]
         self.policy = nn.Sequential(*seq)
 
-    def forward(self, obs, z, std):
+    def forward(self, obs, z, std, *, detach_velocity=True):
         velocity_estimate = None
         policy_obs = obs
         if self.estimate_velocity:
             velocity_estimate = self.velocity_estimator(obs)
-            # Keep the auxiliary target from changing the policy gradient path,
-            # matching VisualResidualActor's deployment/training contract.
-            policy_obs = torch.cat([obs, velocity_estimate.detach()], dim=-1)
+            # Imagined BPTT freezes estimator weights but needs its input Jacobian.
+            policy_obs = torch.cat([obs, velocity_estimate.detach() if detach_velocity else velocity_estimate], dim=-1)
         z_embedding = self.embed_z(torch.cat([policy_obs, z], dim=-1))
         s_embedding = self.embed_s(policy_obs)
         embedding = torch.cat([s_embedding, z_embedding], dim=-1)

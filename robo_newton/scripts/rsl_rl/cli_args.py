@@ -73,7 +73,7 @@ def add_rsl_rl_args(parser: argparse.ArgumentParser):
     arg_group.add_argument("--checkpoint", type=str, default=None, help="Checkpoint file to resume from.")
     arg_group.add_argument(
         "--checkpoint-replay", action=argparse.BooleanOptionalAction, default=None,
-        help="Save rank-local UFO/PUFO replay with checkpoints (default: enabled).",
+        help="Save rank-local UFO/PUFO replay with checkpoints (default: disabled).",
     )
     # -- logger arguments
     arg_group.add_argument(

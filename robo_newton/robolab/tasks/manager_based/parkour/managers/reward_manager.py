@@ -141,33 +141,19 @@ class MultiRewardManager(RewardManager):
             else:
                 raise ValueError(f"Invalid term combine method: {term_combine_method}")
         # iterate over all the reward groups and terms
-        sub_idx, sub_names = self._generator_subterrain_lookup()
         for group_name, terms_cfgs in self.__group_term_cfgs.items():
             term_combine_method = self.__group_term_combine_methods.get(group_name, "sum")
             for term_name, term_cfg in zip(self.__group_term_names[group_name], terms_cfgs):
-                per_env_weights = self._effective_term_weights(
-                    group_name, term_name, term_cfg, sub_idx, sub_names
-                )
-                if per_env_weights is not None and torch.allclose(
-                    per_env_weights, torch.zeros_like(per_env_weights)
-                ):
+                # skip if weight is zero (kind of a micro-optimization)
+                # if all per-env weights are zero, skip whole term
+                per_env_weights = self._per_env_term_weights.get(group_name, {}).get(term_name, None)
+                if per_env_weights is not None and torch.allclose(per_env_weights, torch.zeros_like(per_env_weights)):
                     continue
+                # fallback: if no per-env buffer, skip if term_cfg.weight == 0
                 if per_env_weights is None and term_cfg.weight == 0.0:
                     continue
                 # compute the term's value
-                # Terrain weight settings configure the manager's absolute
-                # per-environment weights and are not reward-function arguments.
-                call_params = {
-                    key: value
-                    for key, value in term_cfg.params.items()
-                    if key
-                    not in (
-                        "terrain_type",
-                        "terrain_weight",
-                        "terrain_weight_overrides",
-                    )
-                }
-                value = term_cfg.func(self._env, **call_params)
+                value = term_cfg.func(self._env, **term_cfg.params)
                 # apply per-env weights when available, otherwise use scalar weight
                 if per_env_weights is not None:
                     value = value * per_env_weights
@@ -244,7 +230,9 @@ class MultiRewardManager(RewardManager):
         if term_name not in self.__group_term_names[group_name]:
             raise ValueError(f"Term '{term_name}' not found in group '{group_name}'.")
         # normalize env_ids to tensor
-        if not isinstance(env_ids, torch.Tensor):
+        if isinstance(env_ids, slice):
+            env_idx = torch.arange(self.num_envs, device=self.device)[env_ids]
+        elif not isinstance(env_ids, torch.Tensor):
             env_idx = torch.tensor(list(env_ids), dtype=torch.long, device=self.device)
         else:
             env_idx = env_ids.to(device=self.device)
@@ -263,7 +251,7 @@ class MultiRewardManager(RewardManager):
         if isinstance(weights, (float, int)):
             w = torch.full((env_idx.shape[0],), float(weights), dtype=torch.float, device=self.device)
         else:
-            w = torch.as_tensor(list(weights), dtype=torch.float, device=self.device)
+            w = torch.as_tensor(weights, dtype=torch.float, device=self.device)
             if w.numel() != env_idx.numel():
                 raise ValueError("weights length must match env_ids length")
         buf[env_idx] = w
@@ -285,75 +273,6 @@ class MultiRewardManager(RewardManager):
     """
     Helper functions.
     """
-
-    def _generator_subterrain_lookup(
-        self,
-    ) -> tuple[torch.Tensor | None, list[str] | None]:
-        terrain = self._env.scene.terrain
-        if getattr(terrain.cfg, "terrain_type", None) != "generator":
-            return None, None
-        names = list(terrain.cfg.terrain_generator.sub_terrains.keys())
-        indices = terrain.terrain_generator.get_subterrain_indices(
-            terrain.terrain_levels, terrain.terrain_types, device=self.device
-        )
-        return indices, names
-
-    def _effective_term_weights(
-        self,
-        group_name: str,
-        term_name: str,
-        term_cfg: RewardTermCfg,
-        sub_idx: torch.Tensor | None,
-        sub_names: list[str] | None,
-    ) -> torch.Tensor | None:
-        """Curriculum/base weights with live terrain overrides.
-
-        Overrides are applied at compute time so an env that leaves a specialist
-        tile recovers the default or curriculum weight instead of keeping a
-        stale baked-in override.
-        """
-        base = self._per_env_term_weights.get(group_name, {}).get(term_name)
-        has_type = "terrain_type" in term_cfg.params
-        has_weight = "terrain_weight" in term_cfg.params
-        if has_type != has_weight:
-            raise ValueError(
-                f"Reward term {term_name!r} must configure terrain_type and "
-                "terrain_weight together."
-            )
-        terrain_weight_overrides = term_cfg.params.get("terrain_weight_overrides", {})
-        if not isinstance(terrain_weight_overrides, dict):
-            raise TypeError(
-                f"Reward term {term_name!r} terrain_weight_overrides must "
-                "be a dictionary mapping terrain names to weights."
-            )
-        if not has_type and not terrain_weight_overrides:
-            return base
-        if sub_idx is None or sub_names is None:
-            return base
-        overrides = dict(terrain_weight_overrides)
-        if has_type:
-            overrides = {
-                term_cfg.params["terrain_type"]: term_cfg.params["terrain_weight"],
-                **overrides,
-            }
-        weights = (
-            base.clone()
-            if base is not None
-            else torch.full(
-                (self.num_envs,),
-                float(term_cfg.weight),
-                dtype=torch.float,
-                device=self.device,
-            )
-        )
-        for terrain_type, terrain_weight in overrides.items():
-            if terrain_type not in sub_names:
-                raise ValueError(
-                    f"Reward term {term_name!r} references unknown terrain "
-                    f"{terrain_type!r}. Available types: {sub_names}."
-                )
-            weights[sub_idx == sub_names.index(terrain_type)] = float(terrain_weight)
-        return weights
 
     def _prepare_terms(self):
         """Prepare the reward group and each term in the groups for computation."""
@@ -402,21 +321,8 @@ class MultiRewardManager(RewardManager):
                         f"Configuration for the term '{term_name}' in group '{group_name}' is not of type"
                         f" RewardTermCfg. Received: '{type(term_cfg)}'."
                     )
-                # Terrain weight settings are consumed by this manager, not by
-                # the reward function. Hide them during function-signature checks.
-                terrain_params = {
-                    key: term_cfg.params.pop(key)
-                    for key in (
-                        "terrain_type",
-                        "terrain_weight",
-                        "terrain_weight_overrides",
-                    )
-                    if key in term_cfg.params
-                }
-                try:
-                    self._resolve_common_term_cfg(term_name, term_cfg, min_argc=1)
-                finally:
-                    term_cfg.params.update(terrain_params)
+                # resolve common parameters
+                self._resolve_common_term_cfg(term_name, term_cfg, min_argc=1)
                 # add the term to the group
                 if group_name not in self.__group_term_names:
                     self.__group_term_names[group_name] = list()

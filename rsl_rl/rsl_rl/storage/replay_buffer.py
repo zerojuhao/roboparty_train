@@ -98,6 +98,8 @@ class TrajectoryDictBuffer:
         self.priorities = torch.ones_like(self.lengths, dtype=torch.float32, device=self.lengths.device)
         self.file_names = []
         self._sampling_cache = {}
+        self.phase_probabilities = None
+        self.phase_bin_steps = 1
 
     @property
     def capacity(self):
@@ -167,6 +169,58 @@ class TrajectoryDictBuffer:
         if float(updated.sum()) <= 0.0:
             raise ValueError("At least one trajectory priority must be positive")
         self.priorities.copy_(updated)
+
+    def set_phase_probabilities(self, probabilities, bin_steps):
+        """Apply within-clip phase weights only to tracking-context sampling."""
+        if probabilities is None:
+            self.phase_probabilities = None
+            return
+        values = torch.as_tensor(probabilities, device=self.lengths.device, dtype=torch.float32)
+        if (values.ndim != 2 or len(values) != len(self.lengths) or bin_steps < 1
+                or not torch.isfinite(values).all() or bool((values < 0).any())
+                or not bool((values.sum(-1) > 0).all())):
+            raise ValueError("Invalid tracking phase probabilities")
+        self.phase_probabilities = values / values.sum(-1, keepdim=True)
+        self.phase_bin_steps = int(bin_steps)
+
+    def sample_tracking_variable(self, num_slices: int, max_length: int):
+        """Sample short and long clips, padding without crossing clip boundaries.
+
+        Lengths count real transitions. Consumers must refresh at these lengths,
+        and exclude padding from temporal averages and training targets.
+        """
+        if num_slices < 1 or max_length < 1 or not self.output_key_tp1:
+            raise ValueError("Tracking requires positive sizes and next-state observations")
+        weights = self.priorities * (self.lengths >= 2)
+        if not bool(weights.sum() > 0):
+            raise RuntimeError("No expert trajectory contains a complete transition")
+        rows = torch.multinomial(weights, num_slices, replacement=True)
+        lengths = (self.lengths[rows] - 1).clamp(max=max_length)
+        max_start = self.lengths[rows] - 1 - lengths
+        if self.phase_probabilities is None:
+            offsets = (torch.rand(num_slices, device=rows.device) * (max_start + 1)).long()
+        else:
+            starts = torch.arange(self.phase_probabilities.shape[1], device=rows.device) * self.phase_bin_steps
+            available = starts[None] <= max_start[:, None]
+            probabilities = self.phase_probabilities[rows] * available
+            probabilities = torch.where(probabilities.sum(-1, keepdim=True) > 0,
+                                        probabilities, available.float())
+            bins = torch.multinomial(probabilities, 1).squeeze(-1)
+            first = bins * self.phase_bin_steps
+            width = (max_start - first + 1).clamp(max=self.phase_bin_steps)
+            offsets = first + (torch.rand_like(width, dtype=torch.float32) * width).long()
+        time = torch.arange(max_length, device=rows.device)[None]
+        valid = time < lengths[:, None]
+        relative = torch.minimum(time.expand(num_slices, -1), lengths[:, None] - 1)
+        starts = self.start_idx[rows].reshape(num_slices, 1)
+        indices = (starts + offsets[:, None] + relative).flatten()
+        output = {key: _tree_map(lambda value: value[indices], self.storage[key])
+                  for key in self.output_key_t}
+        output["next"] = {key: _tree_map(lambda value: value[indices + 1], self.storage[key])
+                          for key in self.output_key_tp1}
+        output["lengths"], output["valid"] = lengths, valid
+        output["trajectory_ids"] = rows
+        return output
 
 
 class ReplayBuffer:
@@ -396,7 +450,7 @@ class ReplayBuffer:
                 replace(output, terminal["observation"])
         return output
 
-    def sample(self, batch_size: int, seq_length: int = 1):
+    def sample(self, batch_size: int, seq_length: int = 1, *, env_ids=None):
         self._refresh_traj()
         assert batch_size % seq_length == 0
         output, offset = {}, 0
@@ -405,6 +459,12 @@ class ReplayBuffer:
             offset = 1
         num_slices = batch_size // seq_length
         lengths, starts, valid_windows, priorities = self._sampling_metadata(seq_length)
+        if env_ids is not None:
+            env_ids = torch.as_tensor(env_ids, device=starts.device)
+            selected = torch.isin(starts[:, 1], env_ids)
+            lengths, starts, valid_windows, priorities = (
+                value[selected] for value in (lengths, starts, valid_windows, priorities)
+            )
         if lengths.numel() == 0:
             raise ValueError("no trajectory long enough to sample")
         idxs, sampled_traj_idx = _get_idxs(

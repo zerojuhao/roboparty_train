@@ -10,7 +10,6 @@ from robolab.assets.robots.roboparty import RPO_CFG, RPO_LINKS
 from robolab.sensors import get_link_prim_targets
 from robolab.tasks.manager_based.parkour.parkour_env_cfg import ROUGH_TERRAINS_CFG, ParkourEnvCfg
 from robolab.sensors import Grid3dPointsGeneratorCfg, NoisyGroupedRayCasterCameraCfg, VolumePointsCfg
-from isaaclab.sensors import patterns
 
 # The motion loader selects and reorders NPZ key-body tracks by these names.
 KEY_BODY_NAMES = [
@@ -37,6 +36,16 @@ FEET_VOLUME_POINTS_GRID = Grid3dPointsGeneratorCfg(
     z_max=-0.02,
     z_num=4,
 )
+
+FOOT_HEIGHT_SCAN_RESOLUTION = 0.01
+FOOT_HEIGHT_SCAN_RAY_START_HEIGHT = 20.0
+FOOT_HEIGHT_SCAN_CENTER = (
+    0.5 * (FEET_VOLUME_POINTS_GRID.x_min + FEET_VOLUME_POINTS_GRID.x_max),
+    0.5 * (FEET_VOLUME_POINTS_GRID.y_min + FEET_VOLUME_POINTS_GRID.y_max),
+)
+# Preserve LIVE RPO existing scanner size [0.1, 0.03] (already differed from RP1 formula).
+FOOT_HEIGHT_SCAN_SIZE = (0.1, 0.03)
+
 KNEE_VOLUME_POINTS_GRID = Grid3dPointsGeneratorCfg(
     x_min=-0.03,
     x_max=0.04,
@@ -62,19 +71,21 @@ class RPOParkourRoughEnvCfg(ParkourEnvCfg):
         # Scene
         self.scene.terrain.terrain_generator = ROUGH_TERRAINS_CFG
         self.scene.robot = RPO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.scene.left_height_scanner.prim_path = (
-            "{ENV_REGEX_NS}/Robot/Geometry/base_link/left_thigh_yaw_link/left_thigh_roll_link/"
-            "left_thigh_pitch_link/left_knee_link/left_ankle_pitch_link/left_ankle_roll_link"
-        )
-        self.scene.right_height_scanner.prim_path = (
-            "{ENV_REGEX_NS}/Robot/Geometry/base_link/right_thigh_yaw_link/right_thigh_roll_link/"
-            "right_thigh_pitch_link/right_knee_link/right_ankle_pitch_link/right_ankle_roll_link"
-        )
+        self.scene.left_height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/(?!.*left_ankle_roll_link[/]).*left_ankle_roll_link"
+        self.scene.right_height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/(?!.*right_ankle_roll_link[/]).*right_ankle_roll_link"
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/Geometry/base_link"
-        self.scene.left_height_scanner.pattern_cfg = patterns.GridPatternCfg(resolution=0.01, size=[0.1, 0.03])
-        self.scene.right_height_scanner.pattern_cfg = patterns.GridPatternCfg(resolution=0.01, size=[0.1, 0.03])
         self.scene.feet_volume_points.points_generator = FEET_VOLUME_POINTS_GRID
         self.scene.knee_volume_points.points_generator = KNEE_VOLUME_POINTS_GRID
+        for scanner_cfg in (
+            self.scene.left_height_scanner,
+            self.scene.right_height_scanner,
+        ):
+            scanner_cfg.offset.pos = (
+                *FOOT_HEIGHT_SCAN_CENTER,
+                FOOT_HEIGHT_SCAN_RAY_START_HEIGHT,
+            )
+            scanner_cfg.pattern_cfg.size = FOOT_HEIGHT_SCAN_SIZE
+            scanner_cfg.pattern_cfg.resolution = FOOT_HEIGHT_SCAN_RESOLUTION
         self.scene.camera.prim_path = "{ENV_REGEX_NS}/Robot/Geometry/base_link/torso_link"
         self.scene.camera.offset.pos = (0.0875, 0.01, 0.20568)
         self.scene.camera.offset.rot = (0.0, 0.5, 0.0, 0.866)
@@ -108,13 +119,10 @@ class RPOParkourRoughEnvCfg(ParkourEnvCfg):
                 preserve_order=True,
             )
         }
-        self.rewards.locomotion.rp1_hip_yaw_deviation = None
-        self.rewards.locomotion.feet_close_y_gauss.params["threshold"] = 0.05
-        self.rewards.locomotion.feet_air_time_positive_biped.params["hip_pitch_asset_cfg"] = SceneEntityCfg(
-            "robot",
-            joint_names=["left_thigh_pitch_joint", "right_thigh_pitch_joint"],
-            preserve_order=True,
+        self.rewards.locomotion.leg_yaw_deviation.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=[".*_thigh_yaw_joint"],
         )
+        self.rewards.locomotion.feet_close_y_gauss.params["threshold"] = 0.05
         self.rewards.locomotion.joint_deviation_upper_body.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=[".*_arm_.*_joint", ".*_elbow_.*_joint"]
         )

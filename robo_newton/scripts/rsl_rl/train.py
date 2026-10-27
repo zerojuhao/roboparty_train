@@ -513,7 +513,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     )
 
     # handle deprecated configurations
-    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
+    if agent_cfg.class_name != "FbCprRunner":
+        agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
 
     # rsl-rl 3.x 的 PPO/PPOAMP 不支持 Isaac Lab 2.3 为 5.0 预留的字段
     if version.parse(installed_version) < version.parse("5.0.0"):
@@ -525,6 +526,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # note: certain randomizations occur in the environment initialization so we set the seed here
     env_cfg.seed = agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+    agent_cfg.device = env_cfg.sim.device
     # check for invalid combination of CPU device with distributed training
     if args_cli.distributed and args_cli.device is not None and "cpu" in args_cli.device:
         raise ValueError(
@@ -534,7 +536,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # multi-gpu training configuration; launch_simulation already bound each rank's device
     if args_cli.distributed:
-        agent_cfg.device = env_cfg.sim.device
         seed = agent_cfg.seed + int(os.getenv("LOCAL_RANK", "0"))
         env_cfg.seed = seed
         agent_cfg.seed = seed
@@ -568,6 +569,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.log_dir = log_dir
 
     # create isaac environment
+    wm_cfg = getattr(agent_cfg, "world_model", None)
+    if wm_cfg is not None and wm_cfg.enabled:
+        if args_cli.task != "RP1-UFO":
+            raise ValueError("agent.world_model.enabled is currently supported only for RP1-UFO")
+        from robolab.tasks.manager_based.ufo.mdp.world_model_state import enable_world_model_observations
+
+        enable_world_model_observations(env_cfg)
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
     if args_cli.profile_physics_steps > 0:

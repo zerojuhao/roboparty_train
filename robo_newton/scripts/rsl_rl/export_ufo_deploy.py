@@ -181,12 +181,14 @@ def main() -> None:
         module.eval().requires_grad_(False)
 
     motion_cfg = env_cfg["commands"]["motion"]
-    motion_dir = args.motion_dir or Path(motion_cfg.get("motion_dir") or motion_cfg["manifest_path"])
-    if not motion_dir.is_absolute():
-        motion_dir = (run / motion_dir).resolve()
+    sources = args.motion_dir or motion_cfg.get("motion_dir") or motion_cfg["manifest_path"]
+    if isinstance(sources, (str, Path)):
+        sources = [sources]
+    motion_dirs = [Path(source) for source in sources]
+    motion_dirs = [path if path.is_absolute() else (run / path).resolve() for path in motion_dirs]
     motion_lib = MotionLibNPZ(
         {
-            "motion_file": (str(motion_dir),),
+            "motion_file": tuple(str(path) for path in motion_dirs),
             "step_dt": motion_cfg["step_dt"],
             "clip_seconds": 0.0,
             "min_clip_seconds": motion_cfg["min_clip_seconds"],

@@ -4,8 +4,8 @@ Data management follows the WBC ``MotionStore`` conventions: each NPZ stores
 its own metadata, clip boundaries are explicit, all clips share
 one fps, quaternions are XYZW, and every read stays inside one clip.
 
-Sampling uses uniform clip weights initially and a uniform phase start time.
-Evaluation can update clip weights through the original UFO priority API.
+Sampling preserves each source's original non-overlapping window mass when
+overlap is enabled. Evaluation can update these weights through the UFO API.
 
 Continuous-time queries blend the two neighbouring frames exactly like the
 vendored UFO ``_calc_frame_blend`` path: linear for positions and velocities,
@@ -31,6 +31,18 @@ MOTION_FIELDS = (
 )
 
 
+def _window_ranges(frame_count, clip_frames, min_frames, stride):
+    start = 0
+    while start < frame_count:
+        end = min(start + clip_frames, frame_count)
+        if start > 0 and end - start < min_frames:
+            break
+        yield start, end
+        if end == frame_count:
+            break
+        start += stride
+
+
 class MotionLibNPZ:
     """Serves the UFO motion API from unified XYZW / named NPZ clips."""
 
@@ -44,6 +56,10 @@ class MotionLibNPZ:
             resolve_motion_directory(entry) for entry in motion_lib_cfg["motion_file"]
         )
         paths = motion_clip_paths(self.motion_dir, motion_lib_cfg.get("motion_names"))
+        excluded = set(motion_lib_cfg.get("excluded_motion_names", ()))
+        paths = [path for path in paths if path.stem not in excluded]
+        if not paths:
+            raise ValueError("No motion clips remain after applying the motion selection")
         target_joints = target_bodies = None
 
         names: list[str] = []
@@ -104,31 +120,33 @@ class MotionLibNPZ:
         }
         self.all_motions_loaded = True
 
-        # Original-UFO clip windowing (humanoidverse utils/motion_data/clip.py):
-        # each source motion is split into fixed-duration non-overlapping
-        # windows (clip_seconds=10, min_clip_seconds=1). The public motion API
-        # then operates on window entries, exactly like the original 902-clip
-        # training/eval granularity.
+        self._base_sampling_weights = torch.ones(len(names), device=self.device)
+        # Overlap adds boundary coverage. Correct its window-count bias so each
+        # source retains its original UFO sampling mass, before difficulty weights.
         clip_seconds = float(motion_lib_cfg.get("clip_seconds", 0) or 0)
         if clip_seconds > 0:
             clip_frames = max(2, int(round(clip_seconds * self._fps)))
+            overlap = float(motion_lib_cfg.get("clip_overlap_seconds", 0.0))
+            if not 0 <= overlap < clip_seconds:
+                raise ValueError("Clip overlap must be non-negative and smaller than clip duration")
+            stride = max(1, clip_frames - int(round(overlap * self._fps)))
             min_frames = max(2, int(round(float(motion_lib_cfg.get("min_clip_seconds", 1.0)) * self._fps)))
             win_src, win_start, win_len, win_names = [], [], [], []
+            original_counts = []
             for m in range(len(names)):
                 n = num_frames[m]
-                start = 0
-                while start < n:
-                    end = min(start + clip_frames, n)
-                    if start > 0 and (end - start) < min_frames:
-                        break  # drop tiny tails; the first window is always kept
+                original_counts.append(sum(1 for _ in _window_ranges(n, clip_frames, min_frames, clip_frames)))
+                for start, end in _window_ranges(n, clip_frames, min_frames, stride):
                     win_src.append(m)
                     win_start.append(start)
                     win_len.append(end - start)
-                    win_names.append(f"{names[m]}__clip{start // clip_frames:03d}")
-                    start = end
+                    win_names.append(f"{names[m]}__clip{start // stride:03d}")
             if not win_names:
                 raise ValueError("clip windowing produced no windows; check clip_seconds.")
             window_sources = torch.tensor(win_src, dtype=torch.long, device=self.device)
+            original_counts = torch.tensor(original_counts, dtype=torch.float32, device=self.device)
+            new_counts = torch.bincount(window_sources, minlength=len(names))
+            self._base_sampling_weights = (original_counts / new_counts)[window_sources]
             window_starts = torch.tensor(win_start, dtype=torch.long, device=self.device)
             self._motion_starts = self._motion_starts[window_sources] + window_starts
             self._num_unique_motions = len(win_names)
@@ -140,7 +158,14 @@ class MotionLibNPZ:
                 f"[MotionLibNPZ] clip windowing: {len(names)} motions -> "
                 f"{self._num_unique_motions} clips of <= {clip_seconds:.1f}s"
             )
-        self._sampling_prob = None
+        self._default_sampling_prob = (self._base_sampling_weights / self._base_sampling_weights.sum()
+                                       if bool((self._base_sampling_weights != 1).any()) else None)
+        self._sampling_prob = self._default_sampling_prob
+        self.phase_curriculum = None
+        if motion_lib_cfg.get("phase_curriculum", False):
+            from robolab.utils.motion_phase_curriculum import MotionPhaseCurriculum
+
+            self.phase_curriculum = MotionPhaseCurriculum(self._motion_lengths)
 
     # ------------------------------------------------------- original UFO API
 
@@ -156,15 +181,17 @@ class MotionLibNPZ:
     def update_sampling_weights(self, probabilities) -> bool:
         """Set per-clip sampling probabilities (original UFO EMD prioritization).
 
-        Accepts an unnormalized non-negative probability vector of length
-        num clips; uniform sampling is restored by passing None.
+        Accepts non-negative per-window difficulty weights. The source-mass
+        correction is applied once here; None restores that baseline.
         """
         if probabilities is None:
-            self._sampling_prob = None
+            self._sampling_prob = self._default_sampling_prob
             return True
         prob = torch.as_tensor(probabilities, dtype=torch.float32, device=self.device).reshape(-1)
-        if prob.numel() != self._num_unique_motions or not torch.isfinite(prob).all():
+        if (prob.numel() != self._num_unique_motions or not torch.isfinite(prob).all()
+                or bool((prob < 0).any())):
             return False
+        prob = prob * self._base_sampling_weights
         total = float(prob.sum())
         if total <= 0:
             return False
@@ -172,12 +199,23 @@ class MotionLibNPZ:
         return True
 
     def sample_time(self, motion_ids, truncate_time=None):
+        if truncate_time is not None and truncate_time < 0:
+            raise ValueError("truncate_time must be non-negative")
+        if self.phase_curriculum is not None:
+            return self.phase_curriculum.sample_time(motion_ids, truncate_time)
         phase = torch.rand(motion_ids.shape, device=self.device)
         motion_len = self._motion_lengths[motion_ids]
         if truncate_time is not None:
             assert truncate_time >= 0.0
             motion_len = motion_len - truncate_time
-        return (phase * motion_len).to(self.device)
+        return (phase * motion_len.clamp_min(0.0)).to(self.device)
+
+    def update_phase_errors(self, motion_id, per_frame_errors, dt):
+        if self.phase_curriculum is not None:
+            self.phase_curriculum.update(motion_id, per_frame_errors, dt)
+
+    def phase_probabilities(self):
+        return None if self.phase_curriculum is None else self.phase_curriculum.probabilities()
 
     def get_motion_state(self, motion_ids, motion_times, offset=None):
         ids = torch.as_tensor(motion_ids, dtype=torch.long, device=self.device).reshape(-1)

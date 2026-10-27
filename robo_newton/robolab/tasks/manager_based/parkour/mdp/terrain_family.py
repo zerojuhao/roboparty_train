@@ -24,69 +24,23 @@ FOOTHOLD_GUIDANCE_FAMILY_IDS = (DISCRETE_FAMILY_ID, *STAIRS_FAMILY_IDS)
 NUM_TERRAIN_FAMILIES = 5
 
 
-def asymmetric_pitch_roll_penalty(
-    projected_gravity: torch.Tensor,
-    forward_tolerance: float | torch.Tensor = 0.0,
-) -> torch.Tensor:
-    """Penalize tilt while allowing a forward-lean deadzone.
-
-    Positive projected gravity on body x is forward lean. Forward tilt is
-    penalized only beyond ``forward_tolerance`` (radians); backward tilt keeps
-    the existing four-times penalty, and roll is unchanged.
-    """
-    tolerance = torch.as_tensor(
-        forward_tolerance,
-        dtype=projected_gravity.dtype,
-        device=projected_gravity.device,
-    )
-    if torch.any((tolerance < 0.0) | (tolerance >= torch.pi / 2)):
-        raise ValueError("forward_tolerance must be in [0, pi/2).")
-    forward = torch.clamp(projected_gravity[:, 0], min=0.0)
-    backward = torch.clamp(-projected_gravity[:, 0], min=0.0)
-    forward_excess = torch.clamp(forward - torch.sin(tolerance), min=0.0)
-    roll = projected_gravity[:, 1]
-    return (
-        torch.square(forward_excess)
-        + torch.square(roll)
-        + 16.0 * torch.square(backward)
-    )
-
-
 def terrain_foot_point_weights(
     local_x: torch.Tensor,
     family_ids: torch.Tensor,
     stairs_weight_min: float = 0.0,
     stairs_weight_max: float = 1.0,
 ) -> torch.Tensor:
-    """Terrain-dependent sole weights along foot-local x (heel → toe).
+    """Sole weights along foot-local x: heel/toe min, mid-foot max (all terrains).
 
-    Up-stairs: toe-heavy; down-stairs: heel-heavy; discrete: mid-foot-heavy.
-    Other terrain families use uniform weights.
-    ``local_x`` is ``(P,)``; ``family_ids`` is ``(N,)``; returns ``(N, P)``.
+    ``local_x`` is ``(P,)``; ``family_ids`` is ``(N,)`` (shape only); returns ``(N, P)``.
     """
     x_min = local_x.min()
     x_max = local_x.max()
     x_frac = ((local_x - x_min) / (x_max - x_min + 1e-8)).clamp(0.0, 1.0)
-    weight_span = stairs_weight_max - stairs_weight_min
-    w_toe_heavy = stairs_weight_min + weight_span * x_frac
-    w_heel_heavy = stairs_weight_max - weight_span * x_frac
-    # Peak at mid-foot; heel and toe sit at stairs_weight_min.
-    w_mid_heavy = stairs_weight_min + weight_span * (
+    w = stairs_weight_min + (stairs_weight_max - stairs_weight_min) * (
         1.0 - 2.0 * torch.abs(x_frac - 0.5)
     )
-    env_w = torch.ones(
-        family_ids.shape[0], local_x.shape[0], device=local_x.device, dtype=local_x.dtype
-    )
-    mask_discrete = family_ids == DISCRETE_FAMILY_ID
-    mask_up = family_ids == STAIRS_UP_FAMILY_ID
-    mask_down = family_ids == STAIRS_DOWN_FAMILY_ID
-    if mask_discrete.any():
-        env_w[mask_discrete] = w_mid_heavy
-    if mask_up.any():
-        env_w[mask_up] = w_toe_heavy
-    if mask_down.any():
-        env_w[mask_down] = w_heel_heavy
-    return env_w
+    return w.unsqueeze(0).expand(family_ids.shape[0], -1).clone()
 
 
 def soft_absolute_clearance_unsupported(
@@ -251,51 +205,3 @@ def get_terrain_family_ids(env: ManagerBasedEnv) -> torch.Tensor:
     return sub_to_family[sub_idx]
 
 
-def terrain_type_indicator(env: ManagerBasedEnv, terrain_type: str) -> torch.Tensor:
-    """Return a float indicator for one exact generated sub-terrain."""
-    terrain = env.scene.terrain
-    if terrain.cfg.terrain_type != "generator":
-        raise ValueError("Exact terrain routing requires generated terrain.")
-
-    sub_terrain_names = list(terrain.cfg.terrain_generator.sub_terrains.keys())
-    if terrain_type not in sub_terrain_names:
-        raise ValueError(
-            f"Terrain type {terrain_type!r} is not configured. "
-            f"Available types: {sub_terrain_names}."
-        )
-    sub_terrain_indices = terrain.terrain_generator.get_subterrain_indices(
-        terrain.terrain_levels, terrain.terrain_types, device=env.device
-    )
-    target_index = sub_terrain_names.index(terrain_type)
-    return (sub_terrain_indices == target_index).to(torch.float32).unsqueeze(-1)
-
-
-def terrain_type_route(
-    env: ManagerBasedEnv, terrain_routes: dict[str, int]
-) -> torch.Tensor:
-    """Return one integer-valued AMP route for each generated sub-terrain."""
-    terrain = env.scene.terrain
-    if terrain.cfg.terrain_type != "generator":
-        raise ValueError("Exact terrain routing requires generated terrain.")
-
-    sub_terrain_names = list(terrain.cfg.terrain_generator.sub_terrains.keys())
-    unknown = set(terrain_routes) - set(sub_terrain_names)
-    if unknown:
-        raise ValueError(
-            f"Terrain routes contain unconfigured types: {sorted(unknown)}. "
-            f"Available types: {sub_terrain_names}."
-        )
-    for terrain_type, route_value in terrain_routes.items():
-        if not isinstance(route_value, int) or route_value <= 0:
-            raise ValueError(
-                f"AMP route for {terrain_type!r} must be a positive integer."
-            )
-
-    sub_terrain_indices = terrain.terrain_generator.get_subterrain_indices(
-        terrain.terrain_levels, terrain.terrain_types, device=env.device
-    )
-    routes = torch.zeros_like(sub_terrain_indices, dtype=torch.float32)
-    for terrain_type, route_value in terrain_routes.items():
-        target_index = sub_terrain_names.index(terrain_type)
-        routes[sub_terrain_indices == target_index] = float(route_value)
-    return routes.unsqueeze(-1)

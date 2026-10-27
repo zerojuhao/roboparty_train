@@ -39,7 +39,6 @@ import torch
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
-from robolab.utils.command_path import command_path_features
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -50,13 +49,6 @@ if TYPE_CHECKING:
 def _as_torch(value) -> torch.Tensor:
     """Return a torch view for Newton proxy arrays and ordinary tensors."""
     return value.torch if hasattr(value, "torch") else value
-
-
-def command_path_state(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
-    """Expose the command-relative state used by accumulated drift rewards."""
-    term = env.command_manager.get_term(command_name)
-    heading_delta = _as_torch(term.robot.data.heading_w) - term.segment_start_heading_w
-    return command_path_features(term.planar_offset_error, heading_delta, term.command)
 
 
 def root_local_rot_tan_norm(

@@ -36,6 +36,8 @@ class PufoRolloutContext:
     tracking_heading_world: torch.Tensor
     tracking_velocity_world: torch.Tensor
     tracking_velocity_valid: torch.Tensor
+    tracking_lengths: torch.Tensor | None = None
+    tracking_start_counts: torch.Tensor | None = None
 
 
 class PufoAgent(FbCprAuxAgent):
@@ -90,15 +92,28 @@ class PufoAgent(FbCprAuxAgent):
 
     @torch.no_grad()
     def _sample_tracking_context(self, replay_buffers, batch_dim: int, length: int):
-        batch = replay_buffers["expert_slicer"].sample(batch_dim * length, seq_length=length)
+        variable = bool(getattr(self.cfg, "rollout_expert_variable_length", False))
+        expert = replay_buffers["expert_slicer"]
+        batch = (expert.sample_tracking_variable(batch_dim, length) if variable
+                 else expert.sample(batch_dim * length, seq_length=length))
         next_obs = tree_to_device(batch["next"]["observation"], self.device)
         z = self._backward_map(self._b_in(next_obs)).view(batch_dim, length, -1)
-        for step in range(length):
-            z[:, step] = z[:, step : min(step + self.cfg.seq_length, length)].mean(dim=1)
+        if variable:
+            lengths = batch["lengths"].to(self.device)
+            time = torch.arange(length, device=self.device)[None].expand(batch_dim, -1)
+            start = torch.minimum(time, lengths[:, None] - 1)
+            end = torch.minimum(start + self.cfg.seq_length, lengths[:, None])
+            prefix = torch.cat((torch.zeros_like(z[:, :1]), z.cumsum(1)), 1)
+            rows = torch.arange(batch_dim, device=self.device)[:, None]
+            z = (prefix[rows, end] - prefix[rows, start]) / (end - start)[..., None]
+        else:
+            for step in range(length):
+                z[:, step] = z[:, step : min(step + self.cfg.seq_length, length)].mean(dim=1)
         heading = batch["heading_forward_xy"].to(self.device).view(batch_dim, length, 2)
         velocity = batch["reference_velocity_world_xy"].to(self.device).view(batch_dim, length, 2)
         velocity_valid = batch["reference_velocity_valid"].to(self.device).view(batch_dim, length, 1)
-        return self.project_z(z), heading, velocity, velocity_valid.bool()
+        result = self.project_z(z), heading, velocity, velocity_valid.bool()
+        return (*result, lengths) if variable else result
 
     @torch.no_grad()
     def advance_rollout_context(
@@ -115,6 +130,7 @@ class PufoAgent(FbCprAuxAgent):
         current_heading_xy = current_heading_xy.to(self.device)
         num_envs = counts.shape[0]
         length = int(self.cfg.rollout_expert_trajectories_length)
+        variable = bool(getattr(self.cfg, "rollout_expert_variable_length", False))
 
         if state is None:
             num_expert = (
@@ -136,6 +152,9 @@ class PufoAgent(FbCprAuxAgent):
                 tracking_heading_world=torch.empty(num_expert, length, 2, device=self.device),
                 tracking_velocity_world=torch.empty(num_expert, length, 2, device=self.device),
                 tracking_velocity_valid=torch.empty(num_expert, length, 1, dtype=torch.bool, device=self.device),
+                tracking_lengths=torch.full((num_expert,), length, device=self.device, dtype=torch.long)
+                    if variable else None,
+                tracking_start_counts=counts[expert_env_ids].clone() if variable else None,
             )
             refresh_rows = torch.arange(num_expert, device=self.device)
         else:
@@ -151,13 +170,22 @@ class PufoAgent(FbCprAuxAgent):
                 state.z[random_mask] = new_z
                 state.context_id[random_mask] += 1
             expert_counts = counts[state.expert_env_ids]
-            refresh_rows = torch.nonzero(expert_counts.remainder(length) == 0, as_tuple=False).flatten()
+            if variable:
+                elapsed = expert_counts - state.tracking_start_counts
+                refresh = (expert_counts == 0) | (elapsed < 0) | (elapsed >= state.tracking_lengths)
+            else:
+                refresh = expert_counts.remainder(length) == 0
+            refresh_rows = torch.nonzero(refresh, as_tuple=False).flatten()
 
         if refresh_rows.numel() > 0:
             refreshed_env_ids = state.expert_env_ids[refresh_rows]
-            z, heading, velocity, velocity_valid = self._sample_tracking_context(
+            sampled = self._sample_tracking_context(
                 replay_buffers, int(refresh_rows.numel()), length
             )
+            z, heading, velocity, velocity_valid = sampled[:4]
+            if variable:
+                state.tracking_lengths[refresh_rows] = sampled[4]
+                state.tracking_start_counts[refresh_rows] = counts[refreshed_env_ids]
             reference_anchor = heading[:, :1].expand_as(heading)
             rollout_anchor = current_heading_xy[refreshed_env_ids, None, :].expand_as(heading)
             state.tracking_z[refresh_rows] = z
@@ -172,7 +200,8 @@ class PufoAgent(FbCprAuxAgent):
 
         ids = state.expert_env_ids
         rows = torch.arange(ids.numel(), device=self.device)
-        indices = counts[ids].remainder(length)
+        indices = (counts[ids] - state.tracking_start_counts if variable
+                   else counts[ids].remainder(length))
         state.z[ids] = state.tracking_z[rows, indices]
         state.heading_target_world[ids] = state.tracking_heading_world[rows, indices]
         state.velocity_target_world[ids] = state.tracking_velocity_world[rows, indices]
@@ -225,8 +254,13 @@ class PufoAgent(FbCprAuxAgent):
         next_velocity_valid = state.velocity_valid.clone()
         ids = state.expert_env_ids
         rows = torch.arange(ids.numel(), device=self.device)
-        indices = counts[ids].remainder(length)
-        next_indices = (indices + 1).clamp(max=length - 1)
+        if state.tracking_lengths is not None:
+            indices = counts[ids] - state.tracking_start_counts
+            lengths = state.tracking_lengths
+        else:
+            indices = counts[ids].remainder(length)
+            lengths = torch.full_like(indices, length)
+        next_indices = torch.minimum(indices + 1, lengths - 1)
         next_z[ids] = state.tracking_z[rows, next_indices]
         next_heading_target[ids] = state.tracking_heading_world[rows, next_indices]
         next_velocity_target[ids] = state.tracking_velocity_world[rows, next_indices]
@@ -236,7 +270,7 @@ class PufoAgent(FbCprAuxAgent):
         heading_valid = state.heading_valid & ~done
         velocity_valid = state.velocity_valid & ~done
         continues = heading_valid.clone()
-        continues[ids] &= (indices + 1 < length).unsqueeze(-1)
+        continues[ids] &= (indices + 1 < lengths).unsqueeze(-1)
         next_heading = heading_observation(next_heading_xy, next_heading_target, heading_valid)
         next_velocity = velocity_observation(
             next_velocity_target, next_heading_xy, next_velocity_valid

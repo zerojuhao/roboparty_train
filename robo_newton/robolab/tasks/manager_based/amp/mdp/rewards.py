@@ -494,13 +494,15 @@ def feet_slide(
     asset_cfg: SceneEntityCfg,
     contact_threshold: float = 1.0,
 ) -> torch.Tensor:
-    """Sum world-frame horizontal foot speeds while the feet are in contact."""
+    """Sum world-frame foot XY linear speed + yaw angular speed while in contact."""
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     asset: Articulation = env.scene[asset_cfg.name]
     forces = _as_torch(contact_sensor.data.net_normal_forces_w)[:, sensor_cfg.body_ids, :]
     contacts = forces.norm(dim=-1) > contact_threshold
-    foot_velocity = _as_torch(asset.data.body_lin_vel_w)[:, asset_cfg.body_ids, :2]
-    return (foot_velocity.norm(dim=-1) * contacts).sum(dim=-1)
+    v_lin_xy = _as_torch(asset.data.body_lin_vel_w)[:, asset_cfg.body_ids, :2]
+    omega_yaw = _as_torch(asset.data.body_ang_vel_w)[:, asset_cfg.body_ids, 2]
+    penalty = v_lin_xy.norm(dim=-1) + omega_yaw.abs()
+    return (penalty * contacts).sum(dim=-1)
 
 def upward(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize z-axis base linear velocity using L2 squared kernel."""

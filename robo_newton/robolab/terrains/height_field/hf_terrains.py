@@ -21,8 +21,30 @@ if TYPE_CHECKING:
     from . import hf_terrains_cfg
 
 from . import hf_terrains_cfg
-from .grid_utils import centered_step_levels
 from .utils import generate_wall
+
+
+def _centered_step_levels(
+    length_pixels: int,
+    platform_pixels: int,
+    step_pixels: int,
+) -> np.ndarray:
+    """Create a centered 1-D stair profile with an exact platform pixel count."""
+    if length_pixels < 1 or platform_pixels < 1 or step_pixels < 1:
+        raise ValueError("Terrain, platform, and step pixel counts must be positive.")
+    if platform_pixels > length_pixels:
+        raise ValueError("platform_pixels cannot exceed length_pixels.")
+
+    platform_start = (length_pixels - platform_pixels) // 2
+    platform_stop = platform_start + platform_pixels
+    indices = np.arange(length_pixels)
+    distance = np.where(
+        indices < platform_start,
+        platform_start - indices,
+        np.where(indices >= platform_stop, indices - platform_stop + 1, 0),
+    )
+    num_steps = int(np.ceil(distance.max() / step_pixels))
+    return num_steps - np.ceil(distance / step_pixels).astype(np.int32)
 
 
 def height_field_to_mesh(func):
@@ -199,8 +221,8 @@ def perlin_pyramid_sloped_terrain(difficulty: float, cfg: hf_terrains_cfg.Perlin
     width_pixels = int(cfg.size[0] / cfg.horizontal_scale)
     length_pixels = int(cfg.size[1] / cfg.horizontal_scale)
     platform_pixels = round(cfg.platform_width / cfg.horizontal_scale)
-    x_levels = centered_step_levels(width_pixels, platform_pixels, 1)
-    y_levels = centered_step_levels(length_pixels, platform_pixels, 1)
+    x_levels = _centered_step_levels(width_pixels, platform_pixels, 1)
+    y_levels = _centered_step_levels(length_pixels, platform_pixels, 1)
     height_per_pixel = slope * cfg.horizontal_scale / cfg.vertical_scale
     hf_raw = np.minimum(x_levels[:, None], y_levels[None, :]) * height_per_pixel
     if cfg.perlin_cfg is not None:
@@ -259,8 +281,8 @@ def perlin_pyramid_stairs_terrain(difficulty: float, cfg: hf_terrains_cfg.Perlin
     # -- platform
     platform_width = round(cfg.platform_width / cfg.horizontal_scale)
 
-    x_levels = centered_step_levels(width_pixels, platform_width, step_width)
-    y_levels = centered_step_levels(length_pixels, platform_width, step_width)
+    x_levels = _centered_step_levels(width_pixels, platform_width, step_width)
+    y_levels = _centered_step_levels(length_pixels, platform_width, step_width)
     hf_raw = np.minimum(x_levels[:, None], y_levels[None, :]) * step_height
 
     if cfg.perlin_cfg is not None:
@@ -432,7 +454,7 @@ def perlin_trapezoid_stairs_terrain(
     step_height_px = round(step_height / vs)
     platform_width_px = round(cfg.platform_width / hs)
 
-    x_levels = centered_step_levels(
+    x_levels = _centered_step_levels(
         sub_width_px, platform_width_px, step_width_px
     )
     hf_raw = np.repeat(x_levels[:, None], sub_length_px, axis=1) * step_height_px

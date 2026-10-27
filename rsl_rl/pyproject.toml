@@ -32,6 +32,7 @@ dependencies = [
     "GitPython",
     "onnx",
     "onnxscript>=0.5.4",
+    "pytorch-kinematics==0.10.0",
 ]
 
 [project.optional-dependencies]

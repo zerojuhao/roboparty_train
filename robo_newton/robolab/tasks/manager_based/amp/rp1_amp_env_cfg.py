@@ -30,7 +30,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from isaaclab.managers import CurriculumTermCfg
-from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
@@ -45,12 +44,11 @@ from .mdp.curriculums import VelocityTrackingCurriculum
 # AMP discriminator end-effectors. Full-body key points duplicate joint_pos and
 # make the disc too easy to saturate; ankles/knees/wrists match parkour AMP.
 KEY_BODY_NAMES = [
-    "left_ankle_roll_link",
-    "right_ankle_roll_link",
-    "left_knee_link",
-    "right_knee_link",
-    "left_wrist_link",
-    "right_wrist_link",
+    ".*_ankle_roll_link",
+    ".*_knee_link",
+    ".*_elbow_link",
+    ".*_wrist_link",
+    ".*_shoulder_pitch_link",
 ]
 AMP_NUM_STEPS = 3
 
@@ -64,8 +62,8 @@ class RP1AmpCurriculumCfg:
             "min_velocity": 1.2,
             "max_velocity": 3.0,
             "step_size": 0.1,
-            "up_threshold": 0.35,
-            "down_threshold": 0.5,
+            "up_threshold": 0.5,
+            "down_threshold": 0.6,
             "up_required_windows": 5,
             "down_required_windows": 2,
         },
@@ -105,6 +103,8 @@ class RP1AmpEnvCfg(AmpEnvCfg):
         self.motion_data.motion_dataset.key_body_names = KEY_BODY_NAMES
         self.motion_data.motion_dataset.motion_data_weights = {
 
+            "neutral_walk_ff_180_R_002__A534": 1.0,
+            "neutral_walk_ff_180_R_002__A534_M": 1.0,
             # "walk_ff_loop_180_R_001__A048": 1.0,
             # "walk_arc_ccw_loop_L_002__A041": 1.0,
             # "walk_arc_cw_loop_001__A048": 1.0,
@@ -126,12 +126,12 @@ class RP1AmpEnvCfg(AmpEnvCfg):
 
             # ACCAD male retargets (50Hz, hhtools -> 4-key xyzw)
             "B4_-_Stand_to_Walk_backwards_stageii": 1.0,
-            "B9_-__Walk_turn_left_90_stageii": 1.0,
-            "B10_-__Walk_turn_left_45_stageii": 1.0,
-            "B13_-__Walk_turn_right_90_stageii": 1.0,
-            "B14_-__Walk_turn_right_45_t2_stageii": 1.0,
-            "B15_-__Walk_turn_around_stageii": 1.0,
-            "Walk_B16_-_Walk_turn_change_stageii": 1.0,
+            # "B9_-__Walk_turn_left_90_stageii": 1.0,
+            # "B10_-__Walk_turn_left_45_stageii": 1.0,
+            # "B13_-__Walk_turn_right_90_stageii": 1.0,
+            # "B14_-__Walk_turn_right_45_t2_stageii": 1.0,
+            # "B15_-__Walk_turn_around_stageii": 1.0,
+            # "Walk_B16_-_Walk_turn_change_stageii": 1.0,
 
             "C1_-_stand_to_run_stageii": 1.0,
             "C3_-_run_stageii": 1.0,
@@ -142,9 +142,9 @@ class RP1AmpEnvCfg(AmpEnvCfg):
             "C15_-_run_turn_right_45_stageii": 1.0,
 
         }
-        self.motion_data.motion_dataset.sampling_mode = "command_match"
+        # self.motion_data.motion_dataset.sampling_mode = "command_match"
         self.motion_data.motion_dataset.command_name = "base_velocity"
-        self.motion_data.motion_dataset.command_match_temperature = 0.3
+        self.motion_data.motion_dataset.command_match_temperature = 0.5
         self.motion_data.motion_dataset.command_match_min_probability = 0.05
         self.motion_data.motion_dataset.command_match_direction_weight = 1.0
         self.motion_data.motion_dataset.command_match_direction_threshold = 0.3
@@ -170,9 +170,6 @@ class RP1AmpEnvCfg(AmpEnvCfg):
                 term.params["command_name"] = "base_velocity"
         self.observations.policy.velocity_commands.params["command_name"] = "base_velocity"
         self.observations.critic.velocity_commands.params["command_name"] = "base_velocity"
-        self.observations.critic.command_path_state = ObsTerm(
-            func=mdp.command_path_state, params={"command_name": "base_velocity"}
-        )
         self.curriculum.velocity_tracking.params["command_name"] = "base_velocity"
 
 

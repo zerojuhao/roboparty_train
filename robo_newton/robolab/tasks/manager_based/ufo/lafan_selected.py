@@ -102,13 +102,45 @@ LOCOMOTION_MOTION_NAMES = (
     "walk_ff_loop_180_R_001__A048",
 )
 
-# KEEP5 gestures (rp1_action), Desktop four-key NPZ stems.
+# All RP1 action variants (rp1_action): base motions, speed variants,
+# no-end-blend variants, and the idle clip.
 ACTION_MOTION_NAMES = (
     "wave_R",
+    "wave_R_slow125",
+    "wave_R_slow150",
+    "wave_R_slow200",
+    "wave_R_slow250",
+    "wave_R_slow300",
+    "wave_R_no_endblend",
     "casual_greeting_R",
+    "casual_greeting_R_slow125",
+    "casual_greeting_R_slow150",
+    "casual_greeting_R_slow200",
+    "casual_greeting_R_slow250",
+    "casual_greeting_R_slow300",
+    "casual_greeting_R_no_endblend",
     "warm_welcome_R",
+    "warm_welcome_R_slow125",
+    "warm_welcome_R_slow150",
+    "warm_welcome_R_slow200",
+    "warm_welcome_R_slow250",
+    "warm_welcome_R_slow300",
+    "warm_welcome_R_no_endblend",
     "salute",
+    "salute_slow125",
+    "salute_slow150",
+    "salute_slow200",
+    "salute_slow250",
+    "salute_slow300",
+    "salute_no_endblend",
     "wave_two_hands_R",
+    "wave_two_hands_R_slow125",
+    "wave_two_hands_R_slow150",
+    "wave_two_hands_R_slow200",
+    "wave_two_hands_R_slow250",
+    "wave_two_hands_R_slow300",
+    "wave_two_hands_R_no_endblend",
+    "idle",
 )
 
 # Combined selection for RP1 UFO / PUFO training (uniform clip sampling).

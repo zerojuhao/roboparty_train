@@ -52,7 +52,12 @@ class UFOSceneCfg(InteractiveSceneCfg):
             dynamic_friction=1.0,
         ),
     )
-    robot = RP1_UFO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot = RP1_UFO_CFG.replace(
+        prim_path="{ENV_REGEX_NS}/Robot",
+        actuators={
+            "all_joints": RP1_UFO_CFG.actuators["all_joints"].replace(min_delay=0, max_delay=0),
+        },
+    )
     light = AssetBaseCfg(prim_path="/World/light", spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0))
     contact_forces = TerrainContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*",
@@ -68,6 +73,13 @@ class UFOCommandsCfg:
         asset_name="robot",
         motion_dir=MOTION_DIR,
         motion_names=MOTION_NAMES,
+        clip_overlap_seconds=2.0,
+        phase_curriculum=True,
+        # These references descend stairs absent from the flat training scene.
+        excluded_motion_names=(
+            "stairs_climbing_down_loop_R_102__A301_M",
+            "stairs_climbing_down_stop_R_103__A301",
+        ),
     )
 
 
@@ -130,24 +142,9 @@ class UFOObservationsCfg:
 
 @configclass
 class UFOEventCfg:
-    resample_motion = EventTerm(
-        func=mdp.resample_motion_for_reset,
-        mode="reset",
-        params={"command_name": "motion"},
-    )
-    reset_root_state = EventTerm(
-        func=mdp.reset_root_state_from_motion,
-        mode="reset",
-        params={"command_name": "motion"},
-    )
-    reset_joint_state = EventTerm(
-        func=mdp.reset_joint_state_from_motion,
-        mode="reset",
-        params={"command_name": "motion", "joint_pos_range": (0.0, 0.0)},
-    )
     randomize_rigid_body_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
-        mode="startup",
+        mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
             "static_friction_range": (0.3, 1.7),
@@ -158,7 +155,7 @@ class UFOEventCfg:
     )
     randomize_rigid_body_com = EventTerm(
         func=mdp.randomize_rigid_body_com,
-        mode="startup",
+        mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
             "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.03, 0.03)},
@@ -166,7 +163,7 @@ class UFOEventCfg:
     )
     scale_link_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
-        mode="startup",
+        mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
             "mass_distribution_params": (0.8, 1.2),
@@ -182,6 +179,27 @@ class UFOEventCfg:
             "damping_distribution_params": (0.7, 1.3),
             "operation": "scale",
         },
+    )
+    resample_motion = EventTerm(
+        func=mdp.resample_motion_for_reset,
+        mode="reset",
+        params={"command_name": "motion"},
+    )
+
+    randomize_joint_calibration = EventTerm(
+        func=mdp.randomize_joint_calibration,
+        mode="reset",
+        params={"offset_range": (-0.01, 0.01)},
+    )
+    reset_root_state = EventTerm(
+        func=mdp.reset_root_state_from_motion,
+        mode="reset",
+        params={"command_name": "motion"},
+    )
+    reset_joint_state = EventTerm(
+        func=mdp.reset_joint_state_from_motion,
+        mode="reset",
+        params={"command_name": "motion", "joint_pos_range": (0.0, 0.0)},
     )
     push_robot = EventTerm(
         func=mdp.push_robot_by_setting_base_velocity,

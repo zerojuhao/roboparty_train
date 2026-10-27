@@ -30,7 +30,6 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
-from robolab.utils.command_path import command_path_features
 from robolab.utils.mujoco_actuators import RoboPartyMujocoActuator
 
 DEFAULT_RUN = Path(
@@ -65,7 +64,6 @@ POLICY_TERM_WIDTHS = {
     "joint_pos": len(MJ_JOINT_NAMES),
     "joint_vel": len(MJ_JOINT_NAMES),
     "actions": len(MJ_JOINT_NAMES),
-    "command_path_state": 4,
 }
 
 
@@ -270,8 +268,6 @@ class Simulation:
         self.data.qpos[self.qids] = self.default
         mujoco.mj_forward(self.model, self.data)
 
-        self.reset_command_origin()
-
         self.last_action = np.zeros(24, dtype=np.float32)
         self.target = self.default.copy()
         self.step_braking_power_peak = 0.0
@@ -282,12 +278,6 @@ class Simulation:
         self.histories = policy_histories_from_config(env_config)
         self.renderer = None
         self.camera_distance = camera_distance
-
-    def reset_command_origin(self) -> None:
-        """Start a path segment; the recorder holds one segment for the full clip."""
-        self.command_origin_xy = self.data.qpos[:2].copy()
-        rotation = self.data.xmat[self.model.body("base_link").id].reshape(3, 3)
-        self.command_origin_heading = np.arctan2(rotation[1, 0], rotation[0, 0])
 
     def observe(self, command: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         rotation = self.data.xmat[self.model.body("base_link").id].reshape(3, 3)
@@ -304,19 +294,6 @@ class Simulation:
             "joint_vel": joint_velocity_mj[POLICY_TO_MJ],
             "actions": self.last_action,
         }
-        if "command_path_state" in self.histories:
-            delta_xy = self.data.qpos[:2] - self.command_origin_xy
-            sine, cosine = np.sin(self.command_origin_heading), np.cos(self.command_origin_heading)
-            displacement = np.array([
-                cosine * delta_xy[0] + sine * delta_xy[1],
-                -sine * delta_xy[0] + cosine * delta_xy[1],
-            ])
-            heading = np.arctan2(rotation[1, 0], rotation[0, 0])
-            values["command_path_state"] = command_path_features(
-                torch.as_tensor(displacement),
-                torch.as_tensor(heading - self.command_origin_heading),
-                torch.as_tensor(command),
-            ).numpy()
         for name, history in self.histories.items():
             history.append(values[name])
         observation = np.concatenate([self.histories[name].flat() for name in self.histories])

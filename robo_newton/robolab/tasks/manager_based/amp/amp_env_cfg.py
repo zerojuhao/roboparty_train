@@ -344,7 +344,7 @@ class EventCfg:
         func=mdp.push_by_setting_velocity,
         mode="interval",
         interval_range_s=(5.0, 10.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-1.0, 1.0)}},
+        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-0.5, 0.5)}},
     )
     
 @configclass
@@ -353,45 +353,45 @@ class RewardsCfg:
 
     # -- tracking
     track_lin_vel_xy_exp = RewTerm(
-        func=mdp.track_lin_vel_xy_exp, weight=2.0,
+        func=mdp.track_lin_vel_xy_exp, weight=1.5,
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
     track_ang_vel_z_exp = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=2.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_ang_vel_z_exp, weight=1.25, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
-    is_alive = RewTerm(func=mdp.is_alive, weight=1.0)
+    is_alive = RewTerm(func=mdp.is_alive, weight=0.15)
 
     # -- gait
     feet_air_time_positive_biped = RewTerm(
-        func=mdp.feet_air_time_positive_biped, weight=1.0,
+        func=mdp.feet_air_time_positive_biped, weight=0.25,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
             "command_name": "base_velocity", "threshold": 0.3,
         },
     )
-    yaw_turn_foot_air_time = RewTerm(
-        func=mdp.yaw_turn_foot_air_time, weight=2.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-            "command_name": "base_velocity",
-            "lin_vel_max": 0.3,
-            "ang_vel_min": 0.3,
-            "target_height": 0.05,
-            "target_air_time": 0.3,
-            "height_std": 0.03,
-            "air_std": 0.15,
-        },
-    )
-    high_speed_double_flight = RewTerm(
-        func=mdp.high_speed_double_flight, weight=5.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
-            "command_name": "base_velocity", "speed_gate": 1.5, "max_flight_time": 0.30,
-            "max_forward_lean": math.radians(15.0),
-            "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
-        },
-    )
+    # yaw_turn_foot_air_time = RewTerm(
+    #     func=mdp.yaw_turn_foot_air_time, weight=1.0,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+    #         "command_name": "base_velocity",
+    #         "lin_vel_max": 0.3,
+    #         "ang_vel_min": 0.3,
+    #         "target_height": 0.05,
+    #         "target_air_time": 0.3,
+    #         "height_std": 0.03,
+    #         "air_std": 0.15,
+    #     },
+    # )
+    # high_speed_double_flight = RewTerm(
+    #     func=mdp.high_speed_double_flight, weight=1.0,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
+    #         "command_name": "base_velocity", "speed_gate": 1.2, "max_flight_time": 0.30,
+    #         "max_forward_lean": math.radians(15.0),
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
+    #     },
+    # )
 
     # -- posture
     stand_still = RewTerm(func=mdp.stand_still, weight=-0.1)
@@ -406,7 +406,7 @@ class RewardsCfg:
     )
     pelvis_ang_vel_xy_l2 = RewTerm(
         func=mdp.link_ang_vel_xy_l2,
-        weight=-0.01,
+        weight=-0.1,
         params={"asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link")},
     )
     hip_yaw_deviation_l1 = RewTerm(
@@ -463,7 +463,7 @@ class RewardsCfg:
             ),
             "contact_threshold": 1.0,
             "command_name": "base_velocity",
-            "speed_gate": 1.5,
+            "speed_gate": 2.0,
         },
     )
     undesired_contacts = RewTerm(
@@ -546,7 +546,7 @@ class AnimationCfg:
         ], 
         num_steps_to_use=3, 
         random_initialize=True,
-        random_fetch=False,
+        random_fetch=True,
         enable_visualization=False,
     )
     animation_in_place_turn: AnimTerm | None = None

@@ -8,7 +8,6 @@ from __future__ import annotations
 import torch
 
 from isaaclab.envs import VecEnvStepReturn
-from isaaclab.utils.buffers import CircularBuffer
 
 from robolab.tasks.manager_based.amp.amp_env import AmpEnv
 from robolab.tasks.manager_based.parkour.managers import (
@@ -49,30 +48,13 @@ class ParkourEnv(AmpEnv):
 
         super().load_managers()
 
-        # Action history for smoothness rewards (same layout as direct BaseEnv).
-        self.action_buffer = CircularBuffer(
-            max_len=3, batch_size=self.num_envs, device=self.device
-        )
-        self.action_buffer.append(
-            torch.zeros(
-                self.num_envs,
-                self.action_manager.total_action_dim,
-                dtype=torch.float,
-                device=self.device,
-            )
-        )
-
         if reward_group_cfg is not None:
             self.cfg.rewards = reward_group_cfg
             self.reward_manager = MultiRewardManager(self.cfg.rewards, self)
             print("[INFO] Multi Reward Manager: ", self.reward_manager)
 
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
-        self.action_buffer.append(action.to(self.device))
         obs, rew, terminated, truncated, extras = super().step(action)
-        reset_env_ids = (terminated | truncated).nonzero(as_tuple=False).squeeze(-1)
-        if len(reset_env_ids) > 0:
-            self.action_buffer.reset(reset_env_ids)
         if isinstance(rew, dict):
             rew = _reward_dict_to_vector(rew)
             self.reward_buf = rew

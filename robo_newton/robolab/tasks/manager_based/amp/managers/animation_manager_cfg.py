@@ -56,12 +56,12 @@ class AnimationTermCfg:
     random_initialize: bool = False
     """Whether to randomly initialize the starting point in the motion data term."""
     
-    random_fetch: bool = False
+    random_fetch: bool = True
     """Whether to randomly fetch the motion data at each step.
 
-    Ignored when the motion term uses ``command_match``: that path always plays
-    the matched clip sequentially and only resamples on reset, command change,
-    or when fewer than ``num_steps_to_use`` frames remain. Clips never wrap.
+    For ``command_match`` this flag is ignored: every step recomputes clip
+    probabilities from the current command and samples a random window of
+    ``num_steps_to_use`` frames. RSI still only runs on episode reset.
     """
     
     enable_visualization: bool = True

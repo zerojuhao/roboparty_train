@@ -194,50 +194,39 @@ class AnimationTerm(ManagerTermBase):
             )
 
     def update(self, dt: float):
-        sequential = False
-        resampled = None
+        random_sample = False
         if self.motion_data_term.cfg.sampling_mode == "command_match":
             env_ids = torch.arange(self.num_envs, device=self._env.device)
             context = self._sampling_context(env_ids)
             if context is not None:
-                sequential = True
                 commands, current = context
-                command_changed = torch.zeros(self.num_envs, dtype=torch.bool, device=self._env.device)
-                if self._match_command is not None and self._match_command.shape[-1] == commands.shape[-1]:
-                    command_changed = (commands - self._match_command).abs().amax(dim=-1) > 1e-6
-                horizon = max(0, self.num_steps - 1) * dt
-                remaining = (self.motion_durations - horizon).clamp(min=0.0)
-                expired = self.motion_fetch_time[:, 0] >= remaining
-                need = command_changed | expired
-                if need.any():
-                    resampled = env_ids[need]
-                    self._resample_motion_ids(resampled, context=(commands[need], current[need]))
+                self._resample_motion_ids(env_ids, context=(commands, current))
                 self._store_match_command(env_ids, commands)
+                random_sample = True
 
-        if self.cfg.random_fetch and not sequential:
-            context = self._sampling_context(torch.arange(self.num_envs, device=self._env.device))
-            if context is not None:
-                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
-                    self.motion_ids,
-                    truncate_time_start=-self.sample_min_time_offset,
-                    truncate_time_end=self.sample_max_time_offset,
-                )
-            elif self.cfg.num_steps_to_use > 0:
-                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
-                    self.motion_ids, truncate_time_end=self.num_steps * dt
-                )
+        if not random_sample:
+            if self.cfg.random_fetch:
+                context = self._sampling_context(torch.arange(self.num_envs, device=self._env.device))
+                if context is not None:
+                    self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
+                        self.motion_ids,
+                        truncate_time_start=-self.sample_min_time_offset,
+                        truncate_time_end=self.sample_max_time_offset,
+                    )
+                elif self.cfg.num_steps_to_use > 0:
+                    self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
+                        self.motion_ids, truncate_time_end=self.num_steps * dt
+                    )
+                else:
+                    self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
+                        self.motion_ids, truncate_time_start=self.num_steps * dt
+                    )
+                if self.num_steps > 1:
+                    self.motion_fetch_time[:, 1:] = (
+                        self.motion_fetch_time[:, 0:1] + self.step_indices[1:].float() * dt
+                    )
             else:
-                self.motion_fetch_time[:, 0] = self.motion_data_term.sample_times(
-                    self.motion_ids, truncate_time_start=self.num_steps * dt
-                )
-            if self.num_steps > 1:
-                self.motion_fetch_time[:, 1:] = self.motion_fetch_time[:, 0:1] + self.step_indices[1:].float() * dt
-
-        if sequential or not self.cfg.random_fetch:
-            keep = torch.ones(self.num_envs, dtype=torch.bool, device=self._env.device)
-            if resampled is not None:
-                keep[resampled] = False
-            self._advance_fetch_time(torch.arange(self.num_envs, device=self._env.device)[keep], dt)
+                self._advance_fetch_time(torch.arange(self.num_envs, device=self._env.device), dt)
 
         self._fetch_motion_data()
 

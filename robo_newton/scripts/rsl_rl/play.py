@@ -127,7 +127,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
 
     # handle deprecated configurations
-    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
+    if agent_cfg.class_name != "FbCprRunner":
+        agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
 
     # rsl-rl 3.x 的 PPO/PPOAMP 不支持 Isaac Lab 2.3 为 5.0 预留的字段
     if version.parse(installed_version) < version.parse("5.0.0"):

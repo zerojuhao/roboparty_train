@@ -49,10 +49,7 @@ def enable_ssr_foothold_guidance(cfg: ParkourEnvCfg) -> None:
     """
     locomotion = cfg.rewards.locomotion
     cfg.rewards = SSRRewardsCfg(locomotion=locomotion, foothold=FootholdRewardsCfg())
-    support_params = locomotion.feet_at_plane.params
     cfg.foothold_support = FootholdSupportCfg(
-        height_tolerance=float(support_params["height_tolerance"]),
-        support_transition_width=float(support_params["support_transition_width"]),
         touchdown_support_ratio_min=0.7,
         touchdown_vertical_force_ratio=1.0,
         touchdown_vertical_force_min=5.0,

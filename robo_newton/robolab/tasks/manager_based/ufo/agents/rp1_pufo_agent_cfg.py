@@ -30,7 +30,7 @@ class RP1PUFORunnerCfg(RslRlBaseRunnerCfg):
     max_iterations: int = 1_000_000
     num_env_steps: int = 1_000_000_000
     checkpoint_interval_steps: int = 9_600_000
-    checkpoint_replay: bool = True
+    checkpoint_replay: bool = False
     replay_checkpoint_keep: int = 1
     resume_replay_warmup_steps: int = 10_240
     seed: int = 42

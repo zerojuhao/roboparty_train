@@ -29,6 +29,7 @@ from ..utils.finite import check_finite_tree, nonfinite_flag, raise_nonfinite_de
 from .tracking_evaluation import (
     PersistentTrackingEvaluator, isolated_evaluator_device, merge_tracking_shards, motion_shard,
 )
+from .tracking_protocol import configured_tracking_modes, tracking_chunk_seed, tracking_environment_config
 
 
 DEFAULT_RSL_RL_LOG_ROOT = "/data/zym/roboparty_train/logs/rsl_rl"
@@ -238,8 +239,10 @@ class FbCprRunner:
         if self.log_interval_steps <= 0:
             raise ValueError("log_interval_steps must be positive.")
         self._tracking_evaluator = None
+        self._tracking_evaluator_mode = None
+        configured_tracking_modes(self.cfg)
         self.checkpoint_interval_steps = int(getattr(self.cfg, "checkpoint_interval_steps", 0) or 0)
-        self.checkpoint_replay = bool(getattr(self.cfg, "checkpoint_replay", True))
+        self.checkpoint_replay = bool(getattr(self.cfg, "checkpoint_replay", False))
         self.replay_checkpoint_keep = int(getattr(self.cfg, "replay_checkpoint_keep", 1))
         self.resume_replay_warmup_steps = int(getattr(self.cfg, "resume_replay_warmup_steps", 10_240))
         if self.replay_checkpoint_keep < 1 or self.resume_replay_warmup_steps < 1:
@@ -319,6 +322,50 @@ class FbCprRunner:
             obs_dims, mgr.action_manager.total_action_dim, train_cfg,
             device=self.device, inference_only=inference_only,
         )
+        self.world_model_adapter = None
+        wm_cfg = getattr(train_cfg, "world_model", {})
+        wm_cfg = wm_cfg if isinstance(wm_cfg, dict) else vars(wm_cfg)
+        self.world_model_enabled = bool(wm_cfg.get("enabled", False)) and not inference_only
+        if self.world_model_enabled:
+            if self.visual_enabled or not self.context_enabled or self.num_envs < 2:
+                raise ValueError("World model requires non-visual UFO with context and at least two environments")
+            if "world_model" not in mgr.observation_manager.group_obs_dim:
+                raise ValueError("Enable world model observations before constructing the environment")
+            from robolab.tasks.manager_based.ufo.mdp.world_model_state import WorldModelAdapter
+            from ..algorithms.world_model import UFOWorldModel
+
+            self.world_model_adapter = WorldModelAdapter(mgr, self.action_rescale, getattr(train_cfg, "clip_actions", None))
+            kinematics = None
+            if wm_cfg.get("objective", "context") in {"fb_value", "fb_sequence"}:
+                from ..algorithms.world_model_kinematics import UFOPrivilegedKinematics
+                from robolab.tasks.manager_based.ufo.mdp.observations import local_self_obs
+                from robolab.tasks.manager_based.ufo.mdp.world_model_state import world_model_state
+
+                robot = mgr.scene["robot"]
+                origins = mgr.scene.env_origins[:, 2]
+                if not torch.allclose(origins, origins[:1].expand_as(origins)):
+                    raise ValueError("UFO imagination requires a shared ground height")
+                kinematics = UFOPrivilegedKinematics(
+                    robot.cfg.spawn.asset_path, robot.joint_names, robot.body_names,
+                    device=self.device, root_height_offset=float(origins[0]),
+                )
+                with torch.no_grad():
+                    reconstructed = kinematics(world_model_state(mgr))
+                    actual = local_self_obs(mgr)
+                    component_errors = [float(error.abs().amax()) for error in
+                                        (reconstructed - actual).split((1, 72, 150, 75, 75), dim=-1)]
+                    torch.testing.assert_close(
+                        reconstructed, actual, atol=1e-3, rtol=1e-4,
+                        msg=("Differentiable UFO kinematics does not match the simulator observation; "
+                             f"max errors [height, position, rotation, linear velocity, angular velocity]={component_errors}"),
+                    )
+            self.agent.world_model = UFOWorldModel(
+                wm_cfg, self.world_model_adapter.codec_kwargs(),
+                self.world_model_adapter.xi().shape[-1], self.agent.actor_obs_dim,
+                self.agent.z_dim, self.device, kinematics=kinematics,
+            )
+            print(f"[WM] enabled: window={wm_cfg['window_length']}, horizon={wm_cfg['horizon']}, "
+                  f"warmup={wm_cfg['warmup_updates']} model updates, actor_weight={wm_cfg['actor_weight']}", flush=True)
         self._broadcast_agent_state()
 
         self.history = make_ufo_history(self.num_envs, device, history_lengths if self.visual_enabled else None)
@@ -338,7 +385,8 @@ class FbCprRunner:
             capacity=self.cfg.buffer_size,
             num_envs=self.num_envs,
             device=replay_device,
-            output_key_t=("observation", "action", "z", "aux_rewards"),
+            output_key_t=("observation", "action", "z", "aux_rewards")
+                         + (("world_model",) if self.world_model_enabled else ()),
             output_key_tp1=(
                 "observation",
                 "terminated",
@@ -486,6 +534,13 @@ class FbCprRunner:
             output_key_tp1=expert_keys,
         )
         buffer.file_names = file_names
+        base_weights = getattr(command.motion_lib, "_base_sampling_weights", None)
+        if base_weights is not None:
+            buffer.update_priorities(base_weights[buffer.motion_ids])
+        curriculum = getattr(command.motion_lib, "phase_curriculum", None)
+        if curriculum is not None:
+            buffer.set_phase_probabilities(command.motion_lib.phase_probabilities(),
+                                           bin_steps=round(curriculum.bin_seconds / self.control_dt))
         self.replay["expert_slicer"] = buffer
         self._expert_built = True
 
@@ -504,6 +559,8 @@ class FbCprRunner:
         return tree.unsqueeze(0)
 
     def _env_action(self, action: torch.Tensor) -> torch.Tensor:
+        if getattr(self, "world_model_enabled", False):
+            return self.agent.world_model.codec.env_action(action)
         return torch.clamp(action * self.action_rescale, -self.action_rescale, self.action_rescale)
 
     def _evaluate_reward_terms(self) -> dict[str, torch.Tensor]:
@@ -615,6 +672,7 @@ class FbCprRunner:
         if evaluator is not None:
             evaluator.close()
             self._tracking_evaluator = None
+        self._tracking_evaluator_mode = None
 
     def _finish_reward_episodes(self, reset_ids):
         if not self.is_main_process or len(reset_ids) == 0:
@@ -790,7 +848,10 @@ class FbCprRunner:
             self._check_finite_rollout({"action": action, "env_action": env_action}, "actions")
             before_physics = self._physics_snapshot()
             before_physics["env_action"] = env_action.detach().clone()
-            next_obs_buf, _, dones, step_infos = self._step_training_environment(env_action, before_physics)
+            if getattr(self, "world_model_enabled", False):
+                self.world_model_adapter.begin_step()
+                wm_xi = self.world_model_adapter.xi()
+            next_obs_buf, env_reward, dones, step_infos = self._step_training_environment(env_action, before_physics)
             dones = dones.to(self.device)
             action_truncated = dones.bool()
             action_terminated = torch.zeros_like(action_truncated)
@@ -871,6 +932,22 @@ class FbCprRunner:
             }
             if self.visual_enabled:
                 transition["depth_episode_start"] = (terminated | truncated).unsqueeze(-1)
+            if getattr(self, "world_model_enabled", False):
+                wm_next = next_obs_buf["world_model"].to(self.device)
+                if bool(dones.any()):
+                    wm_next = torch.where(dones.bool()[:, None],
+                                          step_infos["final_obs"]["world_model"].to(self.device), wm_next)
+                wm_next, wm_disturbance, wm_disturbance_mask = self.world_model_adapter.transition_outcome(wm_next, dones)
+                transition["world_model"] = {
+                    "state": obs_buf["world_model"], "next_state": wm_next,
+                    "disturbance": wm_disturbance,
+                    "disturbance_mask": wm_disturbance_mask,
+                    "previous_action": obs_dict["last_action"],
+                    "xi": wm_xi,
+                    "heading": self._context.heading_target_world.clone(),
+                    "velocity": self._context.velocity_target_world.clone(),
+                    "valid": torch.cat((self._context.heading_valid, self._context.velocity_valid), -1).float(),
+                }
             self.history.add(current_obs_values)
             final_observation = None
             if bool(dones.any()):
@@ -1005,42 +1082,64 @@ class FbCprRunner:
 
     @torch.no_grad()
     def _run_tracking_eval(self, global_step: int):
-        """Evaluate disjoint motion shards in persistent per-rank simulators."""
+        """Evaluate each physical protocol in isolated, disjoint motion shards."""
         motion_lib = self._mgr_env.command_manager.get_term("motion").motion_lib
         keys = [str(key) for key in motion_lib._motion_data_keys]
         requested = int(getattr(self.cfg, "eval_num_motions", 0) or len(keys))
         count = min(requested, len(keys))
         world_size = torch.distributed.get_world_size() if self.is_distributed else 1
         ids = motion_shard(count, self.gpu_global_rank, world_size)
-        try:
-            result = (self._run_eval_shard(global_step, ids) if ids else
-                      {"motion_keys": keys, "motion_ids": [], "sums": {}, "counts": {}, "clips": {}})
-        except Exception as exc:
-            self.close_evaluator()
-            result = {"error": f"rank {self.gpu_global_rank}: {type(exc).__name__}: {exc}"}
-        results = [result]
-        if self.is_distributed:
-            results = [None] * world_size
-            torch.distributed.all_gather_object(results, result, group=self._eval_group)
-        merged = merge_tracking_shards(results, keys, count)
-        metrics = self._finalize_tracking_eval(global_step, merged["metrics"], merged["clips"], count)
-        if self.is_main_process:
-            self._write_metrics({f"eval/{key}": value for key, value in metrics.items()}, global_step)
-            print(f"[FbCpr] tracking evaluation complete: env_steps={global_step:,} ranks={world_size} clips={count} metrics={metrics}", flush=True)
-        return metrics
+        combined = {}
+        for eval_mode in configured_tracking_modes(self.cfg):
+            try:
+                result = (self._run_eval_shard(global_step, ids, eval_mode=eval_mode) if ids else
+                          {"motion_keys": keys, "motion_ids": [], "sums": {}, "counts": {},
+                           "clips": {}, "phase_errors": {}, "eval_mode": eval_mode})
+            except Exception as exc:
+                self.close_evaluator()
+                result = {"error": f"rank {self.gpu_global_rank}: {type(exc).__name__}: {exc}"}
+            results = [result]
+            if self.is_distributed:
+                results = [None] * world_size
+                torch.distributed.all_gather_object(results, result, group=self._eval_group)
+            merged = merge_tracking_shards(results, keys, count)
+            if any(result.get("eval_mode") != eval_mode for result in results):
+                raise ValueError("Tracking evaluator returned a different physical protocol")
+            phase_errors = {motion_id: errors for result in results
+                            for motion_id, errors in result.get("phase_errors", {}).items()}
+            if eval_mode == "nominal" and sorted(phase_errors) != list(range(count)):
+                raise ValueError("Nominal tracking phase-error coverage is incomplete")
+            metrics = self._finalize_tracking_eval(
+                global_step, merged["metrics"], merged["clips"], count,
+                eval_mode=eval_mode, phase_errors=phase_errors,
+            )
+            prefix = f"{eval_mode}/" if eval_mode is not None else ""
+            combined.update({f"{prefix}{key}": value for key, value in metrics.items()})
+            if self.is_main_process:
+                self._write_metrics({f"eval/{prefix}{key}": value for key, value in metrics.items()}, global_step)
+                print(f"[FbCpr] tracking evaluation complete: mode={eval_mode or 'legacy'} "
+                      f"env_steps={global_step:,} ranks={world_size} clips={count} metrics={metrics}", flush=True)
+        return combined
 
-    def _run_eval_shard(self, global_step, motion_ids):
+    def _run_eval_shard(self, global_step, motion_ids, eval_mode=None):
         from robolab.tasks.manager_based.ufo.pufo_env_cfg import PUFOPlaneSceneCfg
 
         if torch.device(self.device).type == "cuda":
             with torch.cuda.device(self.device):
                 torch.cuda.empty_cache()
+        if getattr(self, "_tracking_evaluator_mode", None) != eval_mode:
+            # Keep only one simulator child resident when evaluating both modes.
+            self.close_evaluator()
         if self._tracking_evaluator is None:
             entrypoint = getattr(self.cfg, "tracking_eval_entrypoint", None)
             if not entrypoint or not os.path.isfile(entrypoint):
                 raise ValueError("Tracking evaluation requires the train.py entrypoint supplied by the launcher.")
-            env_cfg = copy.deepcopy(self._mgr_env.cfg)
-            env_cfg.scene.terrain = PUFOPlaneSceneCfg().terrain
+            seed = int(getattr(self.cfg, "tracking_eval_seed", 42))
+            if eval_mode is None:
+                env_cfg = copy.deepcopy(self._mgr_env.cfg)
+                env_cfg.scene.terrain = PUFOPlaneSceneCfg().terrain
+            else:
+                env_cfg = tracking_environment_config(self._mgr_env.cfg, eval_mode, seed)
             env_cfg.scene.num_envs = min(self.num_envs, int(self.cfg.eval_num_envs), len(motion_ids))
             child_device, child_environment = isolated_evaluator_device(
                 self.device, self._eval_process_environment()
@@ -1048,15 +1147,24 @@ class FbCprRunner:
             env_cfg.sim.device = child_device
             env_cfg.episode_length_s = 100000.0
             cfg = dict(vars(self.cfg))
-            cfg.update(logger="tensorboard", eval_interval_steps=0, torch_compile_mode=None, device=child_device)
+            cfg.update(logger="tensorboard", eval_interval_steps=0, torch_compile_mode=None,
+                       device=child_device, tracking_eval_mode=eval_mode, tracking_eval_seed=seed)
+            eval_log_dir = self._tracking_eval_log_dir(eval_mode)
             self._tracking_evaluator = PersistentTrackingEvaluator(
                 entrypoint=entrypoint, request={"env_cfg": env_cfg, "train_cfg": cfg},
                 device=child_device, environment=child_environment,
-                log_dir=self.log_dir, rank=self.gpu_global_rank,
+                log_dir=eval_log_dir, rank=self.gpu_global_rank,
                 timeout=float(getattr(self.cfg, "eval_timeout_s", 1800)),
             )
-        print(f"[FbCpr] tracking evaluation shard: env_steps={global_step:,} rank={self.gpu_global_rank} clips={len(motion_ids)}", flush=True)
+            self._tracking_evaluator_mode = eval_mode
+        print(f"[FbCpr] tracking evaluation shard: mode={eval_mode or 'legacy'} "
+              f"env_steps={global_step:,} rank={self.gpu_global_rank} clips={len(motion_ids)}", flush=True)
         return self._tracking_evaluator.evaluate(self.agent.tracking_state_dict(), global_step, motion_ids)
+
+    def _tracking_eval_log_dir(self, eval_mode):
+        directory = self.log_dir if eval_mode is None else os.path.join(self.log_dir, "eval", eval_mode)
+        os.makedirs(directory, exist_ok=True)
+        return directory
 
     def _run_eval_subprocess(self, global_step):
         from robolab.tasks.manager_based.ufo.pufo_env_cfg import PUFOPlaneSceneCfg
@@ -1104,6 +1212,8 @@ class FbCprRunner:
 
     @torch.no_grad()
     def _run_tracking_eval_on_current_env(self, global_step: int, motion_ids=None, return_shard=False):
+        from .tracking_kinematics import tracking_kinematics_metrics, tracking_phase_errors
+        from robolab.utils.tensors import as_torch_tensor
         from robolab.tasks.manager_based.ufo.mdp.motion_observations import compute_humanoid_observations_max
         from robolab.tasks.manager_based.ufo.mdp.pufo_observations import (
             align_world_vector,
@@ -1114,12 +1224,20 @@ class FbCprRunner:
         from robolab.tasks.manager_based.ufo.motion.torch_utils import quat_rotate_inverse
 
         mgr = self._mgr_env
+        eval_mode = getattr(self.cfg, "tracking_eval_mode", None)
+        if eval_mode is not None and getattr(mgr.cfg, "_tracking_eval_mode", None) != eval_mode:
+            raise ValueError("Tracking protocol must be configured before constructing its environment")
+        eval_seed = int(getattr(self.cfg, "tracking_eval_seed", 42))
         command = mgr.command_manager.get_term("motion")
         motion_lib = command.motion_lib
         requested = int(getattr(self.cfg, "eval_num_motions", 0) or motion_lib._num_unique_motions)
         num_motions = min(requested, motion_lib._num_unique_motions)
         eval_ids = list(range(num_motions)) if motion_ids is None else list(motion_ids)
         motion_ids = torch.tensor(eval_ids, device=self.device, dtype=torch.long)
+
+        robot = mgr.scene["robot"]
+        if tuple(motion_lib._motion_bodies) != tuple(robot.body_names):
+            raise ValueError("Tracking evaluation requires matching simulator/reference body order")
 
         default_dof = mgr.scene["robot"].data.default_joint_pos
         gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=self.device)
@@ -1164,6 +1282,9 @@ class FbCprRunner:
                     "velocity_world": res["body_vel_t"][s0:s1, 0, :2].cpu(),
                     "dof_pos": res["dof_pos"][s0:s1].cpu(),
                     "dof_vel": res["dof_vel"][s0].cpu(),
+                    "body_position": res["rg_pos_t"][s0:s1].cpu(),
+                    "root_quaternion": base_quat[s0:s1].cpu(),
+                    "body_link_velocity": res["body_vel_t"][s0:s1].cpu(),
                     "ctx": ctx_all[s0 + 1 : s1].cpu(),
                     "length": length,
                 }
@@ -1178,8 +1299,10 @@ class FbCprRunner:
         # Chunked rollout over all clips (original UFO pattern: windows beyond
         # num_envs are evaluated in successive batches).
         all_series: dict[int, dict] = {}
+        initial_conditions = {}
         for chunk_start in range(0, len(eval_ids), self.num_envs):
             chunk = eval_ids[chunk_start : chunk_start + self.num_envs]
+            self.env.seed(tracking_chunk_seed(eval_seed, chunk[0]))
             self.env.reset()
             assign = torch.arange(self.num_envs, device=self.device) % len(chunk)
             root_states = robot.data.default_root_state.clone()
@@ -1202,7 +1325,7 @@ class FbCprRunner:
             joint_pos[:] = torch.stack([ref["dof_pos"][0] for ref in chunk_refs]).to(joint_pos.device)[assign]
             joint_vel[:] = torch.stack([ref["dof_vel"] for ref in chunk_refs]).to(joint_vel.device)[assign]
             robot.write_root_pose_to_sim_index(root_pose=root_states[:, :7])
-            robot.write_root_velocity_to_sim_index(root_velocity=root_states[:, 7:13])
+            robot.write_root_link_velocity_to_sim_index(root_velocity=root_states[:, 7:13])
             robot.write_joint_position_to_sim_index(position=joint_pos)
             robot.write_joint_velocity_to_sim_index(velocity=joint_vel)
             mgr.sim.forward()
@@ -1222,6 +1345,32 @@ class FbCprRunner:
             self.history.reset(torch.arange(self.num_envs, device=self.device))
             obs_buf = mgr.observation_manager.compute()
             initial_heading, _ = self._root_heading_velocity()
+            if bool(getattr(self.cfg, "tracking_eval_capture_initial_conditions", False)):
+                import warp as wp
+                from isaaclab.actuators.newton import read_group_parameter
+                from isaaclab_newton.physics.newton_manager import NewtonManager
+
+                try:
+                    stiffness = read_group_parameter(robot.actuators, "all_joints", "controller", "kp")
+                    damping = read_group_parameter(robot.actuators, "all_joints", "controller", "kd")
+                except (AttributeError, KeyError, ValueError):
+                    stiffness = robot.actuators["all_joints"].stiffness
+                    damping = robot.actuators["all_joints"].damping
+                snapshots = {
+                    "root_link_state": as_torch_tensor(robot.data.root_link_state_w),
+                    "joint_position": as_torch_tensor(robot.data.joint_pos),
+                    "joint_velocity": as_torch_tensor(robot.data.joint_vel),
+                    "body_mass": as_torch_tensor(robot.data.body_mass),
+                    "body_com": as_torch_tensor(robot.data.body_com_pos_b),
+                    "calibration": mgr._ufo_joint_calibration_offset,
+                    "stiffness": stiffness,
+                    "damping": damping,
+                    "friction": wp.to_torch(robot._root_view.get_attribute(
+                        "shape_material_mu", NewtonManager.get_model())[:, 0]),
+                }
+                initial_conditions.update({w: {name: value[c_i].detach().cpu().clone()
+                                               for name, value in snapshots.items()}
+                                           for c_i, w in enumerate(chunk)})
 
             max_ctx_chunk = max(ref_obs_cache[w]["ctx"].shape[0] for w in chunk)
             ctx_padded = torch.empty(len(chunk), max_ctx_chunk, self.cfg.z_dim, device=self.device)
@@ -1264,6 +1413,19 @@ class FbCprRunner:
             # device->host copies per clip per step).
             buf_state = torch.empty(max_ctx_chunk, len_chunk, num_dofs, device=self.device)
             buf_joint = torch.empty(max_ctx_chunk, len_chunk, initial_joint.shape[-1], device=self.device)
+            physical_buffers = {
+                "body_position": torch.empty(max_ctx_chunk + 1, len_chunk, robot.num_bodies, 3, device=self.device),
+                "root_quaternion": torch.empty(max_ctx_chunk + 1, len_chunk, 4, device=self.device),
+                "body_link_velocity": torch.empty(max_ctx_chunk + 1, len_chunk, robot.num_bodies, 3, device=self.device),
+            }
+            physical_buffers["body_position"][0].copy_(
+                as_torch_tensor(robot.data.body_pos_w)[:len_chunk] - mgr.scene.env_origins[:len_chunk, None]
+            )
+            physical_buffers["root_quaternion"][0].copy_(as_torch_tensor(robot.data.body_quat_w)[:len_chunk, 0])
+            physical_buffers["body_link_velocity"][0].copy_(as_torch_tensor(robot.data.body_link_lin_vel_w)[:len_chunk])
+            contact_sensor = mgr.scene.sensors.get("contact_forces")
+            contact_free = (torch.empty(max_ctx_chunk, len_chunk, dtype=torch.bool, device=self.device)
+                            if contact_sensor is not None else None)
             measure_velocity = bool(getattr(self.agent._actor, "estimate_velocity", False))
             buf_velocity_error = (torch.empty(max_ctx_chunk, len_chunk, 3, device=self.device)
                                   if measure_velocity else None)
@@ -1271,7 +1433,7 @@ class FbCprRunner:
             init_joint_cpu = initial_joint[:len_chunk].cpu()
             chunk_series: dict[int, dict] = {}
             for c_i, w in enumerate(chunk):
-                chunk_series[w] = {}
+                chunk_series[w] = {"reset_root_lift_m": float(mgr._pufo_reset_lift[c_i])}
             for step in range(max_ctx_chunk):
                 obs_dict = self._obs_dict(obs_buf)
                 current_values = self._current_obs_values(obs_buf)
@@ -1303,8 +1465,22 @@ class FbCprRunner:
                 state_now = self._obs_dict(obs_buf, with_history=False)["state"]
                 buf_state[step].copy_(_joint_state_observation(state_now[:len_chunk], num_dofs))
                 buf_joint[step].copy_(robot.data.joint_pos[:len_chunk])
+                physical_buffers["body_position"][step + 1].copy_(
+                    as_torch_tensor(robot.data.body_pos_w)[:len_chunk] - mgr.scene.env_origins[:len_chunk, None]
+                )
+                physical_buffers["root_quaternion"][step + 1].copy_(
+                    as_torch_tensor(robot.data.body_quat_w)[:len_chunk, 0]
+                )
+                physical_buffers["body_link_velocity"][step + 1].copy_(
+                    as_torch_tensor(robot.data.body_link_lin_vel_w)[:len_chunk]
+                )
+                if contact_free is not None:
+                    forces = as_torch_tensor(contact_sensor.data.net_forces_w_history)[:len_chunk]
+                    contact_free[step].copy_(forces.norm(dim=-1).amax(dim=(1, 2)) < 1.0)
             buf_state_cpu = buf_state.cpu()
             buf_joint_cpu = buf_joint.cpu()
+            physical_cpu = {key: value.cpu() for key, value in physical_buffers.items()}
+            contact_free_cpu = contact_free.cpu() if contact_free is not None else None
             velocity_error_cpu = buf_velocity_error.cpu() if measure_velocity else None
             for c_i, w in enumerate(chunk):
                 ref = ref_obs_cache[w]
@@ -1317,6 +1493,11 @@ class FbCprRunner:
                 chunk_series[w]["joint"] = torch.cat(
                     [init_joint_cpu[c_i].unsqueeze(0), buf_joint_cpu[: n - 1, c_i]], dim=0
                 )
+                for key, value in physical_cpu.items():
+                    chunk_series[w][key] = value[:n, c_i]
+                    chunk_series[w][f"target_{key}"] = ref[key][:n]
+                if contact_free_cpu is not None:
+                    chunk_series[w]["contact_free"] = contact_free_cpu[:n - 1, c_i]
                 if measure_velocity:
                     chunk_series[w]["velocity_error"] = velocity_error_cpu[: n - 1, c_i]
             all_series.update(chunk_series)
@@ -1332,6 +1513,7 @@ class FbCprRunner:
         sums: dict[str, float] = {}
         counts: dict[str, int] = {}
         emd_by_clip: dict[int, dict[str, float]] = {}
+        phase_errors = {}
         for w, values in all_series.items():
             if len(values["joint"]) < 3:
                 continue
@@ -1341,6 +1523,18 @@ class FbCprRunner:
             target_joint = values["target_joint"]
             local = _distance_proximity(state, target_state, prefix="obs_state_")
             local.update(_joint_pos_metrics(joint, target_joint, self.control_dt))
+            local.update(tracking_kinematics_metrics(
+                values["body_position"], values["root_quaternion"], values["body_link_velocity"],
+                values["target_body_position"], values["target_root_quaternion"],
+                values["target_body_link_velocity"], contact_free=values.get("contact_free"),
+            ))
+            local["reset_root_lift_m"] = values["reset_root_lift_m"]
+            if eval_mode == "nominal":
+                phase_errors[w] = tracking_phase_errors(
+                    values["body_position"], values["root_quaternion"], values["body_link_velocity"],
+                    values["target_body_position"], values["target_root_quaternion"],
+                    values["target_body_link_velocity"],
+                ).tolist()
             if "velocity_error" in values:
                 error = values["velocity_error"].float()
                 for index, axis in enumerate("xyz"):
@@ -1352,12 +1546,14 @@ class FbCprRunner:
                 # (compute_joint_pos_metrics); obs_state EMD is logged only.
                 local.update(_emd(state, target_state, prefix="obs_state_"))
                 local.update(_emd(joint, target_joint, prefix=""))
-                emd_by_clip[w] = {"emd": local["emd"], "obs_state_emd": local["obs_state_emd"]}
+                emd_by_clip[w] = dict(local)
             for key, value in local.items():
                 sums[key] = sums.get(key, 0.0) + value
                 counts[key] = counts.get(key, 0) + 1
         if return_shard:
             return {"sums": sums, "counts": counts, "clips": emd_by_clip,
+                    "phase_errors": phase_errors, "eval_mode": eval_mode,
+                    "initial_conditions": initial_conditions,
                     "motion_ids": eval_ids,
                     "motion_keys": [str(key) for key in motion_lib._motion_data_keys]}
         if not counts:
@@ -1376,13 +1572,24 @@ class FbCprRunner:
                 denom = total[1].item()
                 metr[key] = (total[0].item() / denom) if denom > 0 else 0.0
 
-        return self._finalize_tracking_eval(global_step, metr, emd_by_clip, num_motions)
+        return self._finalize_tracking_eval(global_step, metr, emd_by_clip, num_motions,
+                                            eval_mode=eval_mode, phase_errors=phase_errors)
 
-    def _finalize_tracking_eval(self, global_step, metr, emd_by_clip, num_motions):
+    def _finalize_tracking_eval(self, global_step, metr, emd_by_clip, num_motions, *,
+                                eval_mode=None, phase_errors=None):
         import csv
         import os as _os
+        from .tracking_kinematics import write_tracking_kinematics
 
         motion_lib = self._mgr_env.command_manager.get_term("motion").motion_lib
+        expert = self.replay.get("expert_slicer")
+        if eval_mode == "nominal" and phase_errors and hasattr(motion_lib, "update_phase_errors"):
+            for motion_id, errors in phase_errors.items():
+                motion_lib.update_phase_errors(motion_id, errors, self.control_dt)
+            if expert is not None and hasattr(expert, "set_phase_probabilities"):
+                bin_seconds = getattr(getattr(motion_lib, "phase_curriculum", None), "bin_seconds", 1.0)
+                expert.set_phase_probabilities(motion_lib.phase_probabilities(),
+                                               bin_steps=round(bin_seconds / self.control_dt))
         dense_emd = torch.zeros(num_motions, dtype=torch.float64, device=self.device)
         dense_obs_emd = torch.zeros(num_motions, dtype=torch.float64, device=self.device)
         dense_seen = torch.zeros(num_motions, dtype=torch.float64, device=self.device)
@@ -1391,6 +1598,7 @@ class FbCprRunner:
             dense_obs_emd[w] = vals["obs_state_emd"]
             dense_seen[w] = 1.0
         if (bool(getattr(self.cfg, "prioritization", False))
+                and eval_mode in (None, "nominal")
                 and num_motions == motion_lib._num_unique_motions and bool((dense_seen > 0).all())):
             lo = float(getattr(self.cfg, "prioritization_min_val", 0.5))
             hi = float(getattr(self.cfg, "prioritization_max_val", 2.0))
@@ -1414,7 +1622,6 @@ class FbCprRunner:
                 raise ValueError(f"Unsupported prioritization mode {mode}")
             if not motion_lib.update_sampling_weights(weights):
                 raise RuntimeError("Motion library rejected finite tracking priorities")
-            expert = self.replay.get("expert_slicer")
             if expert is None or not hasattr(expert, "update_priorities"):
                 raise RuntimeError("Prioritization requires an expert buffer with priority support")
             motion_to_weight = {motion_id: weights[motion_id] for motion_id in range(num_motions)}
@@ -1422,6 +1629,9 @@ class FbCprRunner:
                 expert_weights = torch.stack(
                     [motion_to_weight[int(motion_id)] for motion_id in expert.motion_ids]
                 )
+                base_weights = getattr(motion_lib, "_base_sampling_weights", None)
+                if base_weights is not None:
+                    expert_weights = expert_weights * base_weights[expert.motion_ids].to(expert_weights)
             except KeyError as exc:
                 raise ValueError(
                     f"Expert buffer motion ID {exc.args[0]} was not covered by full tracking evaluation"
@@ -1436,7 +1646,17 @@ class FbCprRunner:
                 )
         if not self.is_main_process:
             return metr
-        csv_path = _os.path.join(self.log_dir, "tracking_eval_v2.csv")
+        eval_log_dir = self._tracking_eval_log_dir(eval_mode)
+        write_tracking_kinematics(eval_log_dir, global_step, motion_lib._motion_data_keys, emd_by_clip)
+        if eval_mode is not None:
+            protocol = {"mode": eval_mode, "seed": int(getattr(self.cfg, "tracking_eval_seed", 42)),
+                        "initial_state": "reference first frame plus measured penetration clearance",
+                        "policy_action": "distribution mean", "motion_keys": list(map(str, motion_lib._motion_data_keys)),
+                        "phase_errors_used_for_curriculum": (eval_mode == "nominal"
+                                                            and getattr(motion_lib, "phase_curriculum", None) is not None)}
+            with open(_os.path.join(eval_log_dir, "protocol.json"), "w") as stream:
+                json.dump(protocol, stream, indent=2)
+        csv_path = _os.path.join(eval_log_dir, "tracking_eval_v2.csv")
         exists = _os.path.exists(csv_path)
         with open(csv_path, "a", newline="") as f:
             w = csv.writer(f)
@@ -1449,7 +1669,7 @@ class FbCprRunner:
                         f"{metr.get('obs_state_proximity', 0.0):.6f}", f"{metr.get('proximity', 0.0):.6f}",
                         global_step, f"{metr['joint_velocity_l2_rad_s']:.6f}", num_motions])
         # Per-clip tracking detail (mirrors the original humanoidverse_tracking_eval.csv).
-        clips_path = _os.path.join(self.log_dir, "tracking_eval_clips.csv")
+        clips_path = _os.path.join(eval_log_dir, "tracking_eval_clips.csv")
         clips_exists = _os.path.exists(clips_path)
         keys_np = motion_lib._motion_data_keys
         with open(clips_path, "a", newline="") as f:
@@ -1500,6 +1720,10 @@ class FbCprRunner:
                     "num_envs": self.num_envs,
                     "reward_term_scales": getattr(self, "_reward_term_scales", {}),
                     "replay_checkpoint": replay_name if self.checkpoint_replay else None,
+                    "world_model_version": self.agent.world_model.version if self.world_model_enabled else None,
+                    "world_model_config": self.agent.world_model.cfg_dict if self.world_model_enabled else None,
+                    "world_model_contract": self._world_model_checkpoint_contract() if self.world_model_enabled else None,
+                    "motion_phase_curriculum": self._motion_curriculum_checkpoint(),
                 }, temporary)
                 os.replace(temporary, path)
         except Exception as exc:
@@ -1545,6 +1769,102 @@ class FbCprRunner:
         except Exception as exc:
             print(f"[CHECKPOINT] WARNING: replay retention failed: {exc}", flush=True)
 
+    def _world_model_checkpoint_contract(self):
+        wm = self.agent.world_model
+        return {
+            "environment": self.world_model_adapter.checkpoint_contract(),
+            "networks": {
+                "hidden_dims": list(wm.cfg.hidden_dims),
+                "ensemble_size": wm.cfg.ensemble_size,
+                "value_hidden_dims": list(wm.cfg.value_hidden_dims),
+                "actor_obs_dim": self.agent.actor_obs_dim,
+                "z_dim": self.agent.z_dim,
+                "sequence_context_length": getattr(wm.cfg, "sequence_context_length", 10),
+            },
+            "return": {
+                "objective": getattr(wm.cfg, "objective", "context"),
+                "imagination_horizon": getattr(wm.cfg, "horizon", 32),
+                "discount": float(self.cfg.discount),
+                "heading_weight": float(wm.cfg.heading_weight),
+                "velocity_weight": float(wm.cfg.velocity_weight),
+                "velocity_error_scale_mps": float(self.cfg.velocity_error_scale_mps),
+            },
+            "kinematics": (wm.kinematics.checkpoint_contract()
+                           if getattr(wm, "kinematics", None) is not None else None),
+        }
+
+    def _motion_curriculum_checkpoint(self):
+        motion = self._mgr_env.command_manager.get_term("motion").motion_lib
+        curriculum = getattr(motion, "phase_curriculum", None)
+        if curriculum is None:
+            return None
+        return {
+            "motion_keys": list(map(str, motion._motion_data_keys)),
+            "motion_lengths": motion._motion_lengths.detach().cpu().clone(),
+            "control_dt": self.control_dt,
+            "bin_seconds": curriculum.bin_seconds,
+            "temperature": curriculum.temperature,
+            "ema": curriculum.ema,
+            "state": {key: value.detach().cpu().clone() for key, value in curriculum.state_dict().items()},
+        }
+
+    def _restore_motion_curriculum(self, saved):
+        if saved is None:
+            return
+        motion = self._mgr_env.command_manager.get_term("motion").motion_lib
+        curriculum = getattr(motion, "phase_curriculum", None)
+        if curriculum is None:
+            if self.is_main_process:
+                print("[UFO] Saved phase curriculum is disabled in the current configuration", flush=True)
+            return
+        expected = self._motion_curriculum_checkpoint()
+        for key in ("motion_keys", "control_dt", "bin_seconds", "temperature", "ema"):
+            if saved.get(key) != expected[key]:
+                raise ValueError(f"Motion phase curriculum checkpoint mismatch: {key}")
+        lengths = saved.get("motion_lengths")
+        if (not torch.is_tensor(lengths) or lengths.shape != expected["motion_lengths"].shape
+                or not torch.equal(lengths.cpu(), expected["motion_lengths"])):
+            raise ValueError("Motion phase curriculum checkpoint mismatch: motion_lengths")
+        state = saved.get("state", {})
+        if set(state) != set(expected["state"]):
+            raise ValueError("Motion phase curriculum checkpoint has incomplete state")
+        for key, value in state.items():
+            target = expected["state"][key]
+            if (not torch.is_tensor(value) or value.shape != target.shape or value.dtype != target.dtype
+                    or not torch.isfinite(value).all() or bool((value < 0).any())):
+                raise ValueError(f"Invalid motion phase curriculum state: {key}")
+        curriculum.load_state_dict(state)
+        expert = self.replay.get("expert_slicer")
+        if expert is not None:
+            expert.set_phase_probabilities(motion.phase_probabilities(),
+                                           bin_steps=round(curriculum.bin_seconds / self.control_dt))
+
+    def _validate_world_model_checkpoint_contract(self, payload):
+        """Validate the saved task and report an FB-only horizon migration."""
+        current = self._world_model_checkpoint_contract()
+        saved = payload.get("world_model_contract")
+        saved_return = saved.get("return") if isinstance(saved, dict) else None
+        current_return = current["return"]
+        horizon_changed = (
+            payload.get("world_model_version") == getattr(self.agent.world_model, "version", None)
+            and payload.get("world_model_version") is not None
+            and isinstance(saved_return, dict)
+            and saved_return.get("objective") == current_return["objective"] == "fb_value"
+            and type(saved_return.get("imagination_horizon")) is int
+            and saved_return["imagination_horizon"] > 0
+            and saved_return["imagination_horizon"] != current_return["imagination_horizon"]
+        )
+        if horizon_changed:
+            saved = {**saved, "return": {**saved_return,
+                                        "imagination_horizon": current_return["imagination_horizon"]}}
+        changed = [key for key, value in current.items() if not isinstance(saved, dict) or saved.get(key) != value]
+        if changed:
+            raise ValueError(
+                "World model checkpoint contract mismatch: " + ", ".join(changed)
+                + ". Use the original environment/return settings or a baseline checkpoint with a fresh world model."
+            )
+        return horizon_changed
+
     def load(self, path, load_optimizer=True):
         payload = torch.load(path, map_location="cpu", weights_only=False)
         world_size = torch.distributed.get_world_size() if self.is_distributed else 1
@@ -1562,7 +1882,47 @@ class FbCprRunner:
             raise ValueError(
                 f"Checkpoint action_rescale={saved_rescale} does not match runner action_rescale={self.action_rescale}."
             )
+        horizon_changed = False
+        if self.world_model_enabled and "world_model" in payload["model_state"]:
+            saved_version = payload.get("world_model_version")
+            if saved_version == 1:
+                # Version 1 did not save the full action/observation contract.
+                payload["model_state"].pop("world_model")
+                for key in ("world_model", "world_model_value", "world_model_sequence_value"):
+                    payload.get("optimizer_state", {}).pop(key, None)
+                if self.is_main_process:
+                    print("[WM] Version 1 checkpoint: retaining UFO policy; restarting dynamics/value "
+                          "warmup because the old action contract cannot be verified", flush=True)
+            elif saved_version != self.agent.world_model.version:
+                # The state/action contract is part of the learned dynamics.  A
+                # checkpoint from an older contract cannot safely load its WM;
+                # retain the policy and restart WM warmup instead.
+                payload["model_state"].pop("world_model")
+                for key in ("world_model", "world_model_value", "world_model_sequence_value"):
+                    payload.get("optimizer_state", {}).pop(key, None)
+                if self.is_main_process:
+                    print(
+                        f"[WM] Checkpoint version {saved_version} does not match {self.agent.world_model.version}; "
+                        "retaining UFO policy and restarting world-model warmup",
+                        flush=True,
+                    )
+            else:
+                horizon_changed = self._validate_world_model_checkpoint_contract(payload)
+        if load_optimizer:
+            self._restore_motion_curriculum(payload.get("motion_phase_curriculum"))
         self.agent.load_state_dict(payload["model_state"])
+        if horizon_changed:
+            wm = self.agent.world_model
+            wm.validation_p95.fill_(float("inf"))
+            wm.validated_at.fill_(-1)
+            wm.imagination_updates.zero_()
+            wm._imagination_batch = None
+            if self.is_main_process:
+                previous_horizon = payload["world_model_contract"]["return"]["imagination_horizon"]
+                print(f"[WM] FB imagination horizon changed from {previous_horizon} to {wm.cfg.horizon}; "
+                      "retaining dynamics and replay, restarting horizon validation and actor ramp", flush=True)
+        if self.world_model_enabled and "world_model" not in payload["model_state"] and self.is_main_process:
+            print("[WM] Baseline checkpoint: initializing a fresh model and its warmup", flush=True)
         if load_optimizer and "optimizer_state" in payload:
             self.agent.load_optimizer_state_dict(payload["optimizer_state"])
         self.tot_iterations = payload.get("iter", 0)
@@ -1584,6 +1944,11 @@ class FbCprRunner:
         available = bool(replay_dir and (replay_dir / "manifest.json").is_file() and all(
             (replay_dir / f"rank_{rank}" / "manifest.json").is_file() for rank in range(world_size)
         ))
+        wm_version = self.agent.world_model.version if self.world_model_enabled else None
+        if payload.get("world_model_version") != wm_version:
+            available = False
+            if self.is_main_process:
+                print("[WM] Replay model-state contract changed; collecting fresh real transitions", flush=True)
         # Stored aux_reward cannot be recomputed after changing the reward contract.
         if payload.get("reward_term_scales", {}) != getattr(self, "_reward_term_scales", {}):
             available = False

@@ -58,25 +58,8 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
     # One column per sub-terrain; env counts follow proportion (num_cols is overridden).
     one_col_per_subterrain=True,
     sub_terrains={
-        "perlin_rough": terrain_gen.PerlinPlaneTerrainCfg(
-            proportion=0.025,
-            noise_scale=[0.0, 0.1],
-            noise_frequency=20,
-            fractal_octaves=2,
-            fractal_lacunarity=2.0,
-            fractal_gain=0.25,
-            centering=True,
-            wall_prob=[0.3, 0.3, 0.3, 0.3],
-            wall_height=5.0,
-            wall_thickness=0.05,
-            flat_patch_sampling={
-                "target": FlatPatchSamplingCfg(
-                    num_patches=50, patch_radius=[0.05, 0.10, 0.15, 0.20], max_height_diff=0.05
-                ),
-            },
-        ),
         "perlin_rough_x": terrain_gen.PerlinPlaneTerrainCfg(
-            proportion=0.025,
+            proportion=0.05,
             noise_scale=[0.0, 0.1],
             noise_frequency=20,
             fractal_octaves=2,
@@ -127,7 +110,9 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
             wall_thickness=0.05,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
-                    num_patches=50, patch_radius=[0.05, 0.10, 0.15, 0.20], max_height_diff=0.05
+                    num_patches=50, 
+                    patch_radius=[0.05, 0.10, 0.15, 0.20], 
+                    max_height_diff=0.05
                 ),
             },
         ),
@@ -243,60 +228,60 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
         #         ),
         #     },
         # ),
-        "trapezoid_stairs": terrain_gen.PerlinTrapezoidStairsTerrainCfg(
-            proportion=0.1,
-            step_height_range=(0.05, 0.20),
-            step_width=0.30,
-            platform_width=2.0,
-            border_width=1.0,
-            wall_prob=[0.3, 0.3, 0.3, 0.3],
-            wall_height=5.0,
-            wall_thickness=0.05,
-            perlin_cfg=terrain_gen.PerlinPlaneTerrainCfg(
-                noise_scale=0.03,
-                noise_frequency=20,
-                fractal_octaves=2,
-                fractal_lacunarity=2.0,
-                fractal_gain=0.25,
-                centering=True,
-            ),
-            flat_patch_sampling={
-                "target": FlatPatchSamplingCfg(
-                    num_patches=50,
-                    patch_radius=[0.05, 0.10, 0.15, 0.20],
-                    max_height_diff=0.05,
-                    x_range=(3.7, 3.7),
-                    y_range=(-3.0, 3.0),
-                ),
-            },
-        ),
-        "trapezoid_stairs_inv": terrain_gen.PerlinInvertedTrapezoidStairsTerrainCfg(
-            proportion=0.1,
-            step_height_range=(0.05, 0.20),
-            step_width=0.30,
-            platform_width=2.0,
-            border_width=1.0,
-            wall_prob=[0.3, 0.3, 0.3, 0.3],
-            wall_height=5.0,
-            wall_thickness=0.05,
-            perlin_cfg=terrain_gen.PerlinPlaneTerrainCfg(
-                noise_scale=0.03,
-                noise_frequency=20,
-                fractal_octaves=2,
-                fractal_lacunarity=2.0,
-                fractal_gain=0.25,
-                centering=True,
-            ),
-            flat_patch_sampling={
-                "target": FlatPatchSamplingCfg(
-                    num_patches=50,
-                    patch_radius=[0.05, 0.10, 0.15, 0.20],
-                    max_height_diff=0.05,
-                    x_range=(3.7, 3.7),
-                    y_range=(-3.0, 3.0),
-                ),
-            },
-        ),
+        # "trapezoid_stairs": terrain_gen.PerlinTrapezoidStairsTerrainCfg(
+        #     proportion=0.1,
+        #     step_height_range=(0.05, 0.20),
+        #     step_width=0.30,
+        #     platform_width=2.0,
+        #     border_width=1.0,
+        #     wall_prob=[0.3, 0.3, 0.3, 0.3],
+        #     wall_height=5.0,
+        #     wall_thickness=0.05,
+        #     perlin_cfg=terrain_gen.PerlinPlaneTerrainCfg(
+        #         noise_scale=0.03,
+        #         noise_frequency=20,
+        #         fractal_octaves=2,
+        #         fractal_lacunarity=2.0,
+        #         fractal_gain=0.25,
+        #         centering=True,
+        #     ),
+        #     flat_patch_sampling={
+        #         "target": FlatPatchSamplingCfg(
+        #             num_patches=50,
+        #             patch_radius=[0.05, 0.10, 0.15, 0.20],
+        #             max_height_diff=0.05,
+        #             x_range=(3.7, 3.7),
+        #             y_range=(-3.0, 3.0),
+        #         ),
+        #     },
+        # ),
+        # "trapezoid_stairs_inv": terrain_gen.PerlinInvertedTrapezoidStairsTerrainCfg(
+        #     proportion=0.1,
+        #     step_height_range=(0.05, 0.20),
+        #     step_width=0.30,
+        #     platform_width=2.0,
+        #     border_width=1.0,
+        #     wall_prob=[0.3, 0.3, 0.3, 0.3],
+        #     wall_height=5.0,
+        #     wall_thickness=0.05,
+        #     perlin_cfg=terrain_gen.PerlinPlaneTerrainCfg(
+        #         noise_scale=0.03,
+        #         noise_frequency=20,
+        #         fractal_octaves=2,
+        #         fractal_lacunarity=2.0,
+        #         fractal_gain=0.25,
+        #         centering=True,
+        #     ),
+        #     flat_patch_sampling={
+        #         "target": FlatPatchSamplingCfg(
+        #             num_patches=50,
+        #             patch_radius=[0.05, 0.10, 0.15, 0.20],
+        #             max_height_diff=0.05,
+        #             x_range=(3.7, 3.7),
+        #             y_range=(-3.0, 3.0),
+        #         ),
+        #     },
+        # ),
         # "stairs_gap_platforms": terrain_gen.PerlinStairsGapPlatformTerrainCfg(
         #     proportion=0.1,
         #     step_height_range=(0.05, 0.20),
@@ -378,7 +363,9 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
         #     ),
         #     flat_patch_sampling={
         #         "target": FlatPatchSamplingCfg(
-        #             num_patches=50, patch_radius=[0.05, 0.10, 0.15, 0.20], max_height_diff=0.05
+        #             num_patches=50, 
+        #             patch_radius=[0.05, 0.10, 0.15, 0.20], 
+        #             max_height_diff=0.05
         #         ),
         #     },
         # ),
@@ -397,7 +384,10 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
         #     wall_height=5.0,
         #     wall_thickness=0.05,
         #     flat_patch_sampling={
-        #         "target": FlatPatchSamplingCfg(num_patches=50, patch_radius=[0.05, 0.10, 0.15], max_height_diff=0.05),
+        #         "target": FlatPatchSamplingCfg(
+        #             num_patches=50, 
+        #             patch_radius=[0.05, 0.10, 0.15], 
+        #             max_height_diff=0.05),
         #     },
         # ),
         "hf_pyramid_slope_inv": terrain_gen.PerlinInvertedPyramidSlopedTerrainCfg(
@@ -418,7 +408,9 @@ ROUGH_TERRAINS_CFG = FiledTerrainGeneratorCfg(
             ),
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
-                    num_patches=50, patch_radius=[0.05, 0.10, 0.15, 0.20], max_height_diff=0.05
+                    num_patches=50, 
+                    patch_radius=[0.05, 0.10, 0.15, 0.20], 
+                    max_height_diff=0.05
                 ),
             },
         ),

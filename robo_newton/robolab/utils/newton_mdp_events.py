@@ -34,6 +34,9 @@ class _RandomizeRigidBodyComNewton(ManagerTermBase):
     ):
         if self.default_com_pos is None:
             self.default_com_pos = self.asset.data.body_com_pos_b.torch.clone()
+            # Keep the unrandomized value available to the UFO world-model
+            # adapter; the model receives the COM offset, not the absolute COM.
+            env._ufo_nominal_body_com_pos = self.default_com_pos.clone()
 
         env_ids = resolve_env_ids(env_ids, env.scene.num_envs, self.asset.device)
 
@@ -51,6 +54,10 @@ class _RandomizeRigidBodyComNewton(ManagerTermBase):
         com_pos = self.default_com_pos.clone()
         com_pos[env_ids[:, None], body_ids] += rand_samples
         self.asset.set_coms_index(coms=com_pos[env_ids[:, None], body_ids], body_ids=body_ids, env_ids=env_ids)
+        # A reset contact pass may have evaluated FK before this event. Newton's
+        # COM setter clears derived caches but leaves backend body COM velocities
+        # computed at the old offsets; recompute FK before exposing link velocity.
+        self.asset.data._reset_velocity(env_ids=self.asset._resolve_env_ids(env_ids))
 
 
 randomize_rigid_body_com = _RandomizeRigidBodyComNewton

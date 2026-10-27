@@ -58,6 +58,7 @@ class FbCprAuxAgent:
 
     def __init__(self, obs_dims: Dict[str, int], action_dim: int, cfg, device="cuda", *, inference_only=False):
         self.inference_only = inference_only
+        self.world_model = None
         self.cfg = cfg
         self.device = device
         self.fb_target_tau = float(cfg.fb_target_tau)
@@ -330,7 +331,9 @@ class FbCprAuxAgent:
     def _privileged_input(self, parts):
         return torch.cat([parts[key] for key in self.privileged_keys], dim=-1)
 
-    def _actor_forward(self, parts, z):
+    def _actor_forward(self, parts, z, *, imagination=False):
+        if imagination:
+            return self._actor(self._actor_input(parts), z, self.cfg.actor_std, detach_velocity=False)
         return self._actor(self._actor_input(parts), z, self.cfg.actor_std)
 
     def _actor_in(self, obs):
@@ -786,6 +789,8 @@ class FbCprAuxAgent:
             train_batch, collection_obs, collection_next_obs, rollout_z, discount
         )
         metrics.update(self._update_context_critics(train_batch=train_batch, action=train_action, **context))
+        if self.world_model is not None:
+            metrics.update(self.world_model.fit(replay_buffers["train"], self))
         metrics.update(
             self.update_actor(
                 actor_obs=t_obs,
@@ -1278,6 +1283,8 @@ class FbCprAuxAgent:
                             absolute[:, index] * stopped
                         ).sum() / stopped_count
             parameter_metrics = {}
+            wm_metrics = {}
+            wm_loss = None
             if track_depth_gradients:
                 # Include the separate context forward and the actual weighted losses.
                 parameter_metrics = parameter_gradient_metrics(loss_terms, self._actor.depth_encoder.parameters())
@@ -1313,9 +1320,15 @@ class FbCprAuxAgent:
                 ).detach(),
             }
         self._avg_grad(self._actor.parameters())
+        if self.world_model is not None:
+            from .world_model_update import add_imagination_gradients
+
+            wm_metrics = add_imagination_gradients(self.world_model, self)
         self.actor_optimizer.step()
+        if self.world_model is not None:
+            self.world_model.update_target()
         metrics = {
-            "actor_loss": actor_loss.detach(),
+            "actor_loss": actor_loss.detach() + wm_metrics.get("wm/actor_loss", 0),
             "Q_discriminator": q_disc.mean().detach(),
             "Q_aux": q_aux.mean().detach(),
             "Q_fb": q_fb.mean().detach(),
@@ -1330,6 +1343,7 @@ class FbCprAuxAgent:
         metrics.update(depth_ablation_metrics)
         metrics.update(depth_gradient_metrics)
         metrics.update(parameter_metrics)
+        metrics.update(wm_metrics)
         return metrics
 
     @staticmethod
@@ -1382,9 +1396,13 @@ class FbCprAuxAgent:
             out["aux_critic"] = self._aux_critic.state_dict()
             out["target_critic"] = self._target_critic.state_dict()
             out["target_aux_critic"] = self._target_aux_critic.state_dict()
+        if self.world_model is not None:
+            out["world_model"] = self.world_model.state_dict()
         return out
 
     def load_state_dict(self, state):
+        if self.world_model is not None and "world_model" in state:
+            self.world_model.validate_checkpoint(state["world_model"])
         self._actor.load_state_dict(state["actor"])
         self._backward_map.load_state_dict(state["backward_map"])
         if self.inference_only:
@@ -1412,6 +1430,8 @@ class FbCprAuxAgent:
         self._obs_normalizer.load_state_dict(state["obs_normalizer"])
         if "aux_reward_normalizer" in state:
             self._aux_reward_normalizer.load_state_dict(state["aux_reward_normalizer"])
+        if self.world_model is not None and "world_model" in state:
+            self.world_model.load_state_dict(state["world_model"])
 
     def optimizer_state_dict(self):
         out = {
@@ -1423,6 +1443,11 @@ class FbCprAuxAgent:
         }
         if not self.shared_value_net:
             out["aux_critic"] = self.aux_critic_optimizer.state_dict()
+        if self.world_model is not None:
+            out["world_model"] = self.world_model.optimizer.state_dict()
+            out["world_model_value"] = self.world_model.value_optimizer.state_dict()
+            if hasattr(self.world_model, "sequence_value_optimizer"):
+                out["world_model_sequence_value"] = self.world_model.sequence_value_optimizer.state_dict()
         return out
 
     def load_optimizer_state_dict(self, state):
@@ -1433,3 +1458,8 @@ class FbCprAuxAgent:
         if not self.shared_value_net:
             self.aux_critic_optimizer.load_state_dict(state["aux_critic"])
         self.discriminator_optimizer.load_state_dict(state["discriminator"])
+        if self.world_model is not None and "world_model" in state:
+            self.world_model.optimizer.load_state_dict(state["world_model"])
+            self.world_model.value_optimizer.load_state_dict(state["world_model_value"])
+            if hasattr(self.world_model, "sequence_value_optimizer"):
+                self.world_model.sequence_value_optimizer.load_state_dict(state["world_model_sequence_value"])

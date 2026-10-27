@@ -78,7 +78,7 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
                     "all_envs": True,
                     "policy_obs_set": "discriminator",
                     "demonstration_obs_set": "discriminator_demonstration",
-                    "amp_discriminator": {"hidden_dims": [128, 64]},
+                    "amp_discriminator": {"hidden_dims": [1024, 512]},
                 },
             },
             loss_type="LSGAN",

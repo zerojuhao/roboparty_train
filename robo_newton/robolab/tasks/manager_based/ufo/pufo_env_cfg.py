@@ -245,41 +245,16 @@ class PUFOObservationsCfg:
 
 @configclass
 class PUFOEventCfg:
-    resample_motion = EventTerm(
-        func=mdp.resample_motion_for_reset,
-        mode="reset",
-        params={"command_name": "motion"},
-    )
-    reset_root_state = EventTerm(
-        func=reset_pufo_from_motion,
-        mode="reset",
-        params={
-            "command_name": "motion", "lie_down_probability": 0.0,
-            "contact_clearance": 0.05, "penetration_scale": 1.25,
-        },
-    )
-    randomize_camera_installation = EventTerm(
-        func=mdp.randomize_camera_installation,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("camera"),
-            "position_error": 0.02,
-            "angle_error_rpy": (
-                math.radians(3.0),
-                math.radians(10.0),
-                math.radians(3.0),
-            ),
-        },
-    )
     randomize_rigid_body_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 1.7),
-            "dynamic_friction_range": (0.3, 1.7),
-            "restitution_range": (0.0, 0.0),
+            "static_friction_range": (0.3, 1.6),
+            "dynamic_friction_range": (0.3, 1.6),
+            "restitution_range": (0.05, 0.5),
             "num_buckets": 64,
+            "make_consistent": True,
         },
     )
     randomize_rigid_body_com = EventTerm(
@@ -295,18 +270,49 @@ class PUFOEventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "mass_distribution_params": (0.8, 1.2),
+            "mass_distribution_params": (0.9, 1.1),
             "operation": "scale",
         },
     )
     scale_actuator_gains = EventTerm(
         func=mdp.randomize_actuator_gains,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_joint"]),
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
+            "operation": "scale",
+        },
+    )
+    resample_motion = EventTerm(
+        func=mdp.resample_motion_for_reset,
+        mode="reset",
+        params={"command_name": "motion"},
+    )
+    reset_root_state = EventTerm(
+        func=reset_pufo_from_motion,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-            "stiffness_distribution_params": (0.7, 1.3),
-            "damping_distribution_params": (0.7, 1.3),
-            "operation": "scale",
+            "command_name": "motion",
+            "lie_down_probability": 0.0,
+            "contact_clearance": 0.05,
+            "penetration_scale": 1.25,
+        },
+    )
+    randomize_camera_offset = EventTerm(
+        func=mdp.randomize_camera_offsets,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("camera"),
+            "offset_pose_ranges": {
+                "x": (-0.02, 0.02),
+                "y": (-0.02, 0.02),
+                "z": (-0.02, 0.02),
+                "roll": (-math.radians(3), math.radians(3)),
+                "pitch": (-math.radians(10), math.radians(10)),
+                "yaw": (-math.radians(3), math.radians(3)),
+            },
+            "distribution": "uniform",
         },
     )
     push_robot = EventTerm(
@@ -502,4 +508,3 @@ class RP1PUFOEvalEnvCfg(PUFOEnvCfg):
         super().__post_init__()
         self.scene.robot = RP1_UFO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.camera.mesh_prim_paths.extend(get_link_prim_targets(PR1_LINKS))
-        self.events.reset_root_state.params["lie_down_probability"] = 0.0

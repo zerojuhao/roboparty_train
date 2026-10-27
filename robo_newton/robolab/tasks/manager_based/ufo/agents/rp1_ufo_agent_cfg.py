@@ -9,6 +9,7 @@ from .fb_cpr_cfg import (
     FbCprDiscriminatorCfg,
     FbCprMlpModelCfg,
     FbCprResidualModelCfg,
+    UFOWorldModelCfg,
 )
 
 
@@ -27,6 +28,7 @@ class FbCprAlgorithmCfg:
 class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     class_name: str = "FbCprRunner"
     algorithm: FbCprAlgorithmCfg = FbCprAlgorithmCfg()
+    world_model: UFOWorldModelCfg = UFOWorldModelCfg()
 
     experiment_name: str = "rp1_ufo"
     wandb_project: str = "rp1_ufo"
@@ -36,7 +38,7 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     max_iterations: int = 1_000_000
     num_env_steps: int = 1_000_000_000
     checkpoint_interval_steps: int = 9_600_000
-    checkpoint_replay: bool = True
+    checkpoint_replay: bool = False
     replay_checkpoint_keep: int = 1
     resume_replay_warmup_steps: int = 10_240
     seed: int = 42
@@ -152,6 +154,7 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     use_mix_rollout: bool = True
     rollout_expert_trajectories: bool = True
     rollout_expert_trajectories_length: int = 250
+    rollout_expert_variable_length: bool = True
     rollout_expert_trajectories_percentage: float = 0.5
 
     lr_f: float = 3e-4
@@ -196,6 +199,9 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     eval_reference_chunk: int = 128
     eval_timeout_s: float = 1800.0
     eval_num_motions: int = 0
+    tracking_eval_modes: tuple[str, ...] = ("nominal", "robustness")
+    tracking_eval_seed: int = 42
+    tracking_eval_priority_mode: str = "nominal"
 
     # Original-UFO EMD prioritization (workspace.py): per-clip joint-space EMD
     # from the tracking eval feeds clip sampling weights.

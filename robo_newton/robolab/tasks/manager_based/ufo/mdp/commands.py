@@ -25,6 +25,9 @@ class UFOMotionCommand(CommandTerm):
                 "step_dt": cfg.step_dt,
                 "clip_seconds": cfg.clip_seconds,
                 "min_clip_seconds": cfg.min_clip_seconds,
+                "clip_overlap_seconds": cfg.clip_overlap_seconds,
+                "phase_curriculum": cfg.phase_curriculum,
+                "excluded_motion_names": cfg.excluded_motion_names,
                 "motion_names": getattr(cfg, "motion_names", None),
                 "joint_names": list(env.scene[cfg.asset_name].joint_names),
                 "body_names": list(env.scene[cfg.asset_name].body_names),
@@ -106,5 +109,8 @@ class UFOMotionCommandCfg(CommandTermCfg):
     # min_clip_seconds=1.0). 0 disables windowing (full-motion granularity).
     clip_seconds: float = 10.0
     min_clip_seconds: float = 1.0
+    clip_overlap_seconds: float = 0.0
+    phase_curriculum: bool = False
+    excluded_motion_names: tuple[str, ...] = ()
     resampling_time_range: tuple[float, float] = (1.0e9, 1.0e9)
     debug_vis: bool = False

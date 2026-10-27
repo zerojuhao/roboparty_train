@@ -24,12 +24,6 @@ class PoseVelocityCommandCfg(CommandTermCfg):
     heading_control_stiffness: float = 1.0
     """Scale factor to convert the heading error to angular velocity command. Defaults to 1.0."""
 
-    heading_slowdown_range: tuple[float, float] = (0.1745329252, 0.7853981634)
-    """Heading errors where forward speed starts decreasing and reaches zero, in radians."""
-
-    random_velocity_deadband: float = 0.1
-    """Absolute deadband applied independently to randomized x, y, and yaw velocity commands."""
-
     only_positive_lin_vel_x: bool = False
     """Whether to only sample positive linear x velocity commands. Defaults to False."""
 
