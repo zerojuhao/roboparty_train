@@ -7,10 +7,10 @@ import torch
 
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg, ManagerTermBase
-from isaaclab.utils.math import quat_apply, quat_apply_inverse, yaw_quat
+from isaaclab.utils.math import quat_apply, quat_apply_inverse
 from rsl_rl.modules.force_estimator import (
-        ARM_JOINT_NAMES, COMPACT_FORCE_DIM, MULTI_CONTACT_BODIES,
-        compact_estimator_target, compact_wrench_target)
+        ARM_JOINT_NAMES, COMPACT_FORCE_DIM, MULTI_CONTACT_BODIES, REGION_LOAD_FORCE_N,
+        compact_estimator_target, compact_wrench_target, regional_forces)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -254,12 +254,15 @@ class sustained_standing_push(ManagerTermBase):
         return compact_wrench_target(self.applied_force, moment, com, data.root_pos_w.torch, jacobian)
 
     def capture_compact_labels(self):
-        """Snapshot applied force in the heading frame and explicit yaw torque in the root frame."""
-        quat = self.robot.data.root_quat_w.torch
+        """Snapshot root-frame net wrench, regional forces, and load bits."""
+        root = self.robot.data.root_quat_w.torch
         target = self.current_compact_wrench()
-        force_h = quat_apply_inverse(yaw_quat(quat), target[:, :3])
-        yaw_b = quat_apply_inverse(quat, self.explicit_torso_torque_w)[:, 2:3]
-        self.compact_labels.copy_(compact_estimator_target(force_h, yaw_b, target[:, 6:16]))
+        force_b = quat_apply_inverse(root, target[:, :3])
+        moment_b = quat_apply_inverse(root, target[:, 3:6])
+        region_b = quat_apply_inverse(root[:, None], regional_forces(self.applied_force))
+        load = (region_b.norm(dim=-1) >= REGION_LOAD_FORCE_N).to(force_b.dtype)
+        self.compact_labels.copy_(
+            compact_estimator_target(force_b, moment_b, target[:, 6:16], region_b, load))
 
 
 def reset_from_ref(

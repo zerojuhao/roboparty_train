@@ -13,7 +13,7 @@ def _smoothstep(value, bounds):
 
 
 class full_body_return(ManagerTermBase):
-    """Smoothly return each unloaded arm to rest when idle and not force-following."""
+    """Return each arm joint to rest at zero command when that arm has no external load."""
 
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
@@ -22,7 +22,7 @@ class full_body_return(ManagerTermBase):
                      'return_max_speed', 'return_speed_threshold'):
             if not math.isfinite(p[name]) or p[name] <= 0:
                 raise ValueError(f'{name} must be finite and positive')
-        for name in ('arm_velocity_weight', 'arm_fast_return_weight', 'motion_target_threshold'):
+        for name in ('arm_velocity_weight', 'arm_fast_return_weight'):
             if not math.isfinite(p.get(name, 0.)) or p.get(name, 0.) < 0:
                 raise ValueError(f'{name} must be finite and non-negative')
         names = env.scene[p['asset_cfg'].name].joint_names
@@ -33,29 +33,31 @@ class full_body_return(ManagerTermBase):
         ]
         self._joint_flat = [j for side in self.arm_joint_ids for j in side]
         self.arm_local_load = True
-        self.gate = torch.ones(env.num_envs, device=env.device)
-        self.arm_gate = torch.ones(env.num_envs, 2, device=env.device)
+        n, device = env.num_envs, env.device
+        self.gate = torch.ones(n, device=device)
+        self.arm_gate = torch.ones(n, 2, device=device)
+        self.joint_gate = torch.ones(n, 2, 5, device=device)
 
     def reset(self, env_ids=None):
         ids = slice(None) if env_ids is None else env_ids
         self.gate[ids] = 1.
         self.arm_gate[ids] = 1.
+        self.joint_gate[ids] = 1.
 
     def __call__(self, env, asset_cfg, command_name, return_std, recovery_time_s, posture_weight,
                  arm_velocity_weight=2.0, return_max_speed=0.4, arm_fast_return_weight=8.0,
-                 return_speed_threshold=0.8, motion_target_threshold=0.3):
-        from .soft import reward_motion_target
+                 return_speed_threshold=0.8):
         arm = env.reward_manager.get_term_cfg('arm_compliance').func
         zero = (env.command_manager.get_command(command_name) == 0).all(-1)
-        motion = reward_motion_target(env, command_name)
-        moving = (motion[:, :2].norm(dim=-1) > motion_target_threshold) | (
-            motion[:, 2].abs() > motion_target_threshold)
-
-        loaded = arm.passive_observed_gate.amax(-1)
-        idle = (zero & ~moving).to(self.arm_gate.dtype)[:, None]
+        loaded = torch.maximum(
+            arm.passive_observed_gate,
+            _smoothstep(arm.filtered_force_w.norm(dim=-1), (0.5, 2.0))[:, :, None],
+        )
+        idle = zero.to(self.joint_gate.dtype)[:, None, None]
         target = idle * (1. - loaded)
-        recovering = torch.lerp(self.arm_gate, target, -math.expm1(-env.step_dt / recovery_time_s))
-        self.arm_gate.copy_(torch.minimum(target, recovering))
+        recovering = torch.lerp(self.joint_gate, target, -math.expm1(-env.step_dt / recovery_time_s))
+        self.joint_gate.copy_(torch.minimum(target, recovering))
+        self.arm_gate.copy_(self.joint_gate.mean(-1))
         self.gate.copy_(self.arm_gate.mean(-1))
 
         data = env.scene[asset_cfg.name].data
@@ -65,25 +67,24 @@ class full_body_return(ManagerTermBase):
         error = q - rest
         velocity = data.joint_vel.torch[:, self._joint_flat].reshape_as(error)
 
-        gate = self.arm_gate[..., None]
-        immediate = target[..., None]
         # Bounded posture avoids distance-proportional rush; desired velocity guides smooth convergence.
-        posture = posture_weight * (torch.tanh(error.abs() / return_std) * gate).mean(-1)
+        posture = posture_weight * (torch.tanh(error.abs() / return_std) * self.joint_gate).mean(-1)
         desired_vel = -return_max_speed * torch.tanh(error / 0.15)
-        vel_track = arm_velocity_weight * (((velocity - desired_vel) / return_max_speed).square() * gate).mean(-1)
-        # Immediate overspeed brake stops rebound spikes right at load release before arm_gate ramps up.
+        vel_track = arm_velocity_weight * (
+            ((velocity - desired_vel) / return_max_speed).square() * self.joint_gate).mean(-1)
+        # Immediate overspeed brake stops rebound spikes right at load release before joint_gate ramps up.
         overspeed = arm_fast_return_weight * (
-            (velocity.abs() / return_speed_threshold - 1.).clamp_min(0.).square() * immediate).mean(-1)
+            (velocity.abs() / return_speed_threshold - 1.).clamp_min(0.).square() * target).mean(-1)
 
         log = env.extras.setdefault('log', {})
         log['Interaction/return_gate'] = self.gate.mean()
         log['Interaction/return_error_rad'] = (
-            error.abs().mean(-1) * self.arm_gate).sum() / self.arm_gate.sum().clamp_min(1e-6)
+            (error.abs() * self.joint_gate).sum() / self.joint_gate.sum().clamp_min(1e-6))
         return (posture + vel_track + overspeed).sum(-1) * (5. / 24.)
 
 
 class arm_compliance(ManagerTermBase):
-    """Yield with external joint torque: gated mean of τv, hold, and a light v² cost."""
+    """Opened-joint sum of opposing motor torque (PPO = −hold). Yield, power and speed are logs only."""
 
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
@@ -213,13 +214,12 @@ class arm_compliance(ManagerTermBase):
 
         power = (motor * v).clamp_min(0.)
         opposing = (-ext.sign() * motor).clamp_min(0.)
-        allowance = self.resistance_tolerance_nm + self.damping_allowance * v.abs()
-        hold = (opposing - allowance).clamp_min(0.)
+        resist = (opposing - self.resistance_tolerance_nm).clamp_min(0.)
         yield_power = (ext * v).clamp_min(0.)
         speed = (v / self.max_joint_speed).square()
 
         self._power_sum.add_(power * weight)
-        self._hold_sum.add_(hold * weight)
+        self._hold_sum.add_(resist * opened)
         self._yield_sum.add_(yield_power * opened)
         self._speed_sum.add_(speed * opened)
         self._open_sum.add_(opened)
@@ -285,17 +285,15 @@ class arm_compliance(ManagerTermBase):
         self.motion_blend.lerp_(moving * moving * (3. - 2. * moving), -math.expm1(-env.step_dt / 0.3))
 
         power = self._power_sum / steps
-        hold = self._hold_sum / steps
+        yield_raw = self._yield_sum.sum((1, 2)) / steps
+        hold_raw = self._hold_sum.sum((1, 2)) / steps
         mass = self._open_sum.sum((1, 2)).clamp_min(1.)
-        yield_w = self._yield_sum.sum((1, 2)) / mass / self.yield_scale_w
         speed = self._speed_sum.sum((1, 2)) / mass
-        cost = (power / self.power_scale_w + hold / self.torque_scale_nm).sum((1, 2))
-        cost = cost + self.overspeed_weight * speed
 
         log = env.extras.setdefault('log', {})
         log['Interaction/arm_positive_power_w'] = power.sum((1, 2)).mean()
-        log['Interaction/arm_hold_nm'] = hold.sum((1, 2)).mean()
-        log['Interaction/arm_yield_w'] = (self._yield_sum.sum((1, 2)) / mass).mean()
+        log['Interaction/arm_hold_nm'] = hold_raw.mean()
+        log['Interaction/arm_yield_w'] = yield_raw.mean()
         log['Interaction/arm_speed_sq'] = speed.mean()
         log['Interaction/arm_load_fraction'] = gate.mean()
-        return yield_w - cost
+        return -hold_raw

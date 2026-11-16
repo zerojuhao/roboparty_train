@@ -219,14 +219,18 @@ def main() -> None:
             from rsl_rl.modules.force_estimator import ARM_JOINT_NAMES
             for key in ('contact_bodies', 'point_frame', 'yaw_torque_frame'):
                 meta.pop(key, None)
-            meta.update(force_estimation_contract='heading_wrench_tau_v11',
-                        force_estimation_layout='fx, fy, fz; explicit_torso_yaw_torque; left_arm_tau_5; right_arm_tau_5',
-                        moment_frame='base frame z, Nm; explicit torso yaw torque only',
-                        force_frame='heading-aligned XYZ, N; z is world vertical',
-                        arm_joint_order=list(ARM_JOINT_NAMES), estimated_feature_dim=17)
+            meta.update(force_estimation_contract='heading_wrench_tau_region_load_v12',
+                        force_estimation_layout=(
+                            'net_fxyz; net_mxyz; tau10; left_arm_fxyz; right_arm_fxyz; '
+                            'torso_fxyz; left_load; right_load; torso_load'),
+                        moment_frame='root-frame XYZ net moment about root, Nm',
+                        force_frame='root-frame XYZ, N',
+                        regional_force_order=['left_arm', 'right_arm', 'torso'],
+                        load_order=['left_arm', 'right_arm', 'torso'],
+                        arm_joint_order=list(ARM_JOINT_NAMES), estimated_feature_dim=31)
     if model.enable_force_vel_target_estimation:
-        meta.update(force_estimation_contract='heading_wrench_tau_force_vel_v11',
-                    enable_force_vel_target_estimation=True, estimated_feature_dim=20,
+        meta.update(force_estimation_contract='heading_wrench_tau_region_load_force_vel_v12',
+                    enable_force_vel_target_estimation=True, estimated_feature_dim=34,
                     force_vel_head='dedicated_mlp',
                     force_vel_target_order=['vx', 'vy', 'yaw_rate'],
                     force_vel_target_frame='heading-aligned XY, base-frame z angular velocity',

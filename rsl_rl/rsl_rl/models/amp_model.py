@@ -113,7 +113,7 @@ class AMPModel(MLPModel):
         if self.force_estimator is not None:
             history = proprio if self.shared_force_history else self.force_input_normalizer(self._force_history(obs))
             raw = self.force_estimator(history)
-            features.append(raw.detach() if self.force_estimation_compact else ForceEstimator.features(raw).detach())
+            features.append(ForceEstimator.features(raw).detach())
             if self.force_vel_estimator is not None:
                 prediction = self.force_vel_estimator(history)
                 features.append(prediction.detach())
@@ -179,9 +179,10 @@ class AMPModel(MLPModel):
         force_error = raw[..., :3].detach() * 50. - target[..., :3]
         force_square = force_error.square()
         loaded = target[..., :2].norm(dim=-1) >= 10.
-        error = (raw[..., 4:14]*10.-target[..., 4:14]).square().unflatten(-1, (2, 5))
-        active = (target[..., 4:14].abs() > 1.).unflatten(-1, (2, 5))
-        return {
+        error = (raw[..., 6:16]*10.-target[..., 6:16]).square().unflatten(-1, (2, 5))
+        active = (target[..., 6:16].abs() > 1.).unflatten(-1, (2, 5))
+        moment_error = raw[..., 3:6].detach() * 10. - target[..., 3:6]
+        metrics = {
             'Estimation/force/rmse_xy_n': force_square[..., :2].sum(-1).mean().sqrt(),
             'Estimation/force/rmse_z_n': force_square[..., 2].mean().sqrt(),
             'Estimation/force/loaded_rmse_xy_n': (
@@ -192,10 +193,28 @@ class AMPModel(MLPModel):
             'Estimation/force/fx_bias_n': force_error[..., 0].mean(),
             'Estimation/force/fy_bias_n': force_error[..., 1].mean(),
             'Estimation/force/fz_bias_n': force_error[..., 2].mean(),
-            'Estimation/force/yaw_moment_rmse_nm': (raw[..., 3]*10.-target[..., 3]).square().mean().sqrt(),
+            'Estimation/force/net_moment_rmse_nm': moment_error.square().sum(-1).mean().sqrt(),
+            'Estimation/force/yaw_moment_rmse_nm': moment_error[..., 2].square().mean().sqrt(),
             'Estimation/force/arm_torque_rmse_nm': error.mean().sqrt(),
             'Estimation/force/loaded_arm_torque_rmse_nm': ((error*active).sum()/active.sum().clamp_min(1)).sqrt(),
         }
+        if raw.shape[-1] < 28:
+            return metrics
+        region_error = (raw[..., 16:25].detach() * 50. - target[..., 16:25]).unflatten(-1, (3, 3))
+        region_square = region_error.square().sum(-1)
+        load = target[..., 25:28] > 0.5
+        detected = raw[..., 25:28].detach() > 0
+        names = ('left_arm', 'right_arm', 'torso')
+        for i, name in enumerate(names):
+            hit = load[:, i]
+            metrics[f'Estimation/force/{name}_rmse_n'] = region_square[:, i].mean().sqrt()
+            metrics[f'Estimation/force/{name}_loaded_rmse_n'] = (
+                (region_square[:, i] * hit).sum() / hit.sum().clamp_min(1)).sqrt()
+            metrics[f'Estimation/force/{name}_load_recall'] = (
+                (detected[:, i] & hit).sum() / hit.sum().clamp_min(1))
+            metrics[f'Estimation/force/{name}_load_precision'] = (
+                (detected[:, i] & hit).sum() / detected[:, i].sum().clamp_min(1))
+        return metrics
 
     @staticmethod
     def _multi_force_metrics(raw, target):
@@ -327,7 +346,7 @@ class _ExportForceAMPModel(_ExportAMPModel):
             latent = torch.cat((latent, self.velocity_estimator(normalized)), -1)
         history = normalized if self.shared_force_history else self.force_input_normalizer(force_history)
         raw = self.force_estimator(history)
-        force_feat = raw if self.use_compact_force else ForceEstimator.features(raw)
+        force_feat = ForceEstimator.features(raw)
         if self.use_force_vel_estimator:
             latent = torch.cat((latent, force_feat, self.force_vel_estimator(history)), -1)
         else:

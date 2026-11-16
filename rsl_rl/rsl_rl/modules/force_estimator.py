@@ -14,8 +14,9 @@ MULTI_CONTACT_BODIES = ('left_wrist_link', 'right_wrist_link',
 MULTI_FORCE_DIM = 81
 # World-frame net F3/M3 + generalized arm tau10, used by the compliance reward.
 COMPACT_WRENCH_WORLD_DIM = 16
-# Heading-frame Fxyz, explicit torso yaw torque, and arm tau10 for the compact estimator.
-COMPACT_FORCE_DIM = 14
+# Root-frame net Fxyz, net Mxyz, tau10, L/R/torso Fxyz, L/R/torso load.
+COMPACT_FORCE_DIM = 28
+REGION_LOAD_FORCE_N = 1.0
 ARM_JOINT_NAMES = tuple(f'{side}_{part}_joint' for side in ('left', 'right')
                         for part in ('shoulder_pitch', 'shoulder_roll', 'shoulder_yaw', 'elbow', 'wrist'))
 
@@ -32,14 +33,24 @@ def compact_wrench_target(force_w, moment_com_w, com_w, root_w, arm_jacobian_w):
     return torch.cat((force, moment, joint), -1)
 
 
-def compact_estimator_target(force_h, yaw_torque_b, joint):
-    """Heading-frame Fxyz, explicit torso yaw torque, and the ten arm joint torques."""
-    return torch.cat((force_h, yaw_torque_b, joint), -1)
+def compact_estimator_target(force_b, moment_b, joint, region_b, load):
+    """Root-frame net Fxyz, net Mxyz, tau10, regional Fxyz (L/R/torso), and load bits."""
+    return torch.cat((force_b, moment_b, joint, region_b.flatten(1), load), -1)
 
 
 def mirror_compact_force(target):
     result = target.clone()
     if target.shape[-1] == COMPACT_FORCE_DIM:
+        result[..., 1] *= -1
+        result[..., [3, 5]] *= -1
+        result[..., 6:16] = -target[..., [11, 12, 13, 14, 15, 6, 7, 8, 9, 10]]
+        regions = target[..., 16:25].unflatten(-1, (3, 3))
+        mirrored = regions[..., [1, 0, 2], :].clone()
+        mirrored[..., 1] *= -1
+        result[..., 16:25] = mirrored.flatten(-2)
+        result[..., 25:28] = target[..., [26, 25, 27]]
+        return result
+    if target.shape[-1] == 14:
         result[..., 1] *= -1
         result[..., 3] *= -1
         result[..., 4:14] = -target[..., [9, 10, 11, 12, 13, 4, 5, 6, 7, 8]]
@@ -142,6 +153,10 @@ class ForceEstimator(nn.Module):
 
     @staticmethod
     def features(raw):
+        if raw.shape[-1] == COMPACT_FORCE_DIM:
+            return torch.cat((raw[..., :25], raw[..., 25:28].sigmoid()), -1)
+        if raw.shape[-1] == 14:
+            return raw
         if raw.shape[-1] == 31:
             return torch.cat((raw[..., :25], raw[..., 25:28].sigmoid(), raw[..., 28:31]), -1)
         if raw.shape[-1] == 28:
@@ -179,15 +194,21 @@ class ForceEstimator(nn.Module):
     @staticmethod
     def compact_loss_terms(raw, target):
         if raw.shape[-1] != COMPACT_FORCE_DIM:
-            raise ValueError(f'Compact force layout must be {COMPACT_FORCE_DIM} (fxyz, yaw_torque, tau10)')
-        arm_error = (raw[..., 4:14] - target[..., 4:14]/10.).square()
+            raise ValueError(
+                f'Compact force layout must be {COMPACT_FORCE_DIM} (fxyz, mxyz, tau10, region9, load3)')
+        arm_error = (raw[..., 6:16] - target[..., 6:16]/10.).square()
         force_error = (raw[..., :3]-target[..., :3]/50.).square().mean(-1)
         loaded = ((target[..., :2].detach().norm(dim=-1) - 5.) / 5.).clamp(0., 1.)
         loaded = loaded.square() * (3. - 2. * loaded)
+        region_error = (raw[..., 16:25] - target[..., 16:25]/50.).square().unflatten(-1, (3, 3)).mean(-1)
+        load = target[..., 25:28]
+        detection = nn.functional.binary_cross_entropy_with_logits(raw[..., 25:28], load, reduction='none')
         return {
             'force': balanced_contact_mean(force_error, loaded),
-            'yaw_moment': (raw[..., 3]-target[..., 3]/10.).square().mean(),
-            'arm_torque': balanced_joint_torque_mean(arm_error, target[..., 4:14]),
+            'net_moment': (raw[..., 3:6]-target[..., 3:6]/10.).square().mean(),
+            'arm_torque': balanced_joint_torque_mean(arm_error, target[..., 6:16]),
+            'regional_force': 0.5 * balanced_contact_mean(region_error.reshape(-1), load.reshape(-1)),
+            'load': 0.1 * balanced_contact_mean(detection.reshape(-1), load.reshape(-1)),
         }
 
     @staticmethod

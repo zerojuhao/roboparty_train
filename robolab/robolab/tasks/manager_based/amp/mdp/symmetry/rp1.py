@@ -43,7 +43,7 @@ def compute_symmetric_states(
             if group not in obs:
                 continue
             target = obs[group].clone()
-            if group == 'force_target' and target.shape[-1] in (13, 14, 18, 28):
+            if group == 'force_target' and target.shape[-1] in (13, 14, 18, 26, 28, 29):
                 from rsl_rl.modules.force_estimator import mirror_compact_force
                 obs_aug[group][batch_size:] = mirror_compact_force(target)
                 continue

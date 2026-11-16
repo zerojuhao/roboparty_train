@@ -273,7 +273,7 @@ class SoftRewardsCfg:
             'torque_scale_nm': 2.0,
             'yield_scale_w': 2.0,
             'damping_allowance': 8.0,
-            'resistance_tolerance_nm': 0.5,
+            'resistance_tolerance_nm': 0.0,
             'limit_margin': 0.25,
             'max_joint_speed': 1.0,
             'overspeed_weight': 0.05,
@@ -289,7 +289,6 @@ class SoftRewardsCfg:
             'asset_cfg': SceneEntityCfg('robot'),
             'command_name': 'base_velocity',
             'return_std': 0.1,
-            'motion_target_threshold': 0.3,
             'posture_weight': 3.0,
             'recovery_time_s': 0.3,
             'arm_velocity_weight': 2.0,
@@ -508,6 +507,10 @@ class RP1AmpSoftEnvCfg(AmpEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
+        self.actions.joint_pos.scale = {
+            '.*(hip|knee|ankle|waist).*': 0.25,
+            '.*(shoulder|elbow|wrist).*': 3.0,
+        }
         self.scene.robot = RP1_24DOF_CFG.replace(prim_path='{ENV_REGEX_NS}/Robot')
         self.scene.robot.init_state.pos = (0.0, 0.0, 0.78)
         self.sim.use_newton_actuators = False

@@ -27,7 +27,7 @@ def mirror_force_vel_target(target):
 def compact_interaction_critic_state(env):
     """Privileged interaction state, 48-D:
 
-    0:3 heading Fxyz/50, 3 yaw/10, 4:14 tau10/10,
+    0:3 root Fxyz/50, 3 root Mz/10, 4:14 tau10/10,
     14:17 filtered heading net force/50, 17 force-magnitude/50, 18 filtered yaw/10,
     19:25 heading per-arm force/50, 25:35 filtered tau10/10,
     35:37 per-arm return gate, 37 mean return gate, 38:48 per-joint compliance gate.
@@ -46,10 +46,10 @@ def compact_interaction_critic_state(env):
     heading = yaw_quat(env.scene['robot'].data.root_quat_w.torch)
     labels = push.compact_labels
     if labels.shape[-1] != COMPACT_FORCE_DIM:
-        raise ValueError(f'Compact labels must be {COMPACT_FORCE_DIM} (fxyz, yaw_torque, tau10)')
-    state[:, :14] = labels
-    state[:, :3] /= 50.
-    state[:, 3:14] /= 10.
+        raise ValueError(f'Compact labels must be {COMPACT_FORCE_DIM} (fxyz, mxyz, tau10, region9, load3)')
+    state[:, :3] = labels[:, :3] / 50.
+    state[:, 3] = labels[:, 5] / 10.
+    state[:, 4:14] = labels[:, 6:16] / 10.
     state[:, 14:17] = quat_apply_inverse(heading, body.filtered_force_w) / 50.
     state[:, 17] = body.filtered_force_magnitude / 50.
     state[:, 18] = yaw.filtered_torque_z / 10.
