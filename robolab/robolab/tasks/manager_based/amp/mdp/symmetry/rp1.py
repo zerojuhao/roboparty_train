@@ -12,6 +12,7 @@ import torch
 from tensordict import TensorDict
 
 from robolab.tasks.direct.base.mdp.symmetry.rp1 import mirror_joints
+from ..force_estimation import COMPACT_CRITIC_DIM, mirror_compact_critic_state, mirror_force_vel_target
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -37,7 +38,6 @@ def compute_symmetric_states(
         if 'force_history' in obs:
             obs_aug['force_history'][batch_size:] = _transform_policy_obs_left_right(env, obs['force_history'], 'force_history')
         if 'force_vel_target' in obs:
-            from ..force_estimation import mirror_force_vel_target
             obs_aug['force_vel_target'][batch_size:] = mirror_force_vel_target(obs['force_vel_target'])
         for group in ('force_target', 'interaction_critic'):
             if group not in obs:
@@ -62,7 +62,6 @@ def compute_symmetric_states(
                 target[..., 14] *= -1
             obs_aug[group][batch_size:] = target
         if 'compact_interaction_critic' in obs:
-            from ..force_estimation import mirror_compact_critic_state
             obs_aug['compact_interaction_critic'][batch_size:] = mirror_compact_critic_state(
                 obs['compact_interaction_critic'])
     else:
@@ -114,14 +113,31 @@ def _transform_policy_obs_left_right(env: ManagerBasedRLEnv, obs: torch.Tensor, 
     return obs
 
 
+def _critic_proprio_history(env: ManagerBasedRLEnv) -> int:
+    cfg = getattr(env, "unwrapped", env).cfg.observations.critic
+    group = getattr(cfg, "history_length", None)
+    if group is not None and group > 0:
+        return group
+    term = getattr(cfg.base_lin_vel, "history_length", 0)
+    return term if term and term > 0 else 1
+
+
 def _transform_critic_obs_left_right(env: ManagerBasedRLEnv, obs: torch.Tensor) -> torch.Tensor:
     """Left-right mirror for flat critic observations using IsaacLab term-major history layout."""
 
     obs_shape = obs.shape
     num_actions = _num_actions(env)
-    history_length = _history_length(env, "critic")
-    expected_dim = history_length * (3 + 3 + 3 + 3 + num_actions + num_actions + num_actions)
-    assert obs_shape[-1] == expected_dim, f"Expected critic obs dim to be {expected_dim}, got {obs_shape[-1]}."
+    history_length = _critic_proprio_history(env)
+    proprio_dim = history_length * (3 + 3 + 3 + 3 + num_actions + num_actions + num_actions)
+    extra_dim = COMPACT_CRITIC_DIM + 3
+    if obs_shape[-1] == proprio_dim:
+        extra = False
+    elif obs_shape[-1] == proprio_dim + extra_dim:
+        extra = True
+    else:
+        raise AssertionError(
+            f"Expected critic obs dim {proprio_dim} or {proprio_dim + extra_dim}, got {obs_shape[-1]}."
+        )
 
     obs = obs.clone()
     offset = 0
@@ -142,6 +158,11 @@ def _transform_critic_obs_left_right(env: ManagerBasedRLEnv, obs: torch.Tensor) 
     offset += term_dim
     obs[..., offset : offset + term_dim] = _switch_joints_left_right_flat(env, obs[..., offset : offset + term_dim])
     offset += term_dim
+    if extra:
+        compact = obs[..., offset : offset + COMPACT_CRITIC_DIM]
+        obs[..., offset : offset + COMPACT_CRITIC_DIM] = mirror_compact_critic_state(compact)
+        offset += COMPACT_CRITIC_DIM
+        obs[..., offset:] = mirror_force_vel_target(obs[..., offset:])
     return obs
 
 
