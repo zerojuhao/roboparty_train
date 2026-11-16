@@ -72,8 +72,12 @@ class AMPDiscriminator(nn.Module):
 class PPOAMP(PPO):
     """PPO with independent discriminator routes and style rewards."""
 
-    def __init__(self, *args, amp_cfg: dict, obs_groups: dict, resume_learning_rate: float | None = None, **kwargs):
+    def __init__(self, *args, amp_cfg: dict, obs_groups: dict, resume_learning_rate: float | None = None,
+                 force_style_reward_scale: float = 1.0, **kwargs):
         super().__init__(*args, **kwargs)
+        if not math.isfinite(force_style_reward_scale) or not 0 <= force_style_reward_scale <= 1:
+            raise ValueError('force_style_reward_scale must be finite and within [0, 1]')
+        self.force_style_reward_scale = force_style_reward_scale
         if resume_learning_rate is not None and (not math.isfinite(resume_learning_rate) or resume_learning_rate <= 0):
             raise ValueError("resume_learning_rate must be finite and positive")
         self.resume_learning_rate = resume_learning_rate
@@ -151,6 +155,8 @@ class PPOAMP(PPO):
         for name, stats in self._rollout_distributions.items():
             self._reduce_distribution(stats)
             prefix = "AMP/rollout/style_reward" if name == "combined" else f"AMP/{name}/rollout_style_reward"
+            if name in ('force_style_scale', 'effective_style_reward'):
+                prefix = f'AMP/rollout/{name}'
             metrics[f"{prefix}_mean"] = self._distribution_mean(stats)
         self._rollout_distributions.clear()
         return metrics
@@ -236,7 +242,16 @@ class PPOAMP(PPO):
     def process_env_step(self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict) -> None:
         self.style_rewards, self.disc_score = self._collect_style_reward(obs)
         blend = self.discriminators["general"].task_style_lerp
-        self.rewards_lerp = blend * rewards + (1.0 - blend) * self.style_rewards
+        scale = torch.ones_like(self.style_rewards)
+        if self.force_style_reward_scale != 1.0:
+            activation = extras.get('amp_force_activation')
+            if activation is None or activation.shape != self.style_rewards.shape:
+                raise ValueError('Force-dependent AMP requires completed-step amp_force_activation')
+            scale = 1.0 - (1.0 - self.force_style_reward_scale) * activation.clamp(0, 1)
+        self._record_rollout_distribution('force_style_scale', scale)
+        effective_style = self.style_rewards * scale
+        self._record_rollout_distribution('effective_style_reward', effective_style)
+        self.rewards_lerp = blend * rewards + (1.0 - blend) * effective_style
         super().process_env_step(obs, self.rewards_lerp, dones, extras)
 
     def update(self) -> dict[str, float]:
@@ -315,6 +330,8 @@ class PPOAMP(PPO):
         result = super().load(loaded_dict, load_cfg, strict)
         if self.resume_learning_rate is not None:
             self.learning_rate = self.resume_learning_rate
+            if self.schedule == "adaptive":
+                self.learning_rate = min(self.learning_rate, self.adaptive_learning_rate_max)
             for group in self.optimizer.param_groups:
                 group["lr"] = self.learning_rate
             print(f"[INFO] AMP resumed learning rate: {self.learning_rate}, schedule: {self.schedule}")
@@ -327,6 +344,20 @@ class PPOAMP(PPO):
 
     @staticmethod
     def construct_algorithm(obs: TensorDict, env: VecEnv, cfg: dict, device: str) -> PPOAMP:
+        if cfg['actor'].get('enable_force_estimation', False):
+            from rsl_rl.modules.force_estimator import COMPACT_FORCE_DIM
+            expected = 81 * cfg['actor'].get('force_estimation_history_length', 8)
+            history_groups = cfg['obs_groups'].get('force_history', ['force_history'])
+            if not history_groups or any(group not in obs for group in history_groups) or 'force_target' not in obs:
+                raise ValueError('Enable force observation groups before constructing the AMP environment')
+            target_width = (COMPACT_FORCE_DIM if cfg['actor'].get('force_estimation_compact', False)
+                            else 81 if cfg['actor'].get('force_estimation_multi_contact', False)
+                            else 15 if cfg['actor'].get('force_estimation_with_torque', False) else 13)
+            if sum(obs[group].shape[-1] for group in history_groups) != expected or obs['force_target'].shape[-1] != target_width:
+                raise ValueError('Unexpected force history or supervision layout')
+        if cfg['actor'].get('enable_force_vel_target_estimation', False):
+            if 'force_vel_target' not in obs or obs['force_vel_target'].shape[-1] != 3:
+                raise ValueError('Enable three-dimensional force-vel-target supervision before constructing AMP')
         if (
             issubclass(resolve_callable(cfg["actor"]["class_name"]), AMPModel)
             and cfg["actor"].get("enable_velocity_estimation", False)

@@ -133,7 +133,7 @@ class RolloutStorage:
         num_rewards: int = 1,
         compact_depth_history: bool = False,
         depth_history_offsets: tuple[int, ...] | list[int] = (),
-        depth_observation_key: tuple[str, ...] = ("policy", "depth_image"),
+        depth_observation_key: tuple[str, ...] = ("depth",),  # flat ObsGroup; was legacy nested ("policy","depth_image")
     ) -> None:
         """Allocate rollout buffers for a specific training mode and batch shape."""
         self.training_type = training_type

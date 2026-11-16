@@ -7,20 +7,20 @@
 ## 仓库结构
 
 ```text
-robo_newton/robolab/       机器人配置、任务、传感器和工具函数
-robo_newton/scripts/       训练、测试、导出和诊断工具
+robolab/robolab/       机器人配置、任务、传感器和工具函数
+robolab/scripts/       训练、测试、导出和诊断工具
 rsl_rl/rsl_rl/             修改后的算法和 runner
 rsl_rl/tests/              训练库测试
-robo_newton/robolab/data/  本地机器人资产与统一动作数据
+robolab/robolab/data/  本地机器人资产与统一动作数据
 ```
 
-源码目录由本仓库直接管理，不是 Git submodule。Isaac Lab 单独安装；`IsaacLab/`、`IsaacLab-3.0/`、`project_ops/`、日志、checkpoint 和本地数据包不上传。机器人资产与统一后的训练动作统一放在每份 checkout 的 `robo_newton/robolab/data/` 下。
+源码目录由本仓库直接管理，不是 Git submodule。Isaac Lab 单独安装；`IsaacLab/`、`IsaacLab-3.0/`、`project_ops/`、日志、checkpoint 和本地数据包不上传。机器人资产与统一后的训练动作统一放在每份 checkout 的 `robolab/robolab/data/` 下。
 
 ## 环境与安装
 
-当前环境使用 Linux、NVIDIA GPU、Python 3.12 和官方 Isaac Lab 3.0 的 `uv` 源码树。参见 [SDK 官方安装指南](https://isaac-sim.github.io/IsaacLab/release/3.0.0/source/setup/installation/index.html)。请把未修改的 `v3.0.0` 放到旁边的 `IsaacLab-3.0/`。不要改 Isaac Lab 源码；任务和算法只改 `robo_newton` 与 `rsl_rl`。
+当前环境使用 Linux、NVIDIA GPU、Python 3.12 和官方 Isaac Lab 3.0 的 `uv` 源码树。参见 [SDK 官方安装指南](https://isaac-sim.github.io/IsaacLab/release/3.0.0/source/setup/installation/index.html)。请把未修改的 `v3.0.0` 放到旁边的 `IsaacLab-3.0/`。不要改 Isaac Lab 源码；任务和算法只改 `robolab` 与 `rsl_rl`。
 
-仓库根目录的 `pyproject.toml` 依赖 `isaaclab-dev[ov,importers]`、可编辑的 `robo-newton`，以及本仓库的 `rsl-rl-lib`。把虚拟环境放到 data 盘后，在仓库根目录 `uv run` 即可，不必再设 `PYTHONPATH` 或在脚本里写死路径。
+仓库根目录的 `pyproject.toml` 依赖 `isaaclab-dev[ov,importers]`、可编辑的 `robolab`，以及本仓库的 `rsl-rl-lib`。把虚拟环境放到 data 盘后，在仓库根目录 `uv run` 即可，不必再设 `PYTHONPATH` 或在脚本里写死路径。
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -33,10 +33,10 @@ uv sync
 
 ## 统一数据集
 
-`robo_newton/robolab/data` 是 checkout 内的数据根目录，统一 NPZ 数据包和机器人资源都存放在这里。数据搜索顺序为 `--data_root`、`ROBO_TRAIN_DATA_ROOT`、本地 `robo_newton/robolab/data`。
+`robolab/robolab/data` 是 checkout 内的数据根目录，统一 NPZ 数据包和机器人资源都存放在这里。数据搜索顺序为 `--data_root`、`ROBO_TRAIN_DATA_ROOT`、本地 `robolab/robolab/data`。
 
 ```text
-robo_newton/robolab/data/
+robolab/robolab/data/
   robots/rp1/  RP1 URDF、MJCF、网格
   robots/rpo/    RPO URDF、MJCF、网格
   motions/
@@ -60,7 +60,7 @@ robo_newton/robolab/data/
 
 UFO/PUFO 直接按文件名排序读取 `motions/rp1_lafan/` 下的 NPZ，从每个文件获取关节和 link 名称、帧率及四元数约定。可用 `UFO_MOTION_DIR` 或训练参数 `--motion_dir` 指定其他目录；导出和 sim2sim 使用 `--motion-dir`。旧 manifest 路径参数仍可作为目录别名，但不再读取 JSON 清单。后缀同为 `.npz` 不代表四元数和关节排列兼容。
 
-请使用外部工具完成动作重定向，并在训练前准备符合上述规范的 NPZ 数据。历史重定向、CSV/PKL 处理和一次性迁移脚本已移除。训练运行时的数据校验与按名称映射仍由 [motion_npz.py](robo_newton/robolab/utils/motion_npz.py) 提供；该模块不会重新重定向、补全缺失轨迹或猜测来源数据的排列约定。
+请使用外部工具完成动作重定向，并在训练前准备符合上述规范的 NPZ 数据。历史重定向、CSV/PKL 处理和一次性迁移脚本已移除。训练运行时的数据校验与按名称映射仍由 [motion_npz.py](robolab/robolab/utils/motion_npz.py) 提供；该模块不会重新重定向、补全缺失轨迹或猜测来源数据的排列约定。
 
 当前精简后的本地数据集共 125 段动作，总计约 752 MiB：
 
@@ -71,17 +71,19 @@ UFO/PUFO 直接按文件名排序读取 `motions/rp1_lafan/` 下的 NPZ，从每
 | `rp1_upper_run_bounded` | 1 | 小于 0.1 MiB |
 | `rp1_lafan` | 55 | 743.5 MiB |
 
-这些文件应放在 `robo_newton/robolab/data/motions/`。运行时不需要原始动作、中间 PKL、数据集 JSON 清单或重复备份。机器人资产放在同级的 `robots/` 目录，其中物理配置和地形 JSON 仍然需要保留。
+这些文件应放在 `robolab/robolab/data/motions/`。运行时不需要原始动作、中间 PKL、数据集 JSON 清单或重复备份。机器人资产放在同级的 `robots/` 目录，其中物理配置和地形 JSON 仍然需要保留。
 
 动作数据不自动适用源码许可证。[Ubisoft LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) 使用 [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) 许可。重定向不会消除上游许可限制，发布修改后的动作数据前需确认再分发权利；其他目录中的 LAFAN 衍生片段同样需要确认。
 
 ## 训练
 
-在仓库根目录训练，入口是 `robo_newton/scripts/rsl_rl/train.py`。常用任务：`RP1-AMP`、`RP1-Parkour`、`RP1-SSR`、`RP1-UFO`、`RP1-PUFO`、`RPO-AMP`、`RPO-Parkour`。
+在仓库根目录训练，入口是 `robolab/scripts/rsl_rl/train.py`。常用任务：`RP1-AMP`、`RP1-AMP-Soft`、`RP1-Parkour`、`RP1-SSR`、`RP1-UFO`、`RP1-PUFO`、`RPO-AMP`、`RPO-Parkour`。
+
+`RP1-AMP-Soft` 合并了 Interaction 和 Mixed，沿用当前 Mixed 的共享 actor、指令环境全身判别器、柔顺环境下肢判别器。配置统一在 `rp1_amp_soft_env_cfg.py`，新日志写入 `rp1_amp_soft`。旧任务名保留为别名并保留原日志目录；当前 Mixed checkpoint 可以用 `RP1-AMP-Soft-Play --checkpoint /绝对路径/model_N.pt` 播放，续训同样支持绝对 checkpoint 路径。此次整理不改变观测顺序、网络或奖励参数，不迁移更早版本的观测格式。
 
 ```bash
 export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
-uv run python robo_newton/scripts/rsl_rl/train.py \
+uv run python robolab/scripts/rsl_rl/train.py \
   --task RP1-AMP --num_envs 1024 --device cuda:0 \
   --visualizer none --logger tensorboard physics=newton_mjwarp
 ```
@@ -91,7 +93,7 @@ uv run python robo_newton/scripts/rsl_rl/train.py \
 ```bash
 export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
 uv run python -m torch.distributed.run --standalone --nproc_per_node=8 \
-  robo_newton/scripts/rsl_rl/train.py --task RP1-PUFO \
+  robolab/scripts/rsl_rl/train.py --task RP1-PUFO \
   --num_envs 1024 --device cuda --distributed --visualizer none --logger tensorboard \
   physics=newton_mjwarp
 ```
@@ -106,25 +108,23 @@ RP1 UFO 与 PUFO 共用筛选后的 40 条 LAFAN 动作。UFO 仍是无视觉的
 
 ```bash
 export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
-uv run python robo_newton/scripts/rsl_rl/export_amp_deploy.py --checkpoint /path/to/run/model_N.pt
-uv run python robo_newton/scripts/rsl_rl/export_parkour_deploy.py --checkpoint /path/to/run/model_N.pt
-uv run python robo_newton/scripts/rsl_rl/export_pufo_deploy.py \
+uv run python robolab/scripts/rsl_rl/export_amp_deploy.py --checkpoint /path/to/run/model_N.pt
+uv run python robolab/scripts/rsl_rl/export_parkour_deploy.py --checkpoint /path/to/run/model_N.pt
+uv run python robolab/scripts/rsl_rl/export_pufo_deploy.py \
   --load_run /path/to/pufo_run --checkpoint model_N.pt --motion dance1_subject2
 ```
 
-PUFO 导出还需要对应训练配置和动作数据。MuJoCo 验证脚本位于 `robo_newton/scripts/mujoco/`，应选择与策略任务及部署接口匹配的入口。
+PUFO 导出还需要对应训练配置和动作数据。
 
-PUFO sim2sim 资源位于 `robo_newton/robolab/data/robots/rp1/mjcf/`：`rp1_simple_terrain/` 保存地形，`robot_24dof_newton_physics.json` 保存非随机化模型编译后的碰撞、接触和求解器参数。公共工具 `robolab.utils.mujoco_physics` 不加载 checkpoint；电机限幅由 URDF 和传入的执行器配置解析。其他任务可使用同一工具加载自己的物理资产，不会自动套用 PUFO 参数。`sim2sim_rp1_pufo.py --physics-asset PATH` 可选择其他资产。可从非随机化、单机器人加地面的 Newton 模型执行 `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` 重新生成。
+MJCF 与编译物理资源位于 `robolab/robolab/data/robots/rp1/mjcf/`：`rp1_simple_terrain/` 保存地形，`robot_24dof_newton_physics.json` 保存非随机化模型编译后的碰撞、接触和求解器参数。公共工具 `robolab.utils.mujoco_physics` 不加载 checkpoint；电机限幅由 URDF 和传入的执行器配置解析。其他任务可使用同一工具加载自己的物理资产，不会自动套用 PUFO 参数。可从非随机化、单机器人加地面的 Newton 模型执行 `scripts/tools/export_mujoco_physics.py --model MODEL.mjb --urdf ROBOT.urdf --output ASSET.json --physics-dt SECONDS` 重新生成物理 JSON。
 
-地形资产 `rp1_simple_terrain/rp1_simple_terrain.xml` 与 `rp1_simple_terrain/meta.json` 是预生成的，旧的服务器专用地形导出脚本已移除。地形元数据提供重置位置和地形描述，`robot_24dof_newton_physics.json` 提供 Newton 的碰撞、接触和求解器参数；两个 JSON 都是 PUFO sim2sim 所需文件，使用缩进格式保存。上述物理导出工具只生成物理 JSON，不生成地形。使用时需从机器人资源包安装两个地形文件；运行 sim2sim 不依赖外部 UFO 代码目录。
+地形资产 `rp1_simple_terrain/rp1_simple_terrain.xml` 与 `rp1_simple_terrain/meta.json` 是预生成的，旧的服务器专用地形导出脚本已移除。地形元数据提供重置位置和地形描述，`robot_24dof_newton_physics.json` 提供 Newton 的碰撞、接触和求解器参数；两个 JSON 使用缩进格式保存。上述物理导出工具只生成物理 JSON，不生成地形。使用时需从机器人资源包安装两个地形文件；不依赖外部 UFO 代码目录。
 
-Isaac Lab 3 中，`effort_limit_sim` 是仿真关节限幅的旧字段，并不直接等同于显式执行器内部的扭矩限幅；需要内部限幅时应明确配置 `actuator_effort_limit`。sim2sim 保留旧配置的实际解析语义，本次资源整理不修改训练电机参数。
-
-RP1 的 AMP、Parkour、PUFO 三个 sim2sim 入口统一使用 `robolab.utils.mujoco_actuators.RoboPartyMujocoActuator`，实际实例化训练端的 `RoboPartyActuator`，复用 PD、扭矩随转速衰减及制动逻辑，脚本和物理资产不再写死电机扭矩。AMP/PUFO 使用训练运行保存的机器人配置；Parkour 可用 `--env-config params/env.yaml`，否则读取 `--checkpoint` 所属运行的配置，均未指定时使用当前 `roboparty.py` 默认值。标称评估关闭执行器随机延迟和随机前馈扭矩。
+Isaac Lab 3 中，`effort_limit_sim` 是仿真关节限幅的旧字段，并不直接等同于显式执行器内部的扭矩限幅；需要内部限幅时应明确配置 `actuator_effort_limit`。本次资源整理不修改训练电机参数。
 
 ## 脚本用途
 
-下表路径相对于 `robo_newton/scripts/`。独立诊断工具没有被训练代码导入，不代表没有用途。这里说明用途和维护建议，不代表所有旧 GUI 入口都已在当前 Newton 环境验证通过。
+下表路径相对于 `robolab/scripts/`。独立诊断工具没有被训练代码导入，不代表没有用途。这里说明用途和维护建议，不代表所有旧 GUI 入口都已在当前 Newton 环境验证通过。
 
 | 入口 | 用途与维护建议 |
 | --- | --- |
@@ -134,19 +134,12 @@ RP1 的 AMP、Parkour、PUFO 三个 sim2sim 入口统一使用 `robolab.utils.mu
 | `tools/list_envs.py` | 列出本仓库注册的任务 ID，不启动 Kit。 |
 | `tools/visualize_robot.py`、`tools/visualize_terrain.py`、`tools/visualize_depth_domain_randomization.py` | 检查机器人关节/身体顺序、地形和相机噪声，作为可选诊断工具保留；目前使用 AppLauncher 场景。 |
 | `bind_gpu_local_rank.py` | 可选 torchrun 包装器，将各进程绑定到对应 GPU 附近的 CPU；依赖显式 `CUDA_VISIBLE_DEVICES` 和 Linux NUMA 拓扑。 |
-| `mujoco/sim2sim_*.py` | 各任务部署验证入口，观测和动作接口不同。保留与策略匹配的版本，旧 RPO 变体需单独核对兼容性后再合并。 |
 
-动作加载和 RP1 sim2sim 的 CPU 回归测试：
-
-```bash
-MUJOCO_GL=egl python -m pytest -q robo_newton/robolab/utils/tests
-```
-
-sim2sim 集成测试需要本地机器人资产，缺少动作数据时部分检查会跳过。GPU 环境冒烟测试与上述单元测试分开运行：
+GPU 环境冒烟测试：
 
 ```bash
 export UV_PROJECT_ENVIRONMENT=/data/zym/uv/roboparty/.venv
-uv run python robo_newton/scripts/smoke_newton_env.py \
+uv run python robolab/scripts/smoke_newton_env.py \
   --task RP1-AMP --num_envs 2 --steps 4 --device cuda:0
 ```
 

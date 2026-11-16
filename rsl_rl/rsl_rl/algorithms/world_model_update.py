@@ -3,8 +3,11 @@
 import torch
 from torch import nn
 
+from .world_model_memory import memory_phase
 
-def add_imagination_gradients(model, agent):
+
+@memory_phase("imagination")
+def add_imagination_gradients(model, agent, *, discriminator_scale=1.0):
     """Accumulate trajectories, then reduce/clip once and add to the UFO gradient."""
     from .world_model_imagination import fb_imagination_loss
     from .world_model_sequence import fb_sequence_imagination_loss
@@ -21,6 +24,14 @@ def add_imagination_gradients(model, agent):
         return metrics
 
     size = batch["state"].shape[0]
+    device = next(agent._actor.parameters()).device
+    use_discriminator = getattr(cfg, "discriminator_reward", False)
+    use_scaled_reward = use_discriminator or getattr(cfg, "tracking_coef", 0) > 0
+    if use_scaled_reward:
+        discriminator_scale = torch.as_tensor(discriminator_scale, device=device).detach().float().clone()
+        if torch.distributed.is_initialized():
+            torch.distributed.all_reduce(discriminator_scale)
+            discriminator_scale.div_(torch.distributed.get_world_size())
     parameters = tuple(parameter for parameter in agent._actor.parameters() if parameter.requires_grad)
     original = tuple(parameter.grad for parameter in parameters)
     accumulated = [torch.zeros_like(parameter) for parameter in parameters]
@@ -29,11 +40,13 @@ def add_imagination_gradients(model, agent):
     if sequence:
         model.sequence_value_optimizer.zero_grad(set_to_none=True)
     metrics = {}
-    totals = batch["state"].new_zeros(5)
+    totals = torch.zeros(5, dtype=batch["state"].dtype, device=device)
     for start in range(0, size, cfg.imagination_microbatch_size):
         end = min(start + cfg.imagination_microbatch_size, size)
-        chunk = {key: value[start:end] for key, value in batch.items()}
+        chunk = {key: value[start:end].to(device) for key, value in batch.items()}
         kwargs = dict(total_batch_size=size, actor_weight=weight, update_counters=False)
+        if use_scaled_reward:
+            kwargs["discriminator_scale"] = discriminator_scale
         if sequence:
             loss, value_loss, chunk_metrics = fb_sequence_imagination_loss(model, agent, chunk, **kwargs)
         else:

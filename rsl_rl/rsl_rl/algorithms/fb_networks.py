@@ -325,6 +325,7 @@ class ResidualActor(nn.Module):
         seq = [ResidualBlock(hidden_dim, activation, layer_norm) for _ in range(hidden_layers)]
         seq += [Block(hidden_dim, action_dim, None, layer_norm)]
         self.policy = nn.Sequential(*seq)
+        self.fp32_output = False
 
     def forward(self, obs, z, std, *, detach_velocity=True):
         velocity_estimate = None
@@ -336,7 +337,13 @@ class ResidualActor(nn.Module):
         z_embedding = self.embed_z(torch.cat([policy_obs, z], dim=-1))
         s_embedding = self.embed_s(policy_obs)
         embedding = torch.cat([s_embedding, z_embedding], dim=-1)
-        mu = torch.tanh(self.policy(embedding))
+        if self.fp32_output:
+            for index in range(len(self.policy) - 1):
+                embedding = self.policy[index](embedding)
+            with torch.autocast(embedding.device.type, enabled=False):
+                mu = torch.tanh(self.policy[-1](embedding.float()))
+        else:
+            mu = torch.tanh(self.policy(embedding))
         std = torch.ones_like(mu) * std
         dist = TruncatedNormal(mu, std)
         if velocity_estimate is not None:

@@ -12,7 +12,7 @@ def save_replay(buffer, directory, *, rank, world_size, env_iterations, chunk_by
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     metadata = {
-        "version": 3 if buffer.transition_outcomes else (2 if buffer.compact_depth_history else 1), "rank": rank, "world_size": world_size,
+        "version": 4 if buffer.actor_history is not None else (3 if buffer.transition_outcomes else (2 if buffer.compact_depth_history else 1)), "rank": rank, "world_size": world_size,
         "env_iterations": env_iterations, "capacity": buffer.transition_capacity,
         "num_envs": buffer.num_envs, "idx": buffer._idx, "is_full": buffer._is_full,
         "length": len(buffer), "output_key_t": buffer.output_key_t,
@@ -22,6 +22,8 @@ def save_replay(buffer, directory, *, rank, world_size, env_iterations, chunk_by
         "depth_new_segment": buffer._depth_new_segment,
         "transition_outcomes": buffer.transition_outcomes,
         "terminal_chunks": [],
+        "actor_history_spec": list(buffer.actor_history.spec) if buffer.actor_history is not None else [],
+        "actor_history_new_segment": buffer.actor_history.new_segment if buffer.actor_history is not None else True,
     }
 
     def write(tree, keys=()):
@@ -43,6 +45,8 @@ def save_replay(buffer, directory, *, rank, world_size, env_iterations, chunk_by
 
     try:
         write(buffer.storage or {})
+        if buffer.actor_history is not None:
+            torch.save(buffer.actor_history.prefix, directory / "actor_history_prefix.pt")
         pending, pending_bytes = {}, 0
         def tensor_bytes(tree):
             if isinstance(tree, dict):
@@ -70,7 +74,7 @@ def load_replay(buffer, directory, *, rank, world_size, env_iterations):
     directory = Path(directory)
     metadata = json.loads((directory / "manifest.json").read_text())
     expected = {
-        "version": 3 if buffer.transition_outcomes else (2 if buffer.compact_depth_history else 1),
+        "version": 4 if buffer.actor_history is not None else (3 if buffer.transition_outcomes else (2 if buffer.compact_depth_history else 1)),
         "rank": rank, "world_size": world_size, "env_iterations": env_iterations,
         "capacity": buffer.transition_capacity, "num_envs": buffer.num_envs,
         "output_key_t": buffer.output_key_t, "output_key_tp1": buffer.output_key_tp1,
@@ -83,6 +87,8 @@ def load_replay(buffer, directory, *, rank, world_size, env_iterations):
         ("compact_depth_history", buffer.compact_depth_history, False),
         ("depth_history_offsets", list(buffer.depth_history_offsets), []),
         ("transition_outcomes", buffer.transition_outcomes, False),
+        ("actor_history_spec", [list(item) for item in buffer.actor_history.spec]
+         if buffer.actor_history is not None else [], []),
     ):
         if metadata.get(key, legacy) != value:
             raise ValueError(f"Replay checkpoint mismatch for {key}: incompatible storage")
@@ -125,6 +131,31 @@ def load_replay(buffer, directory, *, rank, world_size, env_iterations):
                 or starts is None or starts.shape != (buffer.capacity, buffer.num_envs, 1)
                 or starts.dtype != torch.bool):
             raise ValueError("Invalid compact depth replay tensors")
+    actor_history_prefix = {}
+    actor_history_new_segment = metadata.get("actor_history_new_segment", True)
+    terminal_reference = dict(storage.get("observation", {}))
+    if buffer.actor_history is not None:
+        history = buffer.actor_history
+        if type(actor_history_new_segment) is not bool:
+            raise ValueError("Invalid actor history segment marker")
+        actor_history_prefix = torch.load(directory / "actor_history_prefix.pt",
+                                         map_location=buffer.device, weights_only=True)
+        if length:
+            starts = storage.get("actor_history_start")
+            if (starts is None or starts.shape != (buffer.capacity, buffer.num_envs, 1)
+                    or starts.dtype != torch.bool or "history_actor" in terminal_reference):
+                raise ValueError("Invalid compact actor history tensors")
+            expected_keys = {*history.keys, "actor_history_start"}
+            if set(actor_history_prefix) != expected_keys:
+                raise ValueError("Invalid actor history prefix fields")
+            for key, value in actor_history_prefix.items():
+                reference = starts if key == "actor_history_start" else terminal_reference[key]
+                if value.shape != (history.length, *reference.shape[1:]) or value.dtype != reference.dtype:
+                    raise ValueError("Invalid actor history prefix shape/dtype")
+            terminal_reference["history_actor"] = torch.empty(
+                (0, buffer.num_envs, history.width), dtype=terminal_reference[history.keys[0]].dtype)
+        elif actor_history_prefix:
+            raise ValueError("Empty replay cannot have an actor history prefix")
     terminal_observations = {}
     for filename in metadata.get("terminal_chunks", []):
         if not isinstance(filename, str) or os.path.basename(filename) != filename:
@@ -148,7 +179,7 @@ def load_replay(buffer, directory, *, rank, world_size, env_iterations):
                             expected_shape = (ids.numel(), len(buffer.depth_history_offsets), *reference[key].shape[2:])
                         if value.shape != expected_shape or value.dtype != reference[key].dtype:
                             raise ValueError("Terminal replay observation shape/dtype mismatch")
-            validate_observation(terminal["observation"], storage["observation"])
+            validate_observation(terminal["observation"], terminal_reference)
             terminal_observations[time] = terminal
     if length and buffer.transition_outcomes:
         valid = storage.get("terminal_valid")
@@ -163,3 +194,6 @@ def load_replay(buffer, directory, *, rank, world_size, env_iterations):
     buffer.storage = storage or None
     buffer._idx, buffer._is_full, buffer._recompute = idx, full, True
     buffer._depth_new_segment = new_segment
+    if buffer.actor_history is not None:
+        buffer.actor_history.prefix = actor_history_prefix
+        buffer.actor_history.new_segment = actor_history_new_segment

@@ -19,6 +19,22 @@ from rsl_rl.modules.ssr_estimation import (
 from rsl_rl.utils import resolve_nn_activation
 
 
+
+def _infer_flat_term_dims(flat_dim: int, history_length: int) -> list[int]:
+    """Infer per-term flattened dims for concatenated parkour policy vectors."""
+    if history_length <= 0 or flat_dim % history_length != 0:
+        return [flat_dim]
+    per_frame = flat_dim // history_length
+    # policy terms: ang_vel(3), gravity(3), cmd(3), joint_pos/vel/actions (J each)
+    if per_frame >= 9 and (per_frame - 9) % 3 == 0:
+        joint_dim = (per_frame - 9) // 3
+        term_dims = [3, 3, 3, joint_dim, joint_dim, joint_dim]
+        flat_dims = [dim * history_length for dim in term_dims]
+        if sum(flat_dims) == flat_dim:
+            return flat_dims
+    return [flat_dim]
+
+
 class DepthEncoder(nn.Module):
     """The convolution and MLP head used by the demo Parkour policies."""
 
@@ -190,6 +206,7 @@ class ParkourModel(MLPModel):
         self.gate_foothold_estimation_on_predictor_ready = gate_foothold_estimation_on_predictor_ready
         self.encoder_onnx_filename = encoder_onnx_filename
         self.actor_onnx_filename = actor_onnx_filename
+        self.proprio_history_length = proprio_history_length
         super().__init__(
             obs, obs_groups, obs_set, output_dim, hidden_dims, activation, obs_normalization, distribution_cfg
         )
@@ -198,11 +215,22 @@ class ParkourModel(MLPModel):
         else:
             self.depth_encoder = None
         if enable_ssr_estimation:
+            policy_obs = self._policy_obs_for_estimation(obs)
+            critic_obs = obs.get("critic")
+            skip_names = [] if self._flat_layout else [self.image_name]
             dims = resolve_estimation_dims(
-                obs[obs_groups["actor"][0]], obs[obs_groups["critic"][0]],
-                [self.image_name], self.image_dim, proprio_history_length,
+                policy_obs,
+                critic_obs,
+                skip_names,
+                self.image_dim,
+                proprio_history_length,
                 foot_height_actor_dim=estimation_foot_height_actor_dim,
+                proprio_term_dims=None if self._flat_layout else None,
+                flat_dims=self.flat_dims if self._flat_layout else None,
             )
+            if dims.foot_height_dim == 0:
+                enable_actor_foot_height = False
+                self.enable_actor_foot_height = False
             self.ssr_estimation = SSREstimationModule(
                 dims, estimation_estimator_hidden_dims, estimation_decoder_hidden_dims,
                 activation, enable_actor_foothold, enable_actor_foot_height,
@@ -210,11 +238,14 @@ class ParkourModel(MLPModel):
         else:
             self.ssr_estimation = None
         if enable_velocity_estimation and not enable_ssr_estimation:
+            policy_obs = self._policy_obs_for_estimation(obs)
+            skip_names = [] if self._flat_layout else [self.image_name]
             dims = resolve_velocity_estimation_dims(
-                obs[obs_groups["actor"][0]],
-                [self.image_name],
+                policy_obs,
+                skip_names,
                 self.image_dim,
                 velocity_estimation_history_length,
+                flat_dims=self.flat_dims if self._flat_layout else None,
             )
             self.velocity_estimator = VelocityEstimationModule(
                 dims, velocity_estimation_estimator_hidden_dims, activation
@@ -229,21 +260,72 @@ class ParkourModel(MLPModel):
 
     def _get_obs_dim(self, obs: TensorDict, obs_groups: dict[str, list[str]], obs_set: str):
         group_names = obs_groups[obs_set]
-        if len(group_names) != 1:
-            raise ValueError("ParkourModel expects one structured observation group")
-        group = obs[group_names[0]]
-        self.flat_names = [name for name, value in group.items() if value.ndim == 2]
-        self.flat_dims = [group[name].shape[-1] for name in self.flat_names]
-        images = [name for name, value in group.items() if value.ndim == 4]
-        if len(images) > 1:
-            raise ValueError("ParkourModel supports one image observation")
-        if images and self.encoder_cfg is None:
-            raise ValueError("Depth encoder configuration is required for image observations")
-        self.image_name = images[0] if images else None
-        self.image_shape = tuple(group[self.image_name].shape[1:]) if images else None
-        self.image_dim = self.encoder_cfg["output_size"] if images else 0
-        flat_dim = sum(group[name].shape[-1] for name in self.flat_names)
+        first = obs[group_names[0]]
+        # Legacy nested TensorDict group (depth_image inside policy).
+        if not torch.is_tensor(first):
+            if len(group_names) != 1:
+                raise ValueError("Nested ParkourModel expects one structured observation group")
+            group = first
+            self._flat_layout = False
+            self.proprio_groups = [group_names[0]]
+            self.depth_group = None
+            self.flat_names = [name for name, value in group.items() if value.ndim == 2]
+            self.flat_dims = [group[name].shape[-1] for name in self.flat_names]
+            images = [name for name, value in group.items() if value.ndim == 4]
+            if len(images) > 1:
+                raise ValueError("ParkourModel supports one image observation")
+            if images and self.encoder_cfg is None:
+                raise ValueError("Depth encoder configuration is required for image observations")
+            self.image_name = images[0] if images else None
+            self.image_shape = tuple(group[self.image_name].shape[1:]) if images else None
+            self.image_dim = self.encoder_cfg["output_size"] if images else 0
+            return group_names, sum(self.flat_dims)
+
+        # Official-style flat groups: actor=["policy","depth"].
+        self._flat_layout = True
+        self.flat_names = []
+        self.proprio_groups = []
+        self.depth_group = None
+        self.image_name = None
+        self.image_shape = None
+        self.image_dim = 0
+        flat_dim = 0
+        for name in group_names:
+            value = obs[name]
+            if value.ndim == 4:
+                if self.depth_group is not None:
+                    raise ValueError("ParkourModel supports one image observation")
+                if self.encoder_cfg is None:
+                    raise ValueError("Depth encoder configuration is required for image observations")
+                self.depth_group = name
+                self.image_name = name
+                self.image_shape = tuple(value.shape[1:])
+                self.image_dim = self.encoder_cfg["output_size"]
+            elif value.ndim == 2:
+                self.proprio_groups.append(name)
+                flat_dim += value.shape[-1]
+            else:
+                raise ValueError(f"Invalid observation shape for {name}: {tuple(value.shape)}")
+        hist = int(getattr(self, "proprio_history_length", None) or getattr(self, "history_length", 8) or 8)
+        self.flat_dims = _infer_flat_term_dims(flat_dim, hist)
         return group_names, flat_dim
+
+    def _policy_obs_for_estimation(self, obs: TensorDict):
+        if self._flat_layout:
+            return torch.cat([obs[name] for name in self.proprio_groups], dim=-1)
+        return obs[self.obs_groups[0]]
+
+    def _read_proprio_and_depth(self, obs: TensorDict):
+        if self._flat_layout:
+            proprio = torch.cat([obs[name] for name in self.proprio_groups], dim=-1)
+            proprio = self.obs_normalizer(proprio)
+            depth = None if self.depth_encoder is None else self.depth_encoder(obs[self.depth_group])
+            return proprio, depth
+        group = obs[self.obs_groups[0]]
+        proprio = torch.cat([group[name] for name in self.flat_names], dim=-1)
+        proprio = self.obs_normalizer(proprio)
+        depth = None if self.depth_encoder is None else self.depth_encoder(group[self.image_name])
+        return proprio, depth
 
     def _get_latent_dim(self) -> int:
         if self.enable_ssr_estimation:
@@ -255,12 +337,9 @@ class ParkourModel(MLPModel):
         return self.obs_dim + self.image_dim + (3 if self.enable_velocity_estimation else 0)
 
     def get_latent(self, obs: TensorDict, masks=None, hidden_state=None) -> torch.Tensor:
-        group = obs[self.obs_groups[0]]
-        proprio = torch.cat([group[name] for name in self.flat_names], dim=-1)
-        proprio = self.obs_normalizer(proprio)
-        if self.depth_encoder is None:
+        proprio, depth = self._read_proprio_and_depth(obs)
+        if depth is None:
             return proprio
-        depth = self.depth_encoder(group[self.image_name])
         if self.ssr_estimation is not None:
             split_terms = list(torch.split(proprio, self.flat_dims, dim=-1))
             features, _, _ = self.ssr_estimation(
@@ -307,8 +386,11 @@ class ParkourModel(MLPModel):
 
     def update_normalization(self, obs: TensorDict) -> None:
         if self.obs_normalization:
-            group = obs[self.obs_groups[0]]
-            proprio = torch.cat([group[name] for name in self.flat_names], dim=-1)
+            if self._flat_layout:
+                proprio = torch.cat([obs[name] for name in self.proprio_groups], dim=-1)
+            else:
+                group = obs[self.obs_groups[0]]
+                proprio = torch.cat([group[name] for name in self.flat_names], dim=-1)
             self.obs_normalizer.update(proprio)
 
     def export_as_onnx(self, obs: TensorDict, filedir: str, opset_version: int = 18) -> None:
@@ -317,15 +399,19 @@ class ParkourModel(MLPModel):
             raise RuntimeError("Parkour ONNX export requires a depth observation")
         self.eval()
         os.makedirs(filedir, exist_ok=True)
-        group = obs[self.obs_groups[0]]
-        depth_uint8 = group[self.image_name]
+        if self._flat_layout:
+            depth_uint8 = obs[self.depth_group]
+            proprio = torch.cat([obs[name] for name in self.proprio_groups], dim=-1)
+        else:
+            group = obs[self.obs_groups[0]]
+            depth_uint8 = group[self.image_name]
+            proprio = torch.cat([group[name] for name in self.flat_names], dim=-1)
         if depth_uint8.dtype != torch.uint8:
             raise TypeError(f"ONNX export expects uint8 training depth, got {depth_uint8.dtype}")
         depth_normalized = depth_uint8.float().div(255.0)
         encoder = NormalizedDepthEncoderOnnxExporter(self.depth_encoder).eval()
         with torch.no_grad():
             depth_latent = self.depth_encoder(depth_uint8)
-            proprio = torch.cat([group[name] for name in self.flat_names], dim=-1)
             actor_input = torch.cat((proprio, depth_latent), dim=-1)
         actor = ParkourActorOnnxExporter(self).eval()
         encoder_path = os.path.join(filedir, self.encoder_onnx_filename)

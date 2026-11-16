@@ -43,8 +43,13 @@ class PufoRolloutContext:
 class PufoAgent(FbCprAuxAgent):
     def __init__(self, obs_dims, action_dim, cfg, device="cuda", *, inference_only=False):
         super().__init__(obs_dims, action_dim, cfg, device=device, inference_only=inference_only)
+        self.velocity_dim = obs_dims["velocity_command"] - 1
+        if self.velocity_dim not in (2, 3):
+            raise ValueError("Velocity command must contain XY or XYZ followed by validity")
+        self.reference_velocity_key = "reference_velocity_world" if self.velocity_dim == 3 else "reference_velocity_world_xy"
         if inference_only:
             return
+        self._context_graph = None
         self.heading_critic_enabled = cfg.heading_critic_enabled
         self.velocity_critic_enabled = cfg.velocity_critic_enabled
         if not (self.heading_critic_enabled or self.velocity_critic_enabled):
@@ -61,7 +66,7 @@ class PufoAgent(FbCprAuxAgent):
             ).to(device)
             self._target_context_critic_shared = copy.deepcopy(self._context_critic_shared)
             self.context_critic_optimizer = torch.optim.Adam(
-                self._context_critic_shared.parameters(), lr=float(cfg.lr_heading_critic)
+                self._context_critic_shared.parameters(), lr=float(cfg.lr_heading_critic), fused=self.use_fused_adam
             )
         elif self.heading_critic_enabled:
             self._heading_critic = ResidualForwardMap(
@@ -74,7 +79,7 @@ class PufoAgent(FbCprAuxAgent):
             ).to(device)
             self._target_heading_critic = copy.deepcopy(self._heading_critic).to(device)
             self.heading_critic_optimizer = torch.optim.Adam(
-                self._heading_critic.parameters(), lr=float(cfg.lr_heading_critic)
+                self._heading_critic.parameters(), lr=float(cfg.lr_heading_critic), fused=self.use_fused_adam
             )
         if self.velocity_critic_enabled and not self.shared_context_value_net:
             self._velocity_critic = ResidualForwardMap(
@@ -87,8 +92,16 @@ class PufoAgent(FbCprAuxAgent):
             ).to(device)
             self._target_velocity_critic = copy.deepcopy(self._velocity_critic).to(device)
             self.velocity_critic_optimizer = torch.optim.Adam(
-                self._velocity_critic.parameters(), lr=float(cfg.lr_velocity_critic)
+                self._velocity_critic.parameters(), lr=float(cfg.lr_velocity_critic), fused=self.use_fused_adam
             )
+
+        mode = getattr(cfg, "torch_compile_mode", None)
+        if mode is not None and getattr(cfg, "compile_context_critics", False):
+            modules = [getattr(self, name) for name in (
+                "_context_critic_shared", "_target_context_critic_shared",
+                "_heading_critic", "_target_heading_critic", "_velocity_critic", "_target_velocity_critic",
+            ) if hasattr(self, name)]
+            self._compile_modules(modules, mode)
 
     @torch.no_grad()
     def _sample_tracking_context(self, replay_buffers, batch_dim: int, length: int):
@@ -110,7 +123,7 @@ class PufoAgent(FbCprAuxAgent):
             for step in range(length):
                 z[:, step] = z[:, step : min(step + self.cfg.seq_length, length)].mean(dim=1)
         heading = batch["heading_forward_xy"].to(self.device).view(batch_dim, length, 2)
-        velocity = batch["reference_velocity_world_xy"].to(self.device).view(batch_dim, length, 2)
+        velocity = batch[self.reference_velocity_key].to(self.device).view(batch_dim, length, self.velocity_dim)
         velocity_valid = batch["reference_velocity_valid"].to(self.device).view(batch_dim, length, 1)
         result = self.project_z(z), heading, velocity, velocity_valid.bool()
         return (*result, lengths) if variable else result
@@ -142,7 +155,7 @@ class PufoAgent(FbCprAuxAgent):
             state = PufoRolloutContext(
                 z=self.sample_z(num_envs),
                 heading_target_world=current_heading_xy.clone(),
-                velocity_target_world=torch.zeros(num_envs, 2, device=self.device),
+                velocity_target_world=torch.zeros(num_envs, self.velocity_dim, device=self.device),
                 heading_valid=torch.zeros(num_envs, 1, dtype=torch.bool, device=self.device),
                 velocity_valid=torch.zeros(num_envs, 1, dtype=torch.bool, device=self.device),
                 context_id=torch.zeros(num_envs, 1, dtype=torch.long, device=self.device),
@@ -150,7 +163,7 @@ class PufoAgent(FbCprAuxAgent):
                 expert_env_ids=expert_env_ids,
                 tracking_z=torch.empty(num_expert, length, self.z_dim, device=self.device),
                 tracking_heading_world=torch.empty(num_expert, length, 2, device=self.device),
-                tracking_velocity_world=torch.empty(num_expert, length, 2, device=self.device),
+                tracking_velocity_world=torch.empty(num_expert, length, self.velocity_dim, device=self.device),
                 tracking_velocity_valid=torch.empty(num_expert, length, 1, dtype=torch.bool, device=self.device),
                 tracking_lengths=torch.full((num_expert,), length, device=self.device, dtype=torch.long)
                     if variable else None,
@@ -276,7 +289,7 @@ class PufoAgent(FbCprAuxAgent):
             next_velocity_target, next_heading_xy, next_velocity_valid
         )
         velocity_error = torch.linalg.vector_norm(
-            (actual_velocity_world_xy - state.velocity_target_world)
+            (actual_velocity_world_xy[:, :2] - state.velocity_target_world[:, :2])
             / float(self.cfg.velocity_error_scale_mps),
             dim=-1,
             keepdim=True,
@@ -394,8 +407,8 @@ class PufoAgent(FbCprAuxAgent):
         sampled_heading = heading_observation(current_heading, current_heading, selected)
         sampled_next_heading = heading_observation(next_heading, target_next, selected)
 
-        expert_velocity = expert_batch["reference_velocity_world_xy"].to(self.device)[expert_indices]
-        expert_next_velocity = expert_batch["next"]["reference_velocity_world_xy"].to(self.device)[expert_indices]
+        expert_velocity = expert_batch[self.reference_velocity_key].to(self.device)[expert_indices]
+        expert_next_velocity = expert_batch["next"][self.reference_velocity_key].to(self.device)[expert_indices]
         velocity_valid = selected & expert_batch["reference_velocity_valid"].to(self.device)[expert_indices].bool()
         next_velocity_valid = (
             selected
@@ -466,6 +479,32 @@ class PufoAgent(FbCprAuxAgent):
             velocity_valid = velocity_valid.to(self.device).reshape(-1).bool()
         return heading.unsqueeze(-1), velocity.unsqueeze(-1), heading_valid, velocity_valid
 
+    def _shared_context_loss(
+        self, obs, next_obs, action, z, next_z, discount, velocity_discount,
+        heading_reward, velocity_reward, heading_valid, velocity_valid, target_actions,
+    ):
+        with torch.no_grad():
+            next_heading = self._target_context_critic_shared(next_obs, next_z, target_actions[0])[0].float()
+            next_velocity = self._target_context_critic_shared(next_obs, next_z, target_actions[1])[1].float()
+            heading_v = self._targets_uncertainty(next_heading, float(self.cfg.heading_critic_pessimism_penalty))[2]
+            velocity_v = self._targets_uncertainty(next_velocity, float(self.cfg.velocity_critic_pessimism_penalty))[2]
+            heading_target = heading_reward + discount.unsqueeze(-1) * heading_v
+            velocity_target = velocity_reward + velocity_discount.unsqueeze(-1) * velocity_v
+        heading_qs, velocity_qs = self._context_critic_shared(obs, z, action)
+        heading_loss, heading_value, heading_target_value = self._context_critic_loss(
+            heading_qs.float(), heading_target, heading_valid
+        )
+        velocity_loss, velocity_value, velocity_target_value = self._context_critic_loss(
+            velocity_qs.float(), velocity_target, velocity_valid
+        )
+        metrics = dict(
+            heading_critic_loss=heading_loss.detach(), heading_Q=heading_value,
+            heading_target_Q=heading_target_value, velocity_critic_loss=velocity_loss.detach(),
+            velocity_Q=velocity_value, velocity_target_Q=velocity_target_value,
+        )
+        return heading_loss + velocity_loss, metrics
+
+    @torch.profiler.record_function("fbcpr/context_critics")
     def _update_context_critics(
         self,
         *,
@@ -485,32 +524,48 @@ class PufoAgent(FbCprAuxAgent):
         heading_reward, velocity_reward, _, _ = self._tracking_batch(train_batch)
         target_actions = self._sample_target_actions(next_actor_obs, next_z, count=2)
         if self.shared_context_value_net:
-            velocity_discount = discount * (train_batch["aux_rewards"]["velocity_next"].to(self.device)[:, 2] > 0)
-            with torch.no_grad():
-                next_heading = self._target_context_critic_shared(next_obs, next_z, target_actions[0])[0].float()
-                next_velocity = self._target_context_critic_shared(next_obs, next_z, target_actions[1])[1].float()
-                heading_v = self._targets_uncertainty(next_heading, float(self.cfg.heading_critic_pessimism_penalty))[2]
-                velocity_v = self._targets_uncertainty(next_velocity, float(self.cfg.velocity_critic_pessimism_penalty))[2]
-                heading_target = heading_reward + discount.unsqueeze(-1) * heading_v
-                velocity_target = velocity_reward + velocity_discount.unsqueeze(-1) * velocity_v
-            heading_qs, velocity_qs = self._context_critic_shared(obs, z, action)
-            heading_loss, heading_value, heading_target_value = self._context_critic_loss(
-                heading_qs.float(), heading_target, heading_valid
-            )
-            velocity_loss, velocity_value, velocity_target_value = self._context_critic_loss(
-                velocity_qs.float(), velocity_target, velocity_valid
+            velocity_discount = discount * (train_batch["aux_rewards"]["velocity_next"].to(self.device)[:, -1] > 0)
+            inputs = dict(
+                obs=obs,
+                next_obs=next_obs,
+                action=action,
+                z=z,
+                next_z=next_z,
+                discount=discount,
+                velocity_discount=velocity_discount,
+                heading_reward=heading_reward,
+                velocity_reward=velocity_reward,
+                heading_valid=heading_valid,
+                velocity_valid=velocity_valid,
+                target_actions=target_actions,
             )
             self.context_critic_optimizer.zero_grad(set_to_none=True)
-            (heading_loss + velocity_loss).backward()
-            self._avg_grad(self._context_critic_shared.parameters())
+            parameters = tuple(self._context_critic_shared.parameters())
+            if getattr(self.cfg, "cuda_graph_critics", False) and obs.is_cuda:
+                from .world_model_mbfb_graph import WorldModelGraph
+
+                if self._context_graph is None or not self._context_graph.matches(inputs):
+                    # Graph warmup/capture must not overlap an outstanding collective.
+                    self._finish_shared_critic_update()
+
+                    def evaluate(**inputs):
+                        loss, diagnostics = self._shared_context_loss(**inputs)
+                        return diagnostics, torch.autograd.grad(loss, parameters)
+
+                    self._context_graph = None
+                    self._context_graph = WorldModelGraph(evaluate, inputs, obs.device)
+                diagnostics, gradients = self._context_graph.replay(inputs)
+                for parameter, gradient in zip(parameters, gradients):
+                    parameter.grad = gradient
+                metrics.update({key: value.clone() for key, value in diagnostics.items()})
+            else:
+                loss, diagnostics = self._shared_context_loss(**inputs)
+                loss.backward()
+                metrics.update(diagnostics)
+            self._avg_grad(parameters)
             self.context_critic_optimizer.step()
             soft_update_params(
                 self._context_critic_shared, self._target_context_critic_shared, float(self.cfg.critic_target_tau)
-            )
-            metrics.update(
-                heading_critic_loss=heading_loss.detach(), heading_Q=heading_value,
-                heading_target_Q=heading_target_value, velocity_critic_loss=velocity_loss.detach(),
-                velocity_Q=velocity_value, velocity_target_Q=velocity_target_value,
             )
         elif self.heading_critic_enabled:
             loss, value, target = self._context_critic_update(
@@ -531,7 +586,7 @@ class PufoAgent(FbCprAuxAgent):
             soft_update_params(self._heading_critic, self._target_heading_critic, float(self.cfg.critic_target_tau))
             metrics.update({"heading_critic_loss": loss, "heading_Q": value, "heading_target_Q": target})
         if self.velocity_critic_enabled and not self.shared_context_value_net:
-            velocity_discount = discount * (train_batch["aux_rewards"]["velocity_next"].to(self.device)[:, 2] > 0)
+            velocity_discount = discount * (train_batch["aux_rewards"]["velocity_next"].to(self.device)[:, -1] > 0)
             loss, value, target = self._context_critic_update(
                 self._velocity_critic,
                 self._target_velocity_critic,
@@ -575,6 +630,7 @@ class PufoAgent(FbCprAuxAgent):
         if self.shared_context_value_net != ("context_critic_shared" in state):
             raise ValueError("Checkpoint context critic layout does not match shared_context_value_net")
         super().load_state_dict(state)
+        self._context_graph = None
         if self.shared_context_value_net:
             self._context_critic_shared.load_state_dict(state["context_critic_shared"])
             self._target_context_critic_shared.load_state_dict(

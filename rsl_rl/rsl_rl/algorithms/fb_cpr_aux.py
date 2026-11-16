@@ -50,7 +50,8 @@ FULL_KEYS = OBS_ORDER
 def tree_to_device(x, device):
     if isinstance(x, dict):
         return {k: tree_to_device(v, device) for k, v in x.items()}
-    return x.to(device)
+    # Only H2D can be asynchronous: CPU callers must receive completed D2H data.
+    return x.to(device, non_blocking=x.device.type == "cpu" and torch.device(device).type == "cuda")
 
 
 class FbCprAuxAgent:
@@ -126,6 +127,9 @@ class FbCprAuxAgent:
                 velocity_dim=self.obs_dims.get("velocity_target_yaw", 3),
                 **model_kwargs(cfg.actor),
             )
+            wm_cfg = getattr(cfg, "world_model", {})
+            wm_cfg = wm_cfg if isinstance(wm_cfg, dict) else vars(wm_cfg)
+            self._actor.fp32_output = bool(wm_cfg.get("enabled", False) and wm_cfg.get("objective") == "mbfb")
         self._backward_map = BackwardMap(
             self.privileged_obs_dim,
             z_dim,
@@ -264,6 +268,11 @@ class FbCprAuxAgent:
         # partitioning so distributed gradient reduction does not rebuild it
         # six times per update.
         self._grad_bucket_cache = {}
+        self._pending_critic_update = None
+        self._fb_graphs = {}
+        self._critic_graph = None
+        self._discriminator_graph = None
+        self._actor_graphs = {}
         self.compile(getattr(cfg, "torch_compile_mode", None))
 
     def _autocast_context(self):
@@ -276,6 +285,11 @@ class FbCprAuxAgent:
         """Compile network forward methods without changing checkpoint keys."""
         if mode is None:
             return
+        if getattr(self._actor, "fp32_output", False):
+            from .gradient_audit import enable_compiled_gradient_audit
+
+            # MBFB computes main/aux gradients on a retained graph.
+            enable_compiled_gradient_audit()
         if mode not in self._COMPILE_MODES:
             raise ValueError(
                 f"torch_compile_mode={mode!r} is not supported; use one of "
@@ -298,9 +312,16 @@ class FbCprAuxAgent:
             self._target_forward_map,
             *target_value_modules,
         )
+        self._compile_modules(modules, mode)
+        # WGAN-GP double backward uses CUDA Graphs, not torch.compile.
+
+    def _compile_modules(self, modules, mode):
+        compile_options = dict(torch._inductor.list_mode_options(mode))
+        if getattr(self._actor, "fp32_output", False):
+            # Retained MBFB graphs must keep their saved tensors across backward calls.
+            compile_options["inplace_buffers"] = False
         for module in modules:
-            module.forward = torch.compile(module.forward, mode=mode)  # type: ignore[method-assign]
-        # The discriminator stays eager because WGAN-GP requires double backward.
+            module.forward = torch.compile(module.forward, options=compile_options)  # type: ignore[method-assign]
 
     # --------------------------------------------------------------- inputs
 
@@ -612,13 +633,19 @@ class FbCprAuxAgent:
             "velocity_valid": None,
         }
 
+    @torch.profiler.record_function("fbcpr/gradient_sync")
     def _avg_grad(self, params):
+        """Average gradients across ranks before a synchronous optimizer update."""
+        self._finish_grad_sync(self._begin_grad_sync(params))
+
+    def _begin_grad_sync(self, params):
+        """Start bucket reductions, retaining work handles and buffers until completion."""
         if not torch.distributed.is_initialized() or torch.distributed.get_world_size() <= 1:
-            return
+            return []
         params = tuple(params)
         grads = [p.grad for p in params if p.grad is not None]
         if not grads:
-            return
+            return []
 
         param_key = tuple(id(param) for param in params if param.grad is not None)
         buckets = self._grad_bucket_cache.get(param_key)
@@ -645,12 +672,26 @@ class FbCprAuxAgent:
             flat = _flatten_dense_tensors(tensors)
             work = torch.distributed.all_reduce(flat, async_op=True)
             pending.append((work, flat, tensors))
+        return pending
 
+    @staticmethod
+    def _finish_grad_sync(pending):
+        """Wait for reductions and copy averaged buckets back to parameter gradients."""
+        if not pending:
+            return
         scale = 1.0 / torch.distributed.get_world_size()
         for work, flat, tensors in pending:
             work.wait()
             flat.mul_(scale)
             torch._foreach_copy_(tensors, _unflatten_dense_tensors(flat, tensors))
+
+    def _finish_shared_critic_update(self) -> None:
+        """Complete the deferred critic step before actor use or a new graph capture."""
+        if self._pending_critic_update is not None:
+            with torch.profiler.record_function("fbcpr/critic_sync_finish"):
+                self._finish_grad_sync(self._pending_critic_update)
+                self._pending_critic_update = None
+                self.critic_optimizer.step()
 
     def update(
         self, replay_buffers, *, depth_gradient_diagnostics: bool = False,
@@ -658,9 +699,13 @@ class FbCprAuxAgent:
     ) -> Dict[str, torch.Tensor]:
         cfg = self.cfg
         bs = cfg.batch_size
+        mbfb = self.world_model is not None and self.world_model.cfg.objective == "mbfb"
+        metrics = self.world_model.fit(replay_buffers["train"], self) if mbfb else {}
         expert_batch = replay_buffers["expert_slicer"].sample(bs)
         train_batch = replay_buffers["train"].sample(bs)
         check_finite_tree({"expert_batch": expert_batch, "train_batch": train_batch}, "batches")
+        # Stage each replay field once; model and command losses reuse this batch.
+        train_batch = tree_to_device(train_batch, self.device)
 
         train_obs = tree_to_device(train_batch["observation"], self.device)
         train_next_obs = tree_to_device(train_batch["next"]["observation"], self.device)
@@ -691,13 +736,13 @@ class FbCprAuxAgent:
         expert_z = self.encode_expert(next_obs=expert_b_next)
         check_finite_tree(expert_z, "expert_z")
 
-        metrics = self.update_discriminator(
+        metrics.update(self.update_discriminator(
             expert_obs=expert_b_obs,
             expert_z=expert_z,
             train_obs=train_b_obs,
             train_z=train_z,
             grad_penalty=cfg.grad_penalty_discriminator,
-        )
+        ))
 
         z, mix_source, expert_indices = self.sample_mixed_context_components(
             train_goal_input=goal, expert_encodings=expert_z
@@ -726,6 +771,25 @@ class FbCprAuxAgent:
 
         f_obs, f_next = self._full_in_from_parts(t_obs), self._full_in_from_parts(t_next)
         next_actions = self._sample_target_actions(t_next, train_z, count=3)
+        forward_target = None
+        if self.world_model is not None and self.world_model.cfg.forward_weight > 0:
+            from .world_model_forward import forward_model_target
+
+            heading_valid = torch.where(
+                mask, mix_source == 1, train_batch["aux_rewards"]["heading_valid"].to(self.device).bool())
+            if mbfb:
+                forward_target = self.world_model.forward_target(
+                    self, train_batch, train_next_obs, train_z, discount, heading_valid)
+            else:
+                forward_target = forward_model_target(
+                    self.world_model, self, train_batch, train_next_obs, train_z, discount,
+                    next_actions[0], heading_valid,
+                )
+        if mbfb:
+            heading_valid = torch.where(
+                mask, mix_source == 1, train_batch["aux_rewards"]["heading_valid"].to(self.device).bool())
+            self.world_model.prepare_actor(self, train_batch, train_obs, train_z, goal,
+                                           mask & (mix_source == 1), replay_buffers["expert_slicer"], heading_valid)
         metrics.update(
             self.update_fb(
                 obs=f_obs,
@@ -735,6 +799,7 @@ class FbCprAuxAgent:
                 goal=goal,
                 z=train_z,
                 next_action=next_actions[0],
+                model_target=forward_target,
             )
         )
         if reward_term_scales:
@@ -747,6 +812,15 @@ class FbCprAuxAgent:
         aux_reward = self._aux_reward_normalizer(aux_reward)
         check_finite_tree(aux_reward, "normalized_aux_reward")
 
+        defer_critic = (
+            getattr(cfg, "overlap_critic_communication", False)
+            and getattr(self, "shared_context_value_net", False)
+            and getattr(cfg, "cuda_graph_critics", False)
+            and self._critic_graph is not None
+            and getattr(self, "_context_graph", None) is not None
+            and torch.distributed.is_initialized()
+            and torch.distributed.get_world_size() > 1
+        )
         if self.shared_value_net:
             metrics.update(
                 self.update_shared_critics(
@@ -759,6 +833,7 @@ class FbCprAuxAgent:
                     z=train_z,
                     next_action=next_actions[1],
                     next_aux_action=next_actions[2],
+                    defer_optimizer=defer_critic,
                 )
             )
         else:
@@ -785,12 +860,16 @@ class FbCprAuxAgent:
                     next_action=next_actions[2],
                 )
             )
-        context = self._context_batch(
-            train_batch, collection_obs, collection_next_obs, rollout_z, discount
-        )
-        metrics.update(self._update_context_critics(train_batch=train_batch, action=train_action, **context))
-        if self.world_model is not None:
-            metrics.update(self.world_model.fit(replay_buffers["train"], self))
+        try:
+            context = self._context_batch(
+                train_batch, collection_obs, collection_next_obs, rollout_z, discount
+            )
+            metrics.update(self._update_context_critics(train_batch=train_batch, action=train_action, **context))
+        finally:
+            self._finish_shared_critic_update()
+        if self.world_model is not None and not mbfb:
+            metrics.update(self.world_model.fit(replay_buffers["train"], self,
+                                                expert_replay=replay_buffers.get("expert_slicer")))
         metrics.update(
             self.update_actor(
                 actor_obs=t_obs,
@@ -832,6 +911,7 @@ class FbCprAuxAgent:
         """Update optional task-specific critics before updating the actor."""
         return {}
 
+    @torch.profiler.record_function("fbcpr/buffer_sync")
     def _sync_floating_buffers(self):
         if not torch.distributed.is_initialized() or torch.distributed.get_world_size() <= 1:
             return
@@ -868,7 +948,37 @@ class FbCprAuxAgent:
 
     # -------------------------------------------------------------- updates
 
+    @torch.profiler.record_function("fbcpr/discriminator")
     def update_discriminator(self, expert_obs, expert_z, train_obs, train_z, grad_penalty):
+        parameters = tuple(self._discriminator.parameters())
+        inputs = dict(expert_obs=expert_obs, expert_z=expert_z, train_obs=train_obs, train_z=train_z)
+        if grad_penalty is not None and grad_penalty > 0:
+            inputs["alpha"] = torch.rand(len(expert_obs), 1, device=expert_z.device)
+        self.discriminator_optimizer.zero_grad(set_to_none=True)
+        if getattr(self.cfg, "cuda_graph_critics", False) and expert_obs.is_cuda:
+            from .world_model_mbfb_graph import WorldModelGraph
+
+            key = (self.discriminator_loss, grad_penalty)
+            cached = self._discriminator_graph
+            if cached is None or cached[0] != key or not cached[1].matches(inputs):
+                def evaluate(**inputs):
+                    loss, metrics = self._discriminator_loss(**inputs, grad_penalty=grad_penalty)
+                    return metrics, torch.autograd.grad(loss, parameters)
+
+                self._discriminator_graph = None
+                self._discriminator_graph = (key, WorldModelGraph(evaluate, inputs, expert_obs.device))
+            metrics, gradients = self._discriminator_graph[1].replay(inputs)
+            for parameter, gradient in zip(parameters, gradients):
+                parameter.grad = gradient
+            metrics = {key: value.clone() for key, value in metrics.items()}
+        else:
+            loss, metrics = self._discriminator_loss(**inputs, grad_penalty=grad_penalty)
+            loss.backward()
+        self._avg_grad(parameters)
+        self.discriminator_optimizer.step()
+        return metrics
+
+    def _discriminator_loss(self, expert_obs, expert_z, train_obs, train_z, grad_penalty, alpha=None):
         with self._autocast_context():
             expert_logits = self._discriminator.compute_logits(obs=expert_obs, z=expert_z)
             unlabeled_logits = self._discriminator.compute_logits(obs=train_obs, z=train_z)
@@ -891,12 +1001,8 @@ class FbCprAuxAgent:
             unlabeled_loss = unlabeled_logits
             loss = expert_loss.mean() + unlabeled_loss.mean()
         if grad_penalty is not None and grad_penalty > 0:
-            wgan_gp = self.gradient_penalty_wgan(expert_obs, expert_z, train_obs, train_z)
+            wgan_gp = self.gradient_penalty_wgan(expert_obs, expert_z, train_obs, train_z, alpha=alpha)
             loss = loss + grad_penalty * wgan_gp
-        self.discriminator_optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        self._avg_grad(self._discriminator.parameters())
-        self.discriminator_optimizer.step()
         out = {
             "disc_loss": loss.detach(),
             "disc_expert_loss": expert_loss.detach().mean(),
@@ -904,11 +1010,12 @@ class FbCprAuxAgent:
         }
         if grad_penalty is not None and grad_penalty > 0:
             out["disc_wgan_gp_loss"] = wgan_gp.detach()
-        return out
+        return loss, out
 
-    def gradient_penalty_wgan(self, real_obs, real_z, fake_obs, fake_z):
+    def gradient_penalty_wgan(self, real_obs, real_z, fake_obs, fake_z, *, alpha=None):
         bs = real_obs.shape[0]
-        alpha = torch.rand(bs, 1, device=real_z.device)
+        if alpha is None:
+            alpha = torch.rand(bs, 1, device=real_z.device)
         interpolated_obs = (alpha * real_obs + (1 - alpha) * fake_obs).requires_grad_(True)
         interpolated_z = (alpha * real_z + (1 - alpha) * fake_z).requires_grad_(True)
         with self._autocast_context():
@@ -925,7 +1032,42 @@ class FbCprAuxAgent:
         cat_gradients = torch.cat(gradients, dim=1)
         return ((cat_gradients.norm(2, dim=1) - 1) ** 2).mean()
 
-    def update_fb(self, obs, action, discount, next_obs, goal, z, next_action):
+    @torch.profiler.record_function("fbcpr/fb")
+    def update_fb(self, obs, action, discount, next_obs, goal, z, next_action, *, model_target=None):
+        inputs = dict(obs=obs, action=action, discount=discount, next_obs=next_obs,
+                      goal=goal, z=z, next_action=next_action)
+        parameters = tuple(self._forward_map.parameters()) + tuple(self._backward_map.parameters())
+        self.forward_optimizer.zero_grad(set_to_none=True)
+        self.backward_optimizer.zero_grad(set_to_none=True)
+        use_graph = (getattr(self.cfg, "cuda_graph_fb", False) and obs.is_cuda
+                     and (model_target is None or model_target.get("mbfb", False)))
+        if use_graph:
+            from .world_model_mbfb_graph import FBGraph
+
+            weight = None if model_target is None else float(model_target["weight"])
+            if model_target is not None:
+                inputs["model_target"] = {k: v for k, v in model_target.items() if torch.is_tensor(v)}
+            key = model_target is not None
+            graph = self._fb_graphs.get(key)
+            if graph is None or graph.weight != weight or not graph.matches(inputs):
+                graph = self._fb_graphs[key] = FBGraph(self, parameters, inputs, weight)
+            metrics, gradients = graph.replay(inputs)
+            if model_target is not None and not torch.isfinite(metrics["wm/forward_loss"]):
+                raise FloatingPointError("Non-finite MBFB F loss")
+            for parameter, gradient in zip(parameters, gradients):
+                parameter.grad = gradient
+            # Graph outputs are overwritten at replay; callers may retain metrics.
+            metrics = {key: value.clone() for key, value in metrics.items()}
+        else:
+            loss, metrics = self._fb_loss(**inputs, model_target=model_target)
+            loss.backward()
+        self._avg_grad(parameters)
+        self.forward_optimizer.step()
+        self.backward_optimizer.step()
+        return metrics
+
+    def _fb_loss(self, obs, action, discount, next_obs, goal, z, next_action, *,
+                 model_target=None, check_model_finite=True):
         with torch.no_grad():
             with self._autocast_context():
                 target_fs = self._target_forward_map(next_obs, z, next_action)
@@ -953,14 +1095,16 @@ class FbCprAuxAgent:
         orth_loss = orth_offdiag + orth_diag
         fb_loss = fb_loss + self.cfg.ortho_coef * orth_loss
 
-        self.forward_optimizer.zero_grad(set_to_none=True)
-        self.backward_optimizer.zero_grad(set_to_none=True)
-        fb_loss.backward()
-        self._avg_grad([*self._forward_map.parameters(), *self._backward_map.parameters()])
-        self.forward_optimizer.step()
-        self.backward_optimizer.step()
+        model_metrics = {}
+        if model_target is not None:
+            from .world_model_forward import forward_model_loss
 
-        return {
+            extra, model_metrics = forward_model_loss(
+                self, fs, b, target_b, model_target, check_finite=check_model_finite
+            )
+            fb_loss = fb_loss + extra
+
+        return fb_loss, {
             "target_M": target_m.mean().detach(),
             "M1": ms[0].mean().detach(),
             "F1": fs[0].mean().detach(),
@@ -973,6 +1117,7 @@ class FbCprAuxAgent:
             "orth_loss": orth_loss.detach(),
             "orth_loss_diag": orth_diag.detach(),
             "orth_loss_offdiag": orth_offdiag.detach(),
+            **model_metrics,
         }
 
     def discriminator_reward_from_logits(self, logits):
@@ -1043,6 +1188,7 @@ class FbCprAuxAgent:
             "mean_aux_reward": aux_reward.mean().detach(),
         }
 
+    @torch.profiler.record_function("fbcpr/shared_critics")
     def update_shared_critics(
         self,
         obs,
@@ -1054,8 +1200,46 @@ class FbCprAuxAgent:
         z,
         next_action,
         next_aux_action,
+        *,
+        defer_optimizer: bool = False,
     ):
         """Update both shared critic heads with one backward and optimizer step."""
+        inputs = dict(
+            obs=obs,
+            b_obs=b_obs,
+            action=action,
+            discount=discount,
+            aux_reward=aux_reward,
+            next_obs=next_obs,
+            z=z,
+            next_action=next_action,
+            next_aux_action=next_aux_action,
+        )
+        self.critic_optimizer.zero_grad(set_to_none=True)
+        if getattr(self.cfg, "cuda_graph_critics", False) and obs.is_cuda:
+            from .world_model_mbfb_graph import CriticGraph
+
+            parameters = tuple(self._critic_shared.parameters())
+            if self._critic_graph is None or not self._critic_graph.matches(inputs):
+                self._critic_graph = CriticGraph(self, parameters, inputs)
+            metrics, gradients = self._critic_graph.replay(inputs)
+            for parameter, gradient in zip(parameters, gradients):
+                parameter.grad = gradient
+            metrics = {key: value.clone() for key, value in metrics.items()}
+        else:
+            loss, metrics = self._shared_critic_loss(**inputs)
+            loss.backward()
+        if defer_optimizer:
+            # Command-critic computation is independent; finish before the actor reads either critic.
+            with torch.profiler.record_function("fbcpr/critic_sync_start"):
+                self._pending_critic_update = self._begin_grad_sync(self._critic_shared.parameters())
+        else:
+            self._avg_grad(self._critic_shared.parameters())
+            self.critic_optimizer.step()
+        return metrics
+
+    def _shared_critic_loss(self, obs, b_obs, action, discount, aux_reward, next_obs, z,
+                            next_action, next_aux_action):
         cfg = self.cfg
         num_parallel = self.critic_members
         with torch.no_grad():
@@ -1085,11 +1269,7 @@ class FbCprAuxAgent:
         critic_loss = 0.5 * num_parallel * F.mse_loss(qs, expanded_q)
         aux_critic_loss = 0.5 * num_parallel * F.mse_loss(aux_qs, expanded_aux_q)
 
-        self.critic_optimizer.zero_grad(set_to_none=True)
-        (critic_loss + aux_critic_loss).backward()
-        self._avg_grad(self._critic_shared.parameters())
-        self.critic_optimizer.step()
-        return {
+        return critic_loss + aux_critic_loss, {
             "critic_loss": (critic_loss / num_parallel).detach(),
             "target_Q": target_q.mean().detach(),
             "Q1": qs.mean().detach(),
@@ -1104,8 +1284,7 @@ class FbCprAuxAgent:
             "mean_aux_reward": aux_reward.mean().detach(),
         }
 
-    @eager_gradient_diagnostics
-    def update_actor(
+    def _actor_objectives(
         self,
         actor_obs,
         full_obs,
@@ -1117,8 +1296,8 @@ class FbCprAuxAgent:
         velocity_valid=None,
         depth_gradient_diagnostics=False,
     ):
+        """Build real-sample losses and diagnostics for eager or captured gradients."""
         cfg = self.cfg
-        self.actor_optimizer.zero_grad(set_to_none=True)
         with self._autocast_context():
             if depth_gradient_diagnostics and self.visual_enabled:
                 action_dist = self._actor.forward_with_depth_gradient_diagnostics(
@@ -1237,19 +1416,17 @@ class FbCprAuxAgent:
             qs_fb = (fs * z).sum(-1)
             _, _, q_fb = self._targets_uncertainty(qs_fb, cfg.actor_pessimism_penalty)
 
-            weight = q_fb.abs().mean().detach() if cfg.scale_reg else 1.0
+            return_scale = q_fb.abs().mean().detach() if cfg.scale_reg or self.world_model is not None else 1.0
+            weight = return_scale if cfg.scale_reg else 1.0
             loss_terms = {
                 "discriminator": -q_disc.mean() * cfg.reg_coeff * weight,
                 "aux": -q_aux.mean() * cfg.reg_coeff_aux * weight,
                 "fb": -q_fb.mean(),
             }
-            actor_loss = sum(loss_terms.values())
             if qs_heading is not None:
                 loss_terms['heading'] = -q_heading.mean() * float(getattr(cfg, "reg_coeff_heading", 0.0)) * weight
-                actor_loss = actor_loss + loss_terms['heading']
             if qs_velocity is not None:
                 loss_terms['velocity'] = -q_velocity.mean() * float(getattr(cfg, "reg_coeff_velocity", 0.0)) * weight
-                actor_loss = actor_loss + loss_terms['velocity']
             estimator_loss = None
             estimator_metrics = {}
             if (
@@ -1262,40 +1439,103 @@ class FbCprAuxAgent:
                 error = prediction - target
                 estimator_loss = error.square().mean()
                 loss_terms['estimator'] = float(getattr(cfg, "velocity_estimator_loss_coef", 1.0)) * estimator_loss
-                actor_loss = actor_loss + loss_terms['estimator']
                 with torch.no_grad():
                     absolute = error.abs()
                     estimator_metrics = {"velocity_estimator/loss": estimator_loss.detach()}
-                    for axis, value in zip("xyz", absolute.unbind(dim=-1)):
-                        estimator_metrics[f"velocity_estimator/mae_{axis}"] = value.mean()
-                    for index, axis in enumerate("xyz"):
-                        estimator_metrics[f"velocity_estimator/rmse_{axis}"] = error[:, index].square().mean().sqrt()
-                        estimator_metrics[f"velocity_estimator/bias_{axis}"] = error[:, index].mean()
+                    mae = absolute.mean(dim=0)
+                    rmse = error.square().mean(dim=0).sqrt()
+                    bias = error.mean(dim=0)
                     stopped = torch.linalg.vector_norm(target[:, :2], dim=-1) < 0.1
                     moving_estimate = torch.linalg.vector_norm(prediction[:, :2], dim=-1) > 0.2
+                    stopped_count = stopped.sum().clamp_min(1)
                     estimator_metrics["velocity_estimator/false_motion_when_stopped"] = (
-                        (stopped & moving_estimate).float().sum() / stopped.sum().clamp_min(1)
+                        (stopped & moving_estimate).float().sum() / stopped_count
                     )
                     estimator_metrics["velocity_estimator/stopped_fraction"] = stopped.float().mean()
-                    stopped_count = stopped.sum().clamp_min(1)
+                    stopped_mae = (absolute * stopped[:, None]).sum(dim=0) / stopped_count
                     for index, axis in enumerate("xyz"):
-                        estimator_metrics[f"velocity_estimator/stopped_mae_{axis}"] = (
-                            absolute[:, index] * stopped
-                        ).sum() / stopped_count
-            parameter_metrics = {}
-            wm_metrics = {}
-            wm_loss = None
-            if track_depth_gradients:
-                # Include the separate context forward and the actual weighted losses.
-                parameter_metrics = parameter_gradient_metrics(loss_terms, self._actor.depth_encoder.parameters())
-                # autograd.grad can trigger retained intermediate gradients; keep the
-                # legacy latent diagnostics limited to the real backward below.
-                action_dist.actor_depth_latent.grad = None
-                action_dist.velocity_depth_latent.grad = None
-            actor_loss.backward()
+                        estimator_metrics[f"velocity_estimator/mae_{axis}"] = mae[index]
+                        estimator_metrics[f"velocity_estimator/rmse_{axis}"] = rmse[index]
+                        estimator_metrics[f"velocity_estimator/bias_{axis}"] = bias[index]
+                        estimator_metrics[f"velocity_estimator/stopped_mae_{axis}"] = stopped_mae[index]
         finally:
             for param, enabled in zip(frozen_params, requires_grad):
                 param.requires_grad_(enabled)
+        metrics = {
+            "actor_loss": sum(loss_terms.values()).detach(),
+            "Q_discriminator": q_disc.mean().detach(),
+            "Q_aux": q_aux.mean().detach(),
+            "Q_fb": q_fb.mean().detach(),
+        }
+        if qs_heading is not None:
+            metrics["Q_heading"] = q_heading.mean().detach()
+        if qs_velocity is not None:
+            metrics["Q_velocity"] = q_velocity.mean().detach()
+        if estimator_loss is not None:
+            metrics["velocity_estimator_loss"] = estimator_loss.detach()
+            metrics.update(estimator_metrics)
+        metrics.update(depth_ablation_metrics)
+        if self.world_model is not None and self.world_model.cfg.objective == "mbfb":
+            metrics.update({
+                "actor/saturation": (action_dist.mean.detach().abs() >= .999).float().mean(),
+                "actor/action_std": action_dist.mean.detach().float().std(dim=0, unbiased=False).mean(),
+            })
+        return loss_terms, metrics, action_dist, return_scale
+
+    @eager_gradient_diagnostics
+    @torch.profiler.record_function("fbcpr/actor")
+    def update_actor(
+        self,
+        actor_obs,
+        full_obs,
+        z,
+        context_actor_obs=None,
+        context_full_obs=None,
+        context_z=None,
+        heading_valid=None,
+        velocity_valid=None,
+        depth_gradient_diagnostics=False,
+    ):
+        cfg = self.cfg
+        self.actor_optimizer.zero_grad(set_to_none=True)
+        mbfb = self.world_model is not None and self.world_model.cfg.objective == "mbfb"
+        inputs = dict(actor_obs=actor_obs, full_obs=full_obs, z=z,
+                      context_actor_obs=context_actor_obs, context_full_obs=context_full_obs,
+                      context_z=context_z, heading_valid=heading_valid, velocity_valid=velocity_valid)
+        inputs = {key: value for key, value in inputs.items() if value is not None}
+        parameter_metrics = {}
+        track_depth_gradients = False
+        if (mbfb and getattr(cfg, "cuda_graph_actor", False) and full_obs.is_cuda
+                and not self.visual_enabled and not depth_gradient_diagnostics):
+            from .world_model_mbfb_graph import ActorGraph
+
+            split = self.world_model._svg is not None
+            graph = self._actor_graphs.get(split)
+            if graph is None or not graph.matches(inputs):
+                self._actor_graphs.pop(split, None)
+                graph = None
+                graph = self._actor_graphs[split] = ActorGraph(self, inputs, split=split)
+            with torch.profiler.record_function("fbcpr/actor_native_graph"):
+                metrics, native_gradients = graph.replay(inputs)
+                metrics = {key: value.clone() for key, value in metrics.items()}
+            wm_metrics = self.world_model.actor_gradients(self, None, native_gradients=native_gradients)
+        else:
+            loss_terms, metrics, action_dist, return_scale = self._actor_objectives(
+                **inputs, depth_gradient_diagnostics=depth_gradient_diagnostics)
+            track_depth_gradients = (
+                depth_gradient_diagnostics
+                and hasattr(action_dist, "actor_depth_latent")
+                and hasattr(action_dist, "velocity_depth_latent")
+            )
+            if track_depth_gradients:
+                parameter_metrics = parameter_gradient_metrics(loss_terms, self._actor.depth_encoder.parameters())
+                action_dist.actor_depth_latent.grad = None
+                action_dist.velocity_depth_latent.grad = None
+            if mbfb:
+                wm_metrics = self.world_model.actor_gradients(self, loss_terms)
+            else:
+                sum(loss_terms.values()).backward()
+                wm_metrics = {}
         depth_gradient_metrics = {}
         if track_depth_gradients:
             actor_grad = action_dist.actor_depth_latent.grad.float().flatten()
@@ -1320,27 +1560,28 @@ class FbCprAuxAgent:
                 ).detach(),
             }
         self._avg_grad(self._actor.parameters())
-        if self.world_model is not None:
+        if self.world_model is not None and self.world_model.cfg.objective != "mbfb":
             from .world_model_update import add_imagination_gradients
 
-            wm_metrics = add_imagination_gradients(self.world_model, self)
+            wm_metrics = add_imagination_gradients(self.world_model, self, discriminator_scale=return_scale)
+        if self.world_model is not None and self.world_model.cfg.objective == "mbfb":
+            limit = self.world_model.cfg.actor_max_grad_norm
+            if cfg.clip_grad_norm > 0:
+                limit = min(limit, cfg.clip_grad_norm)
+            norm = torch.nn.utils.clip_grad_norm_(self._actor.parameters(), limit, error_if_nonfinite=True)
+            wm_metrics["mb/actor_grad_norm"] = norm.detach()
+            output_parameters = tuple(self._actor.policy[-1].parameters())
+            output_before = tuple(p.detach().clone() for p in output_parameters)
+            wm_metrics.update({"actor/grad_norm": norm.detach(),
+                               "actor/grad_clip_scale": (limit / norm.clamp_min(1e-12)).clamp(max=1)})
         self.actor_optimizer.step()
-        if self.world_model is not None:
+        if self.world_model is not None and self.world_model.cfg.objective == "mbfb":
+            wm_metrics["actor/output_update_max"] = torch.stack([
+                (parameter.detach() - old).abs().max() for parameter, old in zip(output_parameters, output_before)
+            ]).max()
+        if self.world_model is not None and self.world_model.cfg.objective != "mbfb":
             self.world_model.update_target()
-        metrics = {
-            "actor_loss": actor_loss.detach() + wm_metrics.get("wm/actor_loss", 0),
-            "Q_discriminator": q_disc.mean().detach(),
-            "Q_aux": q_aux.mean().detach(),
-            "Q_fb": q_fb.mean().detach(),
-        }
-        if qs_heading is not None:
-            metrics["Q_heading"] = q_heading.mean().detach()
-        if qs_velocity is not None:
-            metrics["Q_velocity"] = q_velocity.mean().detach()
-        if estimator_loss is not None:
-            metrics["velocity_estimator_loss"] = estimator_loss.detach()
-            metrics.update(estimator_metrics)
-        metrics.update(depth_ablation_metrics)
+        metrics["actor_loss"] = metrics["actor_loss"] + wm_metrics.get("wm/actor_loss", 0)
         metrics.update(depth_gradient_metrics)
         metrics.update(parameter_metrics)
         metrics.update(wm_metrics)
@@ -1403,6 +1644,10 @@ class FbCprAuxAgent:
     def load_state_dict(self, state):
         if self.world_model is not None and "world_model" in state:
             self.world_model.validate_checkpoint(state["world_model"])
+        self._fb_graphs = {}
+        self._critic_graph = None
+        self._discriminator_graph = None
+        self._actor_graphs = {}
         self._actor.load_state_dict(state["actor"])
         self._backward_map.load_state_dict(state["backward_map"])
         if self.inference_only:
@@ -1445,7 +1690,8 @@ class FbCprAuxAgent:
             out["aux_critic"] = self.aux_critic_optimizer.state_dict()
         if self.world_model is not None:
             out["world_model"] = self.world_model.optimizer.state_dict()
-            out["world_model_value"] = self.world_model.value_optimizer.state_dict()
+            if hasattr(self.world_model, "value_optimizer"):
+                out["world_model_value"] = self.world_model.value_optimizer.state_dict()
             if hasattr(self.world_model, "sequence_value_optimizer"):
                 out["world_model_sequence_value"] = self.world_model.sequence_value_optimizer.state_dict()
         return out
@@ -1460,6 +1706,7 @@ class FbCprAuxAgent:
         self.discriminator_optimizer.load_state_dict(state["discriminator"])
         if self.world_model is not None and "world_model" in state:
             self.world_model.optimizer.load_state_dict(state["world_model"])
-            self.world_model.value_optimizer.load_state_dict(state["world_model_value"])
+            if hasattr(self.world_model, "value_optimizer"):
+                self.world_model.value_optimizer.load_state_dict(state["world_model_value"])
             if hasattr(self.world_model, "sequence_value_optimizer"):
                 self.world_model.sequence_value_optimizer.load_state_dict(state["world_model_sequence_value"])

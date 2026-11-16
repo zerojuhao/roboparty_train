@@ -23,16 +23,26 @@ from torch.utils.tensorboard import SummaryWriter
 
 from ..algorithms.fb_cpr_aux import FbCprAuxAgent
 from ..algorithms.pufo import PufoAgent
-from ..storage.replay_buffer import ReplayBuffer, TrajectoryDictBuffer
+from ..storage.replay_buffer import ReplayBuffer
 from ..storage.replay_checkpoint import load_replay, save_replay
 from ..utils.finite import check_finite_tree, nonfinite_flag, raise_nonfinite_details
 from .tracking_evaluation import (
-    PersistentTrackingEvaluator, isolated_evaluator_device, merge_tracking_shards, motion_shard,
+    PersistentTrackingEvaluator, gather_tracking_shards_via_files, isolated_evaluator_device,
+    merge_tracking_shards, motion_shard,
 )
 from .tracking_protocol import configured_tracking_modes, tracking_chunk_seed, tracking_environment_config
 
 
 DEFAULT_RSL_RL_LOG_ROOT = "/data/zym/roboparty_train/logs/rsl_rl"
+
+
+def replay_capacity(cfg, num_envs: int) -> int:
+    steps = getattr(cfg, "buffer_steps_per_env", None)
+    if steps is None:
+        return cfg.buffer_size
+    if type(steps) is not int or steps < 2:
+        raise ValueError("buffer_steps_per_env must be an integer of at least 2.")
+    return num_envs * steps
 
 
 def default_rsl_rl_log_root() -> str:
@@ -82,7 +92,7 @@ def ufo_obs_dims(
         "velocity_target_yaw": 3,
     }
     if context_enabled:
-        dims.update({"heading": 2, "velocity_command": 3})
+        dims.update({"heading": 2, "velocity_command": 4})
     return dims
 
 
@@ -336,7 +346,7 @@ class FbCprRunner:
 
             self.world_model_adapter = WorldModelAdapter(mgr, self.action_rescale, getattr(train_cfg, "clip_actions", None))
             kinematics = None
-            if wm_cfg.get("objective", "context") in {"fb_value", "fb_sequence"}:
+            if wm_cfg.get("objective", "context") in {"mbfb", "fb_value", "fb_sequence"}:
                 from ..algorithms.world_model_kinematics import UFOPrivilegedKinematics
                 from robolab.tasks.manager_based.ufo.mdp.observations import local_self_obs
                 from robolab.tasks.manager_based.ufo.mdp.world_model_state import world_model_state
@@ -359,21 +369,60 @@ class FbCprRunner:
                         msg=("Differentiable UFO kinematics does not match the simulator observation; "
                              f"max errors [height, position, rotation, linear velocity, angular velocity]={component_errors}"),
                     )
-            self.agent.world_model = UFOWorldModel(
-                wm_cfg, self.world_model_adapter.codec_kwargs(),
-                self.world_model_adapter.xi().shape[-1], self.agent.actor_obs_dim,
-                self.agent.z_dim, self.device, kinematics=kinematics,
+            model_type, model_kwargs = UFOWorldModel, {"velocity_dim": self.agent.velocity_dim}
+            if wm_cfg.get("objective") == "mbfb":
+                from ..algorithms.world_model_mbfb import MBFBWorldModel
+
+                if "world_model_position" not in mgr.observation_manager.group_obs_dim:
+                    raise ValueError("MBFB requires pre-reset root position observations")
+                model_type = MBFBWorldModel
+                model_kwargs["dt"] = self.control_dt
+            self.agent.world_model = model_type(
+                wm_cfg,
+                self.world_model_adapter.codec_kwargs(),
+                self.world_model_adapter.xi().shape[-1],
+                self.agent.actor_obs_dim,
+                self.agent.z_dim,
+                self.device,
+                kinematics=kinematics,
+                **model_kwargs,
             )
-            print(f"[WM] enabled: window={wm_cfg['window_length']}, horizon={wm_cfg['horizon']}, "
-                  f"warmup={wm_cfg['warmup_updates']} model updates, actor_weight={wm_cfg['actor_weight']}", flush=True)
+            compile_mode = getattr(train_cfg, "torch_compile_mode", None)
+            if wm_cfg.get("objective") == "mbfb" and compile_mode is not None:
+                options = {**torch._inductor.list_mode_options(compile_mode), "inplace_buffers": False}
+                model = self.agent.world_model
+                if wm_cfg.get("compile_geometry", False):
+                    model.kinematics.compile_observation(compile_mode)
+                model.dynamics.forward = torch.compile(model.dynamics.forward, options=options)
+                model.observe = torch.compile(model.observe, dynamic=True, options=options)
+                if wm_cfg.get("compile_model_math", False):
+                    model.dynamics.normalized_error = torch.compile(
+                        model.dynamics.normalized_error, dynamic=False, options=options
+                    )
+            startup = (
+                "startup=fit-then-imagine"
+                if wm_cfg.get("objective") == "mbfb"
+                else f"warmup={wm_cfg['warmup_updates']} model updates"
+            )
+            print(
+                f"[WM] enabled: window={wm_cfg['window_length']}, horizon={wm_cfg['horizon']}, "
+                f"hidden_dims={wm_cfg['hidden_dims']}, "
+                f"fit_batches={wm_cfg['fit_batches']}, update_interval={wm_cfg['update_interval']}, "
+                f"imagination_batch={wm_cfg['imagination_batch_size']}, "
+                f"imagination_interval={wm_cfg['imagination_interval']}, "
+                f"svg_cuda_graph={wm_cfg.get('cuda_graph_imagination', False)}, "
+                f"fit_cuda_graph={wm_cfg.get('cuda_graph_dynamics', False)}, "
+                f"forward_cuda_graph={wm_cfg.get('cuda_graph_forward', False)}, "
+                f"value_cuda_graph={wm_cfg.get('cuda_graph_value', False)}, "
+                f"{startup}, actor_weight={wm_cfg['actor_weight']}, "
+                f"forward_weight={self.agent.world_model.cfg.forward_weight}, "
+                f"forward_horizon={self.agent.world_model.cfg.forward_horizon}",
+                flush=True,
+            )
         self._broadcast_agent_state()
 
         self.history = make_ufo_history(self.num_envs, device, history_lengths if self.visual_enabled else None)
 
-        # Keep replay storage on host memory for both UFO and PUFO.  This
-        # avoids reserving the full multi-million-transition buffer on GPU;
-        # PUFO additionally compacts its uint8 depth history below.
-        replay_device = "cpu"
         depth_offsets = ()
         if self.visual_enabled:
             depth_params = mgr.cfg.observations.visual.depth_image.params
@@ -382,9 +431,9 @@ class FbCprRunner:
                 for i in range(int(depth_params["num_output_frames"]) - 1, -1, -1)
             )
         self.replay = {"train": ReplayBuffer(
-            capacity=self.cfg.buffer_size,
+            capacity=replay_capacity(self.cfg, self.num_envs),
             num_envs=self.num_envs,
-            device=replay_device,
+            device=self.device,
             output_key_t=("observation", "action", "z", "aux_rewards")
                          + (("world_model",) if self.world_model_enabled else ()),
             output_key_tp1=(
@@ -398,6 +447,13 @@ class FbCprRunner:
             transition_outcomes=True,
             compact_depth_history=self.visual_enabled,
             depth_history_offsets=depth_offsets,
+            actor_history_spec=() if self.visual_enabled else (
+                ("last_action", 0, 24, UFO_HISTORY_LENGTHS["actions"]),
+                ("state", 51, 54, UFO_HISTORY_LENGTHS["base_ang_vel"]),
+                ("state", 0, 24, UFO_HISTORY_LENGTHS["joint_pos"]),
+                ("state", 24, 48, UFO_HISTORY_LENGTHS["joint_vel"]),
+                ("state", 48, 51, UFO_HISTORY_LENGTHS["projected_gravity"]),
+            ),
         )}
         self._expert_built = False
         self._z = None
@@ -476,6 +532,19 @@ class FbCprRunner:
                 self.writer.add_scalar(key, value, global_step)
             self.writer.flush()
 
+    def _check_mbfb_actor_progress(self, metrics, global_step):
+        model = getattr(self.agent, "world_model", None)
+        if model is None or model.cfg.objective != "mbfb":
+            return
+        thresholds = {"actor/grad_norm": 1e-10, "actor/output_update_max": 1e-12, "actor/action_std": 1e-5}
+        stalled = all(float(metrics[key]) < limit for key, limit in thresholds.items())
+        self._actor_stalled_logs = getattr(self, "_actor_stalled_logs", 0) + 1 if stalled else 0
+        if self._actor_stalled_logs >= 5:
+            if self.is_main_process and self.log_dir:
+                report = {"global_step": global_step, **{key: float(metrics[key]) for key in thresholds}}
+                Path(self.log_dir, "actor_stalled.json").write_text(json.dumps(report, indent=2) + "\n")
+            raise RuntimeError("MBFB actor stopped changing for five logging intervals")
+
     @staticmethod
     def _print_training_metrics(metrics, global_step, update, fps):
         losses = [f"{key}={value:.4f}" for key, value in metrics.items() if "loss" in key.lower()]
@@ -499,41 +568,41 @@ class FbCprRunner:
 
     @staticmethod
     def _accumulate_update_metrics(sums, counts, metrics):
+        totals, additions = [], []
         for key, value in metrics.items():
             value = value.detach()
             if key in sums:
-                sums[key].add_(value)
+                totals.append(sums[key])
+                additions.append(value)
             else:
                 sums[key] = value.clone()
             counts[key] = counts.get(key, 0) + 1
+        if totals:
+            torch._foreach_add_(totals, additions)
 
     # ------------------------------------------------------------- helpers
 
     def _build_expert_buffer(self):
-        from robolab.tasks.manager_based.ufo.mdp.expert_motion_loader import load_expert_trajectories_from_motion_lib
+        from robolab.tasks.manager_based.ufo.mdp.expert_motion_loader import MotionExpertBuffer
 
         command = self._mgr_env.command_manager.get_term("motion")
         default_dof_pos = self._mgr_env.scene["robot"].data.default_joint_pos
         base_ang_vel_scale = _obs_term_scale(self._mgr_env.cfg.observations.policy.base_ang_vel)
-        episodes, file_names = load_expert_trajectories_from_motion_lib(
-            command.motion_lib, self.control_dt, default_dof_pos, device=self.device,
-            base_ang_vel_scale=base_ang_vel_scale,
-        )
         expert_keys = ("observation",)
         if self.context_enabled:
             expert_keys += (
                 "heading_forward_xy",
-                "reference_velocity_world_xy",
+                self.agent.reference_velocity_key,
                 "reference_velocity_valid",
             )
-        buffer = TrajectoryDictBuffer(
-            episodes=episodes,
-            device=self.device,
+        buffer = MotionExpertBuffer(
+            command.motion_lib, self.control_dt, default_dof_pos,
+            base_ang_vel_scale=base_ang_vel_scale,
             seq_length=self.cfg.seq_length,
             output_key_t=expert_keys,
             output_key_tp1=expert_keys,
+            compile_mode=getattr(self.cfg, "torch_compile_mode", None),
         )
-        buffer.file_names = file_names
         base_weights = getattr(command.motion_lib, "_base_sampling_weights", None)
         if base_weights is not None:
             buffer.update_priorities(base_weights[buffer.motion_ids])
@@ -787,8 +856,11 @@ class FbCprRunner:
         log_every_update = bool(getattr(self.cfg, "log_every_update", False))
         profile_phase = int(getattr(self.cfg, "profile_update_phase", 0))
         profile_rank = int(getattr(self.cfg, "profile_update_rank", 0))
+        profile_index = int(getattr(self.cfg, "profile_update_index", 0))
         if profile_phase < 0 or not -1 <= profile_rank < world_size:
             raise ValueError("Invalid update profiling phase or rank")
+        if not 0 <= profile_index < self.cfg.num_agent_updates:
+            raise ValueError("Invalid update profiling minibatch index")
         initial_update_count = self.tot_iterations
         next_eval_step = (
             ((current_global_step // self.eval_interval_steps) + 1) * self.eval_interval_steps
@@ -932,6 +1004,8 @@ class FbCprRunner:
             }
             if self.visual_enabled:
                 transition["depth_episode_start"] = (terminated | truncated).unsqueeze(-1)
+            else:
+                transition["actor_history_start"] = (terminated | truncated).unsqueeze(-1)
             if getattr(self, "world_model_enabled", False):
                 wm_next = next_obs_buf["world_model"].to(self.device)
                 if bool(dones.any()):
@@ -942,12 +1016,21 @@ class FbCprRunner:
                     "state": obs_buf["world_model"], "next_state": wm_next,
                     "disturbance": wm_disturbance,
                     "disturbance_mask": wm_disturbance_mask,
-                    "previous_action": obs_dict["last_action"],
                     "xi": wm_xi,
                     "heading": self._context.heading_target_world.clone(),
                     "velocity": self._context.velocity_target_world.clone(),
                     "valid": torch.cat((self._context.heading_valid, self._context.velocity_valid), -1).float(),
                 }
+                if self.agent.world_model.cfg.objective == "mbfb":
+                    position = obs_buf["world_model_position"]
+                    next_position = next_obs_buf["world_model_position"].to(self.device)
+                    if bool(dones.any()):
+                        next_position = torch.where(dones.bool()[:, None],
+                                                    step_infos["final_obs"]["world_model_position"].to(self.device),
+                                                    next_position)
+                    transition["world_model"].update(position=position, next_position=next_position)
+                    self.agent.world_model.record(transition["world_model"], position, next_position,
+                                                  obs_dict["last_action"], action, dones)
             self.history.add(current_obs_values)
             final_observation = None
             if bool(dones.any()):
@@ -1002,7 +1085,7 @@ class FbCprRunner:
                         ),
                         reward_term_scales=self._reward_term_scales,
                     )
-                    if (profile_phase > 0 and update_index == 0
+                    if (profile_phase > 0 and update_index == profile_index
                             and (profile_rank == -1 or self.gpu_global_rank == profile_rank)
                             and self.tot_iterations - initial_update_count + 1 == profile_phase):
                         metrics = self._profile_agent_update(
@@ -1025,6 +1108,7 @@ class FbCprRunner:
                     last_log_step = global_step
                     metrics = {key: value / metric_counts[key] for key, value in metric_sums.items()}
                     metrics = self._average_metrics(metrics)
+                    self._check_mbfb_actor_progress(metrics, global_step)
                     metric_sums, metric_counts = {}, {}
                     training_time = interval_collection_time + interval_update_time
                     fps = interval_env_steps / max(training_time, 1e-9)
@@ -1039,6 +1123,12 @@ class FbCprRunner:
                             "Perf/eval_time": interval_eval_time,
                             "Perf/elapsed_minutes": (time.time() - train_start) / 60.0,
                         }
+                        if torch.device(self.device).type == "cuda":
+                            logged.update({
+                                "Perf/gpu_allocated_mib": torch.cuda.memory_allocated(self.device) / 2**20,
+                                "Perf/gpu_reserved_mib": torch.cuda.memory_reserved(self.device) / 2**20,
+                                "Perf/gpu_peak_allocated_mib": torch.cuda.max_memory_allocated(self.device) / 2**20,
+                            })
                         logged.update({k if k.startswith("Reward/") else f"train/{k}": v
                                        for k, v in metrics.items()})
                         if diagnostic_metrics:
@@ -1100,8 +1190,11 @@ class FbCprRunner:
                 result = {"error": f"rank {self.gpu_global_rank}: {type(exc).__name__}: {exc}"}
             results = [result]
             if self.is_distributed:
-                results = [None] * world_size
-                torch.distributed.all_gather_object(results, result, group=self._eval_group)
+                results = gather_tracking_shards_via_files(
+                    self._tracking_eval_log_dir(eval_mode), global_step, eval_mode,
+                    self.gpu_global_rank, world_size, result, self._eval_group,
+                    timeout_seconds=float(getattr(self.cfg, "eval_timeout_s", 1800)) + 60,
+                )
             merged = merge_tracking_shards(results, keys, count)
             if any(result.get("eval_mode") != eval_mode for result in results):
                 raise ValueError("Tracking evaluator returned a different physical protocol")
@@ -1213,7 +1306,6 @@ class FbCprRunner:
     @torch.no_grad()
     def _run_tracking_eval_on_current_env(self, global_step: int, motion_ids=None, return_shard=False):
         from .tracking_kinematics import tracking_kinematics_metrics, tracking_phase_errors
-        from robolab.utils.tensors import as_torch_tensor
         from robolab.tasks.manager_based.ufo.mdp.motion_observations import compute_humanoid_observations_max
         from robolab.tasks.manager_based.ufo.mdp.pufo_observations import (
             align_world_vector,
@@ -1279,7 +1371,7 @@ class FbCprRunner:
                     "root_lin_vel": res["body_vel_t"][s0, 0].cpu(),
                     "root_ang_vel": res["body_ang_vel_t"][s0, 0].cpu(),
                     "heading_world": heading_xy(base_quat[s0:s1]).cpu(),
-                    "velocity_world": res["body_vel_t"][s0:s1, 0, :2].cpu(),
+                    "velocity_world": res["body_vel_t"][s0:s1, 0, :self.obs_dims.get("velocity_command", 3) - 1].cpu(),
                     "dof_pos": res["dof_pos"][s0:s1].cpu(),
                     "dof_vel": res["dof_vel"][s0].cpu(),
                     "body_position": res["rg_pos_t"][s0:s1].cpu(),
@@ -1357,11 +1449,11 @@ class FbCprRunner:
                     stiffness = robot.actuators["all_joints"].stiffness
                     damping = robot.actuators["all_joints"].damping
                 snapshots = {
-                    "root_link_state": as_torch_tensor(robot.data.root_link_state_w),
-                    "joint_position": as_torch_tensor(robot.data.joint_pos),
-                    "joint_velocity": as_torch_tensor(robot.data.joint_vel),
-                    "body_mass": as_torch_tensor(robot.data.body_mass),
-                    "body_com": as_torch_tensor(robot.data.body_com_pos_b),
+                    "root_link_state": robot.data.root_link_state_w.torch,
+                    "joint_position": robot.data.joint_pos.torch,
+                    "joint_velocity": robot.data.joint_vel.torch,
+                    "body_mass": robot.data.body_mass.torch,
+                    "body_com": robot.data.body_com_pos_b.torch,
                     "calibration": mgr._ufo_joint_calibration_offset,
                     "stiffness": stiffness,
                     "damping": damping,
@@ -1375,7 +1467,8 @@ class FbCprRunner:
             max_ctx_chunk = max(ref_obs_cache[w]["ctx"].shape[0] for w in chunk)
             ctx_padded = torch.empty(len(chunk), max_ctx_chunk, self.cfg.z_dim, device=self.device)
             heading_padded = torch.empty(self.num_envs, max_ctx_chunk, 2, device=self.device)
-            velocity_padded = torch.empty(self.num_envs, max_ctx_chunk, 2, device=self.device)
+            velocity_padded = torch.empty(self.num_envs, max_ctx_chunk,
+                                          self.obs_dims.get("velocity_command", 3) - 1, device=self.device)
             for c_i, w in enumerate(chunk):
                 ctx = ref_obs_cache[w]["ctx"]
                 ctx_padded[c_i, : ctx.shape[0]] = ctx
@@ -1419,10 +1512,10 @@ class FbCprRunner:
                 "body_link_velocity": torch.empty(max_ctx_chunk + 1, len_chunk, robot.num_bodies, 3, device=self.device),
             }
             physical_buffers["body_position"][0].copy_(
-                as_torch_tensor(robot.data.body_pos_w)[:len_chunk] - mgr.scene.env_origins[:len_chunk, None]
+                robot.data.body_pos_w.torch[:len_chunk] - mgr.scene.env_origins[:len_chunk, None]
             )
-            physical_buffers["root_quaternion"][0].copy_(as_torch_tensor(robot.data.body_quat_w)[:len_chunk, 0])
-            physical_buffers["body_link_velocity"][0].copy_(as_torch_tensor(robot.data.body_link_lin_vel_w)[:len_chunk])
+            physical_buffers["root_quaternion"][0].copy_(robot.data.body_quat_w.torch[:len_chunk, 0])
+            physical_buffers["body_link_velocity"][0].copy_(robot.data.body_link_lin_vel_w.torch[:len_chunk])
             contact_sensor = mgr.scene.sensors.get("contact_forces")
             contact_free = (torch.empty(max_ctx_chunk, len_chunk, dtype=torch.bool, device=self.device)
                             if contact_sensor is not None else None)
@@ -1466,16 +1559,16 @@ class FbCprRunner:
                 buf_state[step].copy_(_joint_state_observation(state_now[:len_chunk], num_dofs))
                 buf_joint[step].copy_(robot.data.joint_pos[:len_chunk])
                 physical_buffers["body_position"][step + 1].copy_(
-                    as_torch_tensor(robot.data.body_pos_w)[:len_chunk] - mgr.scene.env_origins[:len_chunk, None]
+                    robot.data.body_pos_w.torch[:len_chunk] - mgr.scene.env_origins[:len_chunk, None]
                 )
                 physical_buffers["root_quaternion"][step + 1].copy_(
-                    as_torch_tensor(robot.data.body_quat_w)[:len_chunk, 0]
+                    robot.data.body_quat_w.torch[:len_chunk, 0]
                 )
                 physical_buffers["body_link_velocity"][step + 1].copy_(
-                    as_torch_tensor(robot.data.body_link_lin_vel_w)[:len_chunk]
+                    robot.data.body_link_lin_vel_w.torch[:len_chunk]
                 )
                 if contact_free is not None:
-                    forces = as_torch_tensor(contact_sensor.data.net_forces_w_history)[:len_chunk]
+                    forces = contact_sensor.data.net_forces_w_history.torch[:len_chunk]
                     contact_free[step].copy_(forces.norm(dim=-1).amax(dim=(1, 2)) < 1.0)
             buf_state_cpu = buf_state.cpu()
             buf_joint_cpu = buf_joint.cpu()
@@ -1712,6 +1805,7 @@ class FbCprRunner:
                     }))
                 torch.save({
                     "model_state": self.agent.state_dict(),
+                    "obs_dims": getattr(self, "obs_dims", None),
                     "optimizer_state": self.agent.optimizer_state_dict(),
                     "iter": self.tot_iterations,
                     "env_iterations": self.env_iterations,
@@ -1783,11 +1877,21 @@ class FbCprRunner:
             },
             "return": {
                 "objective": getattr(wm.cfg, "objective", "context"),
+                "discriminator_reward": getattr(wm.cfg, "discriminator_reward", False),
+                "tracking_pose": getattr(wm.cfg, "tracking_coef", 0) > 0,
+                "tracking_z": getattr(wm.cfg, "tracking_z", False),
+                "tracking_z_window": (self.agent.cfg.seq_length if getattr(wm.cfg, "tracking_z", False) else None),
+                "discriminator_reward_type": (self.agent.discriminator_reward_type
+                                              if getattr(wm.cfg, "discriminator_reward", False) else None),
                 "imagination_horizon": getattr(wm.cfg, "horizon", 32),
                 "discount": float(self.cfg.discount),
                 "heading_weight": float(wm.cfg.heading_weight),
                 "velocity_weight": float(wm.cfg.velocity_weight),
                 "velocity_error_scale_mps": float(self.cfg.velocity_error_scale_mps),
+                **({"control_dt": self.control_dt, "svg_action_mode": wm.cfg.svg_action_mode}
+                   if getattr(wm.cfg, "objective", "context") == "mbfb" else {}),
+                **({"value_lambda": wm.cfg.value_lambda}
+                   if getattr(wm.cfg, "objective", "context") == "mbfb" else {}),
             },
             "kinematics": (wm.kinematics.checkpoint_contract()
                            if getattr(wm, "kinematics", None) is not None else None),
@@ -1845,6 +1949,12 @@ class FbCprRunner:
         saved = payload.get("world_model_contract")
         saved_return = saved.get("return") if isinstance(saved, dict) else None
         current_return = current["return"]
+        if (isinstance(saved_return, dict)
+                and saved_return.get("objective") == current_return["objective"] == "mbfb"):
+            # Old v14 startup settings do not invalidate learned dynamics or value weights.
+            saved_return = {key: value for key, value in saved_return.items()
+                            if key not in {"gate_ratio", "value_warmup_updates"}}
+            saved = {**saved, "return": saved_return}
         horizon_changed = (
             payload.get("world_model_version") == getattr(self.agent.world_model, "version", None)
             and payload.get("world_model_version") is not None
@@ -1882,6 +1992,15 @@ class FbCprRunner:
             raise ValueError(
                 f"Checkpoint action_rescale={saved_rescale} does not match runner action_rescale={self.action_rescale}."
             )
+        current_dims = getattr(self, "obs_dims", {})
+        saved_dims = payload.get("obs_dims") or {}
+        saved_command_dim = saved_dims.get("velocity_command", 3)
+        if "velocity_command" in current_dims and current_dims["velocity_command"] != saved_command_dim:
+            raise ValueError(
+                f"Checkpoint velocity_command dimension {saved_command_dim} does not match "
+                f"current {current_dims['velocity_command']}. XYZ reference commands change actor/value "
+                "inputs; start a new training run. Old checkpoints remain supported by export_ufo_deploy.py."
+            )
         horizon_changed = False
         if self.world_model_enabled and "world_model" in payload["model_state"]:
             saved_version = payload.get("world_model_version")
@@ -1891,19 +2010,19 @@ class FbCprRunner:
                 for key in ("world_model", "world_model_value", "world_model_sequence_value"):
                     payload.get("optimizer_state", {}).pop(key, None)
                 if self.is_main_process:
-                    print("[WM] Version 1 checkpoint: retaining UFO policy; restarting dynamics/value "
-                          "warmup because the old action contract cannot be verified", flush=True)
+                    print("[WM] Version 1 checkpoint: retaining UFO policy; reinitializing dynamics/value "
+                          "because the old action contract cannot be verified", flush=True)
             elif saved_version != self.agent.world_model.version:
                 # The state/action contract is part of the learned dynamics.  A
                 # checkpoint from an older contract cannot safely load its WM;
-                # retain the policy and restart WM warmup instead.
+                # Retain the policy and initialize a fresh world model instead.
                 payload["model_state"].pop("world_model")
                 for key in ("world_model", "world_model_value", "world_model_sequence_value"):
                     payload.get("optimizer_state", {}).pop(key, None)
                 if self.is_main_process:
                     print(
                         f"[WM] Checkpoint version {saved_version} does not match {self.agent.world_model.version}; "
-                        "retaining UFO policy and restarting world-model warmup",
+                        "retaining UFO policy and initializing a fresh world model",
                         flush=True,
                     )
             else:
@@ -1922,7 +2041,7 @@ class FbCprRunner:
                 print(f"[WM] FB imagination horizon changed from {previous_horizon} to {wm.cfg.horizon}; "
                       "retaining dynamics and replay, restarting horizon validation and actor ramp", flush=True)
         if self.world_model_enabled and "world_model" not in payload["model_state"] and self.is_main_process:
-            print("[WM] Baseline checkpoint: initializing a fresh model and its warmup", flush=True)
+            print("[WM] Baseline checkpoint: initializing a fresh world model", flush=True)
         if load_optimizer and "optimizer_state" in payload:
             self.agent.load_optimizer_state_dict(payload["optimizer_state"])
         self.tot_iterations = payload.get("iter", 0)
@@ -1963,6 +2082,12 @@ class FbCprRunner:
                     available = False
                     if self.is_main_process:
                         print("[RECOVERY] Legacy replay lacks pre-reset outcomes; retain model/optimizer and collect fresh replay", flush=True)
+                history = self.replay["train"].actor_history
+                history_spec = [list(item) for item in history.spec] if history is not None else []
+                if shard_manifest.get("actor_history_spec", []) != history_spec:
+                    available = False
+                    if self.is_main_process:
+                        print("[RECOVERY] Replay history storage changed; retain model/optimizer and collect fresh replay", flush=True)
         except Exception as exc:
             compatibility_error = f"rank {self.gpu_global_rank} replay compatibility: {type(exc).__name__}: {exc}"
         self._checkpoint_check_errors(compatibility_error)

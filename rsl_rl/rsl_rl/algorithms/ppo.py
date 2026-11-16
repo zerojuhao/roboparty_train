@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import torch
 import torch.nn as nn
 from itertools import chain
@@ -14,6 +15,7 @@ from tensordict import TensorDict
 from rsl_rl.env import VecEnv
 from rsl_rl.extensions import RandomNetworkDistillation, Symmetry, resolve_rnd_config, resolve_symmetry_config
 from rsl_rl.models import MLPModel
+from rsl_rl.modules.actor_target import actor_target_loss
 from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import (
     compile_model,
@@ -67,10 +69,18 @@ class PPO:
         grad_reduce_bucket_mb: float = 25,
         aux_loss_coef: float = 0.0,
         enable_aux_loss: bool = False,
+        actor_target_loss_coef: float = 0.0,
+        actor_target_warmup_updates: int = 0,
+        adaptive_learning_rate_max: float = 1.0e-2,
     ) -> None:
         """Initialize the algorithm with models, storage, and optimization settings."""
         # Device-related parameters
         self.device = device
+        if not math.isfinite(adaptive_learning_rate_max) or adaptive_learning_rate_max < 1.0e-5:
+            raise ValueError('adaptive_learning_rate_max must be finite and at least 1e-5')
+        self.adaptive_learning_rate_max = adaptive_learning_rate_max
+        if schedule == "adaptive":
+            learning_rate = min(learning_rate, self.adaptive_learning_rate_max)
         self.is_multi_gpu = multi_gpu_cfg is not None
 
         # Multi-GPU parameters
@@ -123,6 +133,17 @@ class PPO:
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
         self.use_mixed_precision = use_mixed_precision
         self.aux_loss_coef = aux_loss_coef if enable_aux_loss else 0.0
+        if not math.isfinite(actor_target_loss_coef) or actor_target_loss_coef < 0:
+            raise ValueError('actor_target_loss_coef must be finite and non-negative')
+        if type(actor_target_warmup_updates) is not int or actor_target_warmup_updates < 0:
+            raise ValueError('actor_target_warmup_updates must be a non-negative integer')
+        self.actor_target_loss_coef = actor_target_loss_coef
+        self.actor_target_warmup_updates = actor_target_warmup_updates
+        self.actor_target_updates = 0
+
+    def actor_target_coefficient(self) -> float:
+        ramp = min((self.actor_target_updates + 1) / self.actor_target_warmup_updates, 1.) if self.actor_target_warmup_updates else 1.
+        return self.actor_target_loss_coef * ramp
 
     def act(self, obs: TensorDict) -> torch.Tensor:
         """Sample actions and store transition data."""
@@ -198,6 +219,7 @@ class PPO:
         metric_totals = torch.zeros(6, device=self.device, dtype=torch.float32)
         mean_aux_metrics: dict[str, torch.Tensor] = {}
         aux_metric_counts: dict[str, int] = {}
+        target_coefficient = self.actor_target_coefficient()
 
         # Get mini-batch generator
         if self.actor.is_recurrent or self.critic.is_recurrent:
@@ -253,7 +275,7 @@ class PPO:
                             if kl_value > self.desired_kl * 2.0:
                                 self.learning_rate = max(1e-5, self.learning_rate / 1.5)
                             elif 0.0 < kl_value < self.desired_kl / 2.0:
-                                self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                                self.learning_rate = min(self.adaptive_learning_rate_max, self.learning_rate * 1.5)
 
                         # Update the learning rate for all GPUs
                         if self.is_multi_gpu:
@@ -288,6 +310,17 @@ class PPO:
                     if aux_loss is not None:
                         loss = loss + self.aux_loss_coef * aux_loss
                         metric_totals[3].add_(aux_loss.detach().float())
+                if self.actor_target_loss_coef:
+                    if 'arm_passive_target' not in batch.observations:
+                        raise ValueError('Actor target supervision requires arm_passive_target observations')
+                    target_loss, target_gate = actor_target_loss(
+                        self.actor.output_mean, batch.observations['arm_passive_target'])
+                    loss = loss + target_coefficient * target_loss
+                    for key, value in (('actor_target', target_loss.detach()),
+                                       ('actor_target_gate_fraction', target_gate),
+                                       ('actor_target_coefficient', target_loss.new_tensor(target_coefficient))):
+                        mean_aux_metrics[key] = mean_aux_metrics.get(key, torch.zeros_like(value)) + value
+                        aux_metric_counts[key] = aux_metric_counts.get(key, 0) + 1
                 get_aux_metrics = getattr(self.actor, "get_aux_metrics", None)
                 if get_aux_metrics is not None:
                     for key, value in get_aux_metrics().items():
@@ -378,6 +411,8 @@ class PPO:
 
         # Clear the storage
         self.storage.clear()
+        if self.actor_target_loss_coef:
+            self.actor_target_updates += 1
 
         return loss_dict
 
@@ -405,6 +440,8 @@ class PPO:
         if self.rnd:
             saved_dict["rnd_state_dict"] = self.rnd.state_dict()
             saved_dict["rnd_optimizer_state_dict"] = self.rnd.optimizer.state_dict()
+        if self.actor_target_loss_coef:
+            saved_dict['actor_target_updates'] = self.actor_target_updates
         return saved_dict
 
     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
@@ -427,6 +464,13 @@ class PPO:
         if load_cfg.get("optimizer"):
             self.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
             self.learning_rate = self.optimizer.param_groups[0]["lr"]
+            if self.schedule == "adaptive":
+                self.learning_rate = min(self.learning_rate, self.adaptive_learning_rate_max)
+                for group in self.optimizer.param_groups:
+                    group["lr"] = self.learning_rate
+            self.actor_target_updates = int(loaded_dict.get('actor_target_updates', 0))
+            if self.actor_target_updates < 0:
+                raise ValueError('actor_target_updates cannot be negative')
         if load_cfg.get("rnd") and self.rnd:
             self.rnd.load_state_dict(loaded_dict["rnd_state_dict"], strict=strict)
             self.rnd.optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])
@@ -482,6 +526,7 @@ class PPO:
             num_rewards=num_rewards,
             compact_depth_history=cfg.get("compact_depth_history", False),
             depth_history_offsets=cfg.get("depth_history_offsets", ()),
+            depth_observation_key=cfg.get("depth_observation_key", ("depth",)),
         )
 
         # Initialize the algorithm

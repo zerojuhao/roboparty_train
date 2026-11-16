@@ -1,19 +1,23 @@
 """Real-replay dynamics and differentiable imagination for UFO.
 
 No learned termination: timeout ends replay windows, never the value bootstrap.
-The existing FB representations and critics consume only simulator transitions.
+An optional short-horizon successor target augments F; B and the original critics
+continue learning only from simulator transitions.
 """
 
 from __future__ import annotations
 
 import copy
 import math
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
+
+from .world_model_memory import memory_phase
 
 from isaaclab.utils.math import quat_apply, quat_apply_inverse, quat_conjugate, quat_mul, yaw_quat
 
@@ -189,7 +193,8 @@ class UFOStateCodec(nn.Module):
         frame = yaw_quat(quat)
         target_heading = quat_apply_inverse(frame, F.pad(heading_target, (0, 1)))[:, :2]
         heading = torch.cat((1 - target_heading[:, :1], target_heading[:, 1:2]), -1) * valid[:, :1]
-        velocity = quat_apply_inverse(frame, F.pad(velocity_target, (0, 1)))[:, :2]
+        dim = velocity_target.shape[-1]
+        velocity = quat_apply_inverse(frame, F.pad(velocity_target, (0, 3 - dim)))[:, :dim]
         return {"state": policy, "last_action": previous_action, "history_actor": history,
                 "heading": heading,
                 "velocity_command": torch.cat((velocity * valid[:, 1:2], valid[:, 1:2]), -1),
@@ -211,20 +216,23 @@ class UFOStateCodec(nn.Module):
 class UFOWorldModel(nn.Module):
     # The learned transition ends before an external push. Replay carries the
     # sampled post-physics COM velocity override separately for autoregressive fitting.
-    version = 9
+    version = 12
 
-    def __init__(self, cfg, codec_kwargs, xi_dim, actor_obs_dim, z_dim, device, *, kinematics=None):
+    def __init__(self, cfg, codec_kwargs, xi_dim, actor_obs_dim, z_dim, device, *, kinematics=None, velocity_dim=2):
         super().__init__()
         self.cfg_dict = dict(cfg) if isinstance(cfg, dict) else vars(cfg).copy()
         self.cfg = cfg = SimpleNamespace(**self.cfg_dict)
         # Older programmatic callers retain the original context-only objective.
         defaults = dict(objective="context", validation_max_p95=0.5,
-                        imagination_max_disagreement=0.25, imagination_action_radius=0.5,
+                        imagination_action_radius=0.5,
                         fb_covariance_batch_size=1024, fb_covariance_ridge=1e-3,
                         fb_max_projection_residual=0.1, fit_batches=1, bootstrap_members=False,
                         validation_batch_size=cfg.batch_size, fb_covariance_chunk_size=1024,
-                        imagination_interval=1, imagination_microbatch_size=64,
-                        scoring_chunk_size=2048, sequence_context_length=10)
+                        imagination_interval=1, imagination_microbatch_size=16,
+                        fit_microbatch_size=128, activation_checkpointing=True, profile_memory=False,
+                        scoring_chunk_size=2048, sequence_context_length=10,
+                        discriminator_reward=False, tracking_z=False, tracking_coef=0.0,
+                        forward_weight=0.0, forward_horizon=4)
         for key, value in defaults.items():
             if not hasattr(cfg, key):
                 setattr(cfg, key, value)
@@ -233,22 +241,35 @@ class UFOWorldModel(nn.Module):
             raise ValueError(f"Unknown world model objective: {cfg.objective}")
         if cfg.objective in {"fb_value", "fb_sequence"} and kinematics is None:
             raise ValueError("FB imagination requires verified privileged-state kinematics")
-        if cfg.objective in {"fb_value", "fb_sequence"} and cfg.ensemble_size < 2:
-            raise ValueError("FB imagination requires at least two dynamics members")
         for key in ("ensemble_size", "window_length", "horizon", "batch_size", "imagination_batch_size",
                     "update_interval", "ramp_updates", "validation_interval", "fb_covariance_batch_size",
                     "fit_batches", "validation_batch_size", "fb_covariance_chunk_size", "imagination_interval",
-                    "imagination_microbatch_size", "scoring_chunk_size", "sequence_context_length"):
+                    "imagination_microbatch_size", "fit_microbatch_size", "scoring_chunk_size", "sequence_context_length", "forward_horizon"):
             if type(getattr(cfg, key)) is not int or getattr(cfg, key) < 1:
                 raise ValueError(f"world_model.{key} must be a positive integer")
         if type(cfg.bootstrap_members) is not bool:
             raise ValueError("world_model.bootstrap_members must be a boolean")
+        for key in ("activation_checkpointing", "profile_memory"):
+            if type(getattr(cfg, key)) is not bool:
+                raise ValueError(f"world_model.{key} must be a boolean")
+        if type(cfg.discriminator_reward) is not bool:
+            raise ValueError("world_model.discriminator_reward must be a boolean")
+        if type(cfg.tracking_z) is not bool:
+            raise ValueError("world_model.tracking_z must be a boolean")
+        if cfg.tracking_z and cfg.objective != "fb_sequence":
+            raise ValueError("Tracking relabeling requires fb_sequence; set tracking_z=False for other objectives")
+        if cfg.tracking_coef > 0 and not cfg.tracking_z:
+            raise ValueError("Pose tracking requires tracking_z=True for aligned expert references")
+        if cfg.forward_weight > 0 and (cfg.objective == "context" or cfg.forward_horizon < 2):
+            raise ValueError("F model targets require an FB objective and forward_horizon >= 2")
+        if cfg.forward_weight > 0 and max(cfg.validation_horizons) < cfg.forward_horizon - 1:
+            raise ValueError("F model targets require validation covering forward_horizon - 1")
         for key in ("learning_rate", "grad_clip", "validation_max_p95",
-                    "imagination_max_disagreement", "imagination_action_radius", "fb_covariance_ridge",
+                    "imagination_action_radius", "fb_covariance_ridge",
                     "fb_max_projection_residual"):
             if not math.isfinite(getattr(cfg, key)) or getattr(cfg, key) <= 0:
                 raise ValueError(f"world_model.{key} must be finite and positive")
-        for key in ("actor_weight", "heading_weight", "velocity_weight"):
+        for key in ("actor_weight", "heading_weight", "velocity_weight", "tracking_coef", "forward_weight"):
             if not math.isfinite(getattr(cfg, key)) or getattr(cfg, key) < 0:
                 raise ValueError(f"world_model.{key} must be finite and nonnegative")
         if (any(type(getattr(cfg, key)) is not int or getattr(cfg, key) < 0
@@ -276,6 +297,8 @@ class UFOWorldModel(nn.Module):
             self.sequence_value = SequenceValue(
                 self.codec.state_dim, xi_dim, actor_obs_dim, z_dim,
                 cfg.sequence_context_length, cfg.value_hidden_dims,
+                output_dim=1 + int(cfg.discriminator_reward),
+                velocity_dim=velocity_dim,
             )
             self.target_sequence_value = copy.deepcopy(self.sequence_value).requires_grad_(False)
         self.register_buffer("sequence_value_updates", torch.zeros((), dtype=torch.long))
@@ -318,7 +341,18 @@ class UFOWorldModel(nn.Module):
         local = self.codec.rotate_state(state, quat_conjugate(heading))
         executed = self.codec.env_action(action)
         features = torch.cat((local / self.codec.state_scale, executed / self.codec.action_rescale, xi), -1)
-        output = self.members[member](self.input_norm(features))
+        network = self.members[member]
+        features = self.input_norm(features)
+        # PyTorch checkpoint does not support forward-mode AD used by JVP diagnostics.
+        has_tangent = torch.autograd.forward_ad.unpack_dual(features).tangent is not None
+        if self.cfg.activation_checkpointing and torch.is_grad_enabled() and not has_tangent:
+            # Imagination restores requires_grad before backward; recompute with
+            # the same frozen weights while retaining gradients through inputs.
+            is_frozen = not any(parameter.requires_grad for parameter in network.parameters())
+            output = checkpoint(network, features, use_reentrant=False,
+                                context_fn=lambda: (nullcontext(), frozen(network) if is_frozen else nullcontext()))
+        else:
+            output = network(features)
         delta = output * self.delta_norm.std() + self.delta_norm.mean
         next_local = self.codec.apply_delta(local, delta)
         return self.codec.rotate_state(next_local, heading)
@@ -347,17 +381,22 @@ class UFOWorldModel(nn.Module):
         self.input_norm.update(features)
         self.delta_norm.update(self.codec.delta_from_states(state, target))
 
-    def _sample(self, replay, length, batch_size, *, validation=False):
+    def _sample(self, replay, length, batch_size, *, validation=False, device=None):
+        device = self.device if device is None else device
         holdout = max(1, replay.num_envs // 8)
         split = replay.num_envs - holdout
         env_ids = torch.arange(split, replay.num_envs) if validation else torch.arange(split)
         batch = replay.sample(batch_size * length, seq_length=length, env_ids=env_ids)
-        fields = {k: v.to(self.device).reshape(batch_size, length, -1) for k, v in batch["world_model"].items()}
-        fields["action"] = batch["action"].to(self.device).reshape(batch_size, length, -1)
-        fields["history"] = batch["observation"]["history_actor"].to(self.device).reshape(batch_size, length, -1)
-        fields["z"] = batch["z"].to(self.device).reshape(batch_size, length, -1)
+        fields = {k: v.to(device).reshape(batch_size, length, -1) for k, v in batch["world_model"].items()}
+        fields["previous_action"] = batch["observation"]["last_action"].to(device).reshape(batch_size, length, -1)
+        fields["action"] = batch["action"].to(device).reshape(batch_size, length, -1)
+        fields["history"] = batch["observation"]["history_actor"].to(device).reshape(batch_size, length, -1)
+        fields["z"] = batch["z"].to(device).reshape(batch_size, length, -1)
         if "aux_rewards" in batch and "heading_context_id" in batch["aux_rewards"]:
-            fields["context_id"] = batch["aux_rewards"]["heading_context_id"].to(self.device).reshape(batch_size, length, -1)
+            fields["context_id"] = batch["aux_rewards"]["heading_context_id"].to(device).reshape(batch_size, length, -1)
+        if "aux_rewards" in batch and "heading_source_type" in batch["aux_rewards"]:
+            fields["tracking_source"] = (batch["aux_rewards"]["heading_source_type"].to(device)
+                                         .reshape(batch_size, length, -1) == 1)
         return fields
 
     def _available(self, replay, length, validation=False):
@@ -369,35 +408,71 @@ class UFOWorldModel(nn.Module):
             torch.distributed.all_reduce(ready, op=torch.distributed.ReduceOp.MIN)
         return bool(ready)
 
-    def fit(self, replay, agent):
+    def fit(self, replay, agent, *, expert_replay=None):
         self._imagination_batch = None
         self.calls.add_(1)
         cfg = self.cfg
         if int(self.calls) % cfg.update_interval or not self._available(replay, cfg.window_length):
             return {}
+        metrics = self._fit_dynamics(replay, agent)
+        self.updates.add_(1)
+        imagination_length = (cfg.horizon + cfg.sequence_context_length if cfg.objective == "fb_sequence"
+                              else cfg.horizon + 1 if cfg.objective == "fb_value" else 1)
+        if (cfg.actor_weight > 0 and int(self.updates) > cfg.warmup_updates
+                and int(self.updates) % cfg.imagination_interval == 0
+                and self._available(replay, imagination_length)):
+            self._imagination_batch = self._sample(replay, imagination_length, cfg.imagination_batch_size, device="cpu")
+            if cfg.tracking_z:
+                from .world_model_tracking import prepare_tracking_batch
+
+                chunks = []
+                for start in range(0, cfg.imagination_batch_size, cfg.imagination_microbatch_size):
+                    chunk = {key: value[start:start + cfg.imagination_microbatch_size].to(self.device)
+                             for key, value in self._imagination_batch.items()}
+                    prepare_tracking_batch(self, agent, chunk, expert_replay)
+                    chunks.append({key: value.cpu() for key, value in chunk.items()})
+                    del chunk
+                self._imagination_batch = {key: torch.cat([chunk[key] for chunk in chunks]) for key in chunks[0]}
+        metrics.update({"wm/updates": self.updates.float().clone(),
+                        "wm/fit_phases": self.updates.float().clone(),
+                        "wm/optimizer_steps": self.optimizer_steps.float().clone()})
+        if cfg.actor_weight > 0 and cfg.objective in {"fb_value", "fb_sequence"}:
+            metrics.update(self._update_fb_covariance(replay, agent))
+        if int(self.updates) % cfg.validation_interval == 0:
+            metrics.update(self.validate(replay, agent))
+        return metrics
+
+    @memory_phase("fit")
+    def _fit_dynamics(self, replay, agent):
+        cfg = self.cfg
         phase_losses, phase_gradients = [], []
         for _ in range(cfg.fit_batches):
-            batches = [self._sample(replay, cfg.window_length, cfg.batch_size)
+            batches = [self._sample(replay, cfg.window_length, cfg.batch_size, device="cpu")
                        for _ in range(cfg.ensemble_size if cfg.bootstrap_members else 1)]
             for batch in batches:
-                self._update_norms(batch)
+                self._update_norms({key: batch[key].to(self.device)
+                                    for key in ("state", "next_state", "action", "xi")})
             self.optimizer.zero_grad(set_to_none=True)
             member_losses = []
             for member in range(cfg.ensemble_size):
                 batch = batches[member if cfg.bootstrap_members else 0]
-                state, losses = batch["state"][:, 0], []
-                for step in range(cfg.window_length):
-                    state = self.predict(state, batch["action"][:, step], batch["xi"][:, step], member)
-                    losses.append(self._scaled_state_error(state, batch["next_state"][:, step]).mean())
-                    state = self._apply_disturbance(
-                        state, batch["disturbance"][:, step], batch["disturbance_mask"][:, step]
-                    )
-                loss = torch.stack(losses).mean() / cfg.ensemble_size
-                if not torch.isfinite(loss):
-                    raise FloatingPointError("Non-finite world model fitting loss")
-                # Release each member's graph before fitting the next member.
-                loss.backward()
-                member_losses.append(loss.detach())
+                for start in range(0, cfg.batch_size, cfg.fit_microbatch_size):
+                    chunk = {key: value[start:start + cfg.fit_microbatch_size].to(self.device)
+                             for key, value in batch.items()
+                             if key in {"state", "next_state", "action", "xi", "disturbance", "disturbance_mask"}}
+                    state, losses = chunk["state"][:, 0], []
+                    for step in range(cfg.window_length):
+                        state = self.predict(state, chunk["action"][:, step], chunk["xi"][:, step], member)
+                        losses.append(self._scaled_state_error(state, chunk["next_state"][:, step]).mean())
+                        state = self._apply_disturbance(
+                            state, chunk["disturbance"][:, step], chunk["disturbance_mask"][:, step]
+                        )
+                    loss = torch.stack(losses).mean() * len(state) / (cfg.batch_size * cfg.ensemble_size)
+                    if not torch.isfinite(loss):
+                        raise FloatingPointError("Non-finite world model fitting loss")
+                    loss.backward()
+                    member_losses.append(loss.detach())
+                    del state, losses, loss, chunk
             agent._avg_grad(self.members.parameters())
             grad = nn.utils.clip_grad_norm_(self.members.parameters(), cfg.grad_clip, error_if_nonfinite=True)
             self.optimizer.step()
@@ -405,24 +480,9 @@ class UFOWorldModel(nn.Module):
             self.optimizer_steps.add_(1)
             phase_losses.append(torch.stack(member_losses).sum())
             phase_gradients.append(grad.detach())
-        self.updates.add_(1)
-        imagination_length = (cfg.horizon + cfg.sequence_context_length if cfg.objective == "fb_sequence"
-                              else cfg.horizon + 1 if cfg.objective == "fb_value" else 1)
-        if (cfg.actor_weight > 0 and int(self.updates) > cfg.warmup_updates
-                and int(self.updates) % cfg.imagination_interval == 0
-                and self._available(replay, imagination_length)):
-            self._imagination_batch = self._sample(replay, imagination_length, cfg.imagination_batch_size)
         mean_loss = torch.stack(phase_losses).mean()
-        metrics = {"wm/loss": mean_loss, "wm/state_mse": mean_loss,
-                   "wm/grad_norm": torch.stack(phase_gradients).mean(),
-                   "wm/updates": self.updates.float().clone(),
-                   "wm/fit_phases": self.updates.float().clone(),
-                   "wm/optimizer_steps": self.optimizer_steps.float().clone()}
-        if cfg.actor_weight > 0 and cfg.objective in {"fb_value", "fb_sequence"}:
-            metrics.update(self._update_fb_covariance(replay, agent))
-        if int(self.updates) % cfg.validation_interval == 0:
-            metrics.update(self.validate(replay, agent))
-        return metrics
+        return {"wm/loss": mean_loss, "wm/state_mse": mean_loss,
+                "wm/grad_norm": torch.stack(phase_gradients).mean()}
 
     @torch.no_grad()
     def _update_fb_covariance(self, replay, agent):
@@ -461,7 +521,7 @@ class UFOWorldModel(nn.Module):
         forward[:, 0] = 1
         heading_now = F.normalize(quat_apply(state[:, 1:5], forward)[:, :2], dim=-1, eps=1e-6)
         heading_reward = ((heading_now * heading).sum(-1, keepdim=True).clamp(-1, 1) - 1) * valid[:, :1]
-        error = torch.linalg.vector_norm((state[:, 5:7] - velocity) / velocity_scale, dim=-1, keepdim=True)
+        error = torch.linalg.vector_norm((state[:, 5:7] - velocity[:, :2]) / velocity_scale, dim=-1, keepdim=True)
         velocity_reward = -F.huber_loss(error, torch.zeros_like(error), reduction="none") * valid[:, 1:2]
         return self.cfg.heading_weight * heading_reward + self.cfg.velocity_weight * velocity_reward
 
@@ -472,6 +532,7 @@ class UFOWorldModel(nn.Module):
         self._imagination_batch = None
         if batch is None or cfg.actor_weight == 0 or int(self.updates) <= cfg.warmup_updates:
             return None, {}
+        batch = {key: value.to(self.device) for key, value in batch.items()}
         if cfg.objective == "fb_value":
             from .world_model_imagination import fb_imagination_loss
 
@@ -576,6 +637,7 @@ class UFOWorldModel(nn.Module):
             target.lerp_(source, self.cfg.value_tau)
 
     @torch.no_grad()
+    @memory_phase("validation")
     def validate(self, replay, agent=None):
         metrics = {}
         horizons = set(self.cfg.validation_horizons)
@@ -605,7 +667,6 @@ class UFOWorldModel(nn.Module):
             member_physical.append(torch.stack(physical, 1))
         states = torch.stack(member_states)
         all_errors, all_physical = torch.stack(member_errors), torch.stack(member_physical)
-        frame = quat_conjugate(yaw_quat(batch["state"][:, 0, 1:5]))
         for horizon in horizons:
             errors = all_errors[:, :, horizon - 1].mean(0)
             path_errors = all_errors[:, :, :horizon].amax(dim=(0, 2))
@@ -620,14 +681,6 @@ class UFOWorldModel(nn.Module):
                     torch.distributed.all_reduce(quality, op=torch.distributed.ReduceOp.MAX)
                 self.validation_p95.copy_(quality)
                 self.validated_at.copy_(self.updates)
-            predictions = []
-            reference = self.codec.rotate_state(batch["next_state"][:, horizon - 1], frame)
-            for member in range(self.cfg.ensemble_size):
-                prediction = self.codec.rotate_state(states[member, :, horizon - 1], frame)
-                sign = torch.where((prediction[:, 1:5] * reference[:, 1:5]).sum(-1, keepdim=True) < 0, -1., 1.)
-                prediction = torch.cat((prediction[:, :1], prediction[:, 1:5] * sign, prediction[:, 5:]), -1)
-                predictions.append(prediction[:, :59] / self.codec.state_scale[:59])
-            metrics[f"wm/validation_{horizon}_disagreement"] = torch.stack(predictions).std(0, unbiased=False).mean()
             for suffix, physical_error in (("", all_physical[:, :, horizon - 1]),
                                            ("path_", all_physical[:, :, :horizon])):
                 for name, error in zip(

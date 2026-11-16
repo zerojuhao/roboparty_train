@@ -16,6 +16,24 @@ from rsl_rl.modules.distribution import Distribution
 from rsl_rl.utils import resolve_class, unpad_trajectories
 
 
+
+def _group_as_1d(value: torch.Tensor | TensorDict) -> torch.Tensor:
+    """Flatten a possibly unconcatenated ObsGroup TensorDict into a 2D tensor.
+
+    SSR critic uses concatenate_terms=False so named foot maps stay addressable;
+    the MLP critic still needs a flat vector.
+    """
+    if isinstance(value, TensorDict):
+        parts = []
+        for v in value.values():
+            if isinstance(v, torch.Tensor):
+                parts.append(v if v.ndim == 2 else v.reshape(v.shape[0], -1))
+        if not parts:
+            raise ValueError("Nested observation group has no tensor terms.")
+        return torch.cat(parts, dim=-1)
+    return value
+
+
 class MLPModel(nn.Module):
     """MLP-based neural model.
 
@@ -111,8 +129,8 @@ class MLPModel(nn.Module):
         self, obs: TensorDict, masks: torch.Tensor | None = None, hidden_state: HiddenState = None
     ) -> torch.Tensor:
         """Build the model latent by concatenating and normalizing selected observation groups."""
-        # Select and concatenate observations
-        latent = torch.cat([obs[obs_group] for obs_group in self.obs_groups], dim=-1)
+        # Select and concatenate observations (flatten unconcatenated ObsGroups)
+        latent = torch.cat([_group_as_1d(obs[obs_group]) for obs_group in self.obs_groups], dim=-1)
         # Normalize observations
         latent = self.obs_normalizer(latent)
         return latent
@@ -170,8 +188,8 @@ class MLPModel(nn.Module):
     def update_normalization(self, obs: TensorDict) -> None:
         """Update observation-normalization statistics from a batch of observations."""
         if self.obs_normalization:
-            # Select and concatenate observations
-            obs_list = [obs[obs_group] for obs_group in self.obs_groups]
+            # Select and concatenate observations (flatten unconcatenated ObsGroups)
+            obs_list = [_group_as_1d(obs[obs_group]) for obs_group in self.obs_groups]
             mlp_obs = torch.cat(obs_list, dim=-1)
             # Update the normalizer parameters
             self.obs_normalizer.update(mlp_obs)  # type: ignore
@@ -181,11 +199,12 @@ class MLPModel(nn.Module):
         active_obs_groups = obs_groups[obs_set]
         obs_dim = 0
         for obs_group in active_obs_groups:
-            if len(obs[obs_group].shape) != 2:
+            flat = _group_as_1d(obs[obs_group])
+            if flat.ndim != 2:
                 raise ValueError(
-                    f"The MLP model only supports 1D observations, got shape {obs[obs_group].shape} for '{obs_group}'."
+                    f"The MLP model only supports 1D observations, got shape {flat.shape} for '{obs_group}'."
                 )
-            obs_dim += obs[obs_group].shape[-1]
+            obs_dim += flat.shape[-1]
         return active_obs_groups, obs_dim
 
     def _get_latent_dim(self) -> int:

@@ -12,10 +12,21 @@ version = "0.1.0"
 description = "RP1/RPO training overlay on unmodified Isaac Lab 3.0."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "isaaclab-dev[ov,importers]",
-    "robo-newton",
+    "isaaclab-dev",
+    "robolab",
     "rsl-rl-lib",
 ]
+
+[project.optional-dependencies]
+physx = ["isaaclab-dev[isaacsim]"]
+tools = ["robolab[tools]"]
+video = ["isaaclab-dev[video]"]
+wandb = ["rsl-rl-lib[wandb]"]
+
+[dependency-groups]
+# LIVE: include ov with importers so Newton/OV runtime stays in the default sync
+# (official mjwarp group is importers-only; full isaacsim stays under optional physx).
+mjwarp = ["isaaclab-dev[importers,ov]"]
 
 # Keep indexes and overrides aligned with IsaacLab-3.0/pyproject.toml [tool.uv].
 [[tool.uv.index]]
@@ -34,12 +45,15 @@ explicit = true
 
 [tool.uv]
 package = false
+default-groups = ["mjwarp"]
 index-strategy = "unsafe-best-match"
 prerelease = "allow"
 python-preference = "only-managed"
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
+# Path-based editables avoid checkout directories shadowing their Python packages.
+config-settings-package = { robolab = { editable_mode = "compat" }, rsl-rl-lib = { editable_mode = "compat" } }
 override-dependencies = [
     "numpy>=2",
     "mujoco~=3.12.0",
@@ -57,7 +71,7 @@ override-dependencies = [
 
 [tool.uv.sources]
 isaaclab-dev = { path = "IsaacLab-3.0", editable = true }
-robo-newton = { path = "robo_newton", editable = true }
+robolab = { path = "robolab", editable = true }
 rsl-rl-lib = { path = "rsl_rl", editable = true }
 omniverseclient = { index = "pypi-public" }
 ovphysx = { index = "pypi-public" }

@@ -1,0 +1,579 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<mujoco model="rp1">
+  <compiler angle="radian" meshdir="../" autolimits="true" eulerseq="zyx" balanceinertia="true"/>
+  <option timestep="0.005" integrator="implicitfast" iterations="100" solver="Newton" gravity="0 0 -9.81">
+    <flag frictionloss="enable"/>
+  </option>
+  <size memory="32M"/>
+  <default>
+    <default class="RP1">
+      <joint damping="0.01" frictionloss="0.1" armature="0.01"/>
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom group="3" condim="4" contype="1" conaffinity="1" solref="0.01 1" friction="0.9 0.2 0.2"/>
+      </default>
+    </default>
+    <default class="hand">
+      <joint type="hinge" damping="2.0" armature="0.01" frictionloss="0"/>
+      <geom condim="4" friction="1.0 0.005 0.001" contype="0" conaffinity="0" group="2"/>
+      <equality solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    </default>
+  </default>
+  <worldbody>
+    <body name="base_link" pos="0 0 0.78" quat="1 0 0 0" childclass="RP1">
+      <site name="imu" size="0.01" pos="0.0 0 0.0"/>
+      <freejoint name="base_link_freejoint"/>
+      <inertial pos="-0.03786057 -0.00301243 -0.04479345" mass="3.295" fullinertia="0.00960796 0.00699457 0.00815508 0.00000112 -0.00015116 -0.00000270"/>
+      <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="base_link" material="base_link_material"/>
+      <!-- LEFT LEG -->
+      <body name="left_hip_pitch_link" pos="-0.03843 0.062987 -0.051639" quat="1 0 0 0">
+        <joint axis="0 1 0" name="left_hip_pitch_joint" type="hinge" range="-2.86 2.86" armature="0.0290856"/>
+        <inertial pos="-0.00326988 0.05886633 -0.05765170" mass="1.83930168" fullinertia="0.00338343 0.00286182 0.00254132 0.00000610 -0.00000685 0.00030016"/>
+        <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_hip_pitch_link" material="left_hip_pitch_material"/>
+        <geom name="left_hip_pitch_collision" type="capsule" class="collision" size="0.04970" fromto="-0.01122 0.06756 -0.06890 -0.01122 0.05070 -0.01118"/>
+        <body name="left_hip_roll_link" pos="0.031915 0.061254 -0.060672" quat="1 0 0 0">
+          <joint axis="1 0 0" name="left_hip_roll_joint" type="hinge" range="-0.74 2.6" armature="0.0290856"/>
+          <inertial pos="-0.00518991 -0.00003499 -0.08084106" mass="1.473" fullinertia="0.00376408 0.00382823 0.00192275 0.00000313 -0.00065554 -0.00000256"/>
+          <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_hip_roll_link" material="left_hip_roll_material"/>
+          <geom name="left_hip_roll_collision" type="capsule" class="collision" size="0.05622" fromto="-0.01270 0 -0.07578 -0.01270 0 -0.00658"/>
+          <body name="left_hip_yaw_link" pos="-0.012698 0 -0.129" quat="1 0 0 0">
+            <joint axis="0 0 -1" name="left_hip_yaw_joint" type="hinge" range="-2.76 2.76" armature="0.00884"/>
+            <inertial pos="-0.01959270 -0.00023200 -0.12376414" mass="2.483" fullinertia="0.01126838 0.01225761 0.00388513 0.00001684 -0.00196020 0.00002442"/>
+            <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_hip_yaw_link" material="left_hip_yaw_material"/>
+            <geom name="left_hip_yaw_collision" type="capsule" class="collision" size="0.05622" fromto="-0.03046 0 -0.16235 -0.00001 0 -0.05622"/>
+            <body name="left_knee_link" pos="-0.033201 -0.030809 -0.16509" quat="1 0 0 0">
+              <joint axis="0 -1 0" name="left_knee_joint" type="hinge" range="-2.83 0.06" armature="0.0290856"/>
+              <inertial pos="0.03105182 0.03046366 -0.13362250" mass="2.557" fullinertia="0.01819333 0.01828843 0.00291276 -0.00006969 -0.00019845 0.00002464"/>
+              <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_knee_link" material="left_knee_material"/>
+              <geom name="left_knee_upper_collision" type="capsule" class="collision" size="0.0520" fromto="0.0330 0.03081 -0.1450 0.0030 0.03081 -0.0040"/>
+              <geom name="left_knee_lower_collision" type="capsule" class="collision" size="0.0405" fromto="0.0270 0.03081 -0.2780 0.0330 0.03081 -0.1850"/>
+              <body name="left_ankle_pitch_link" pos="0.03131 0.030811 -0.30533" quat="1 0 0 0">
+                <joint axis="0 1 0" name="left_ankle_pitch_joint" type="hinge" range="-0.78 0.61" armature="0.006266268" frictionloss="0.1"/>
+                <inertial pos="0.00126332 0.00000000 -0.01319163" mass="0.16605731" fullinertia="0.00003624 0.00004292 0.00002407 0.00000000 0.00000148 0.00000000"/>
+                <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_ankle_pitch_link" material="left_ankle_pitch_material"/>
+                <geom name="left_ankle_pitch_collision" type="capsule" class="collision" size="0.02150" fromto="-0.00145 0 -0.00614 0.00959 0 -0.01051"/>
+                <body name="left_ankle_roll_link" pos="0.013067 0 -0.018922" quat="1 0 0 0">
+                  <joint axis="0.999993677858222 0 0.00355587451777954" name="left_ankle_roll_joint" type="hinge" range="-0.26 0.26" armature="0.006266268" frictionloss="0.1"/>
+                  <inertial pos="0.008711 -0.000002 -0.021633" mass="0.6430" fullinertia="0.000361 0.001920 0.002002 0.000000 0.000123 0.000000"/>
+                  <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_ankle_roll_link" material="left_ankle_roll_material"/>
+                  <geom name="left_foot_toe_neg_collision" type="capsule" class="collision" size="0.01" fromto="0.03 -0.03 -0.035 0.09 -0.03 -0.035"/>
+                  <geom name="left_foot_outer_neg_collision" type="capsule" class="collision" size="0.01" fromto="-0.065 -0.02 -0.035 0.11 -0.02 -0.035"/>
+                  <geom name="left_foot_inner_neg_collision" type="capsule" class="collision" size="0.01" fromto="-0.0775 -0.01 -0.035 0.1225 -0.01 -0.035"/>
+                  <geom name="left_foot_center_collision" type="capsule" class="collision" size="0.01" fromto="-0.0825 0 -0.035 0.1275 0 -0.035"/>
+                  <geom name="left_foot_inner_pos_collision" type="capsule" class="collision" size="0.01" fromto="-0.0775 0.01 -0.035 0.1225 0.01 -0.035"/>
+                  <geom name="left_foot_outer_pos_collision" type="capsule" class="collision" size="0.01" fromto="-0.065 0.02 -0.035 0.11 0.02 -0.035"/>
+                  <geom name="left_foot_toe_pos_collision" type="capsule" class="collision" size="0.01" fromto="0.03 0.03 -0.035 0.09 0.03 -0.035"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <!-- RIGHT LEG -->
+      <body name="right_hip_pitch_link" pos="-0.03843 -0.069013 -0.051639" quat="1 0 0 0">
+        <joint axis="0 -1 0" name="right_hip_pitch_joint" type="hinge" range="-2.86 2.86" armature="0.0290856"/>
+        <inertial pos="-0.00326831 -0.05867998 -0.05764945" mass="1.84174869" fullinertia="0.00339042 0.00287691 0.00253348 0.00000130 -0.00000978 -0.00029218"/>
+        <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_hip_pitch_link" material="right_hip_pitch_material"/>
+        <geom name="right_hip_pitch_collision" type="capsule" class="collision" size="0.04970" fromto="-0.01122 -0.06756 -0.06890 -0.01122 -0.05070 -0.01118"/>
+        <body name="right_hip_roll_link" pos="0.031915 -0.061254 -0.060672" quat="1 0 0 0">
+          <joint axis="1 0 0" name="right_hip_roll_joint" type="hinge" range="-2.6 0.74" armature="0.0290856"/>
+          <inertial pos="-0.00518991 -0.00003499 -0.08084106" mass="1.473" fullinertia="0.00376408 0.00382823 0.00192275 0.00000313 -0.00065554 -0.00000256"/>
+          <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_hip_roll_link" material="right_hip_roll_material"/>
+          <geom name="right_hip_roll_collision" type="capsule" class="collision" size="0.05622" fromto="-0.01270 0 -0.07578 -0.01270 0 -0.00658"/>
+          <body name="right_hip_yaw_link" pos="-0.012698 0 -0.129" quat="1 0 0 0">
+            <joint axis="0 0 -1" name="right_hip_yaw_joint" type="hinge" range="-2.76 2.76" armature="0.00884"/>
+            <inertial pos="-0.01958069 0.00023065 -0.12376565" mass="2.483" fullinertia="0.01132547 0.01225907 0.00383024 -0.00001670 -0.00196009 -0.00002438"/>
+            <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_hip_yaw_link" material="right_hip_yaw_material"/>
+            <geom name="right_hip_yaw_collision" type="capsule" class="collision" size="0.05622" fromto="-0.03046 0 -0.16235 -0.00001 0 -0.05622"/>
+            <body name="right_knee_link" pos="-0.0332010004232152 0.0308089665012395 -0.165090022909223" quat="1 0 0 0">
+              <joint axis="0 1 0" name="right_knee_joint" type="hinge" range="-0.06 2.83" armature="0.0290856"/>
+              <inertial pos="0.03115290 -0.03066848 -0.13404559" mass="2.557" fullinertia="0.01802753 0.01813266 0.00288242 0.00006186 -0.00023263 0.00002714"/>
+              <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_knee_link" material="right_knee_material"/>
+              <geom name="right_knee_upper_collision" type="capsule" class="collision" size="0.0520" fromto="0.0330 -0.03081 -0.1450 0.0030 -0.03081 -0.0040"/>
+              <geom name="right_knee_lower_collision" type="capsule" class="collision" size="0.0405" fromto="0.0270 -0.03081 -0.2780 0.0330 -0.03081 -0.1850"/>
+              <body name="right_ankle_pitch_link" pos="0.03131 -0.030809 -0.30533" quat="1 0 0 0">
+                <joint axis="0 1 0" name="right_ankle_pitch_joint" type="hinge" range="-0.78 0.61" armature="0.006266268" frictionloss="0.1"/>
+                <inertial pos="0.00126328 0.00000000 -0.01319163" mass="0.16605731" fullinertia="0.00003624 0.00004292 0.00002407 0.00000000 0.00000148 0.00000000"/>
+                <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_ankle_pitch_link" material="right_ankle_pitch_material"/>
+                <geom name="right_ankle_pitch_collision" type="capsule" class="collision" size="0.02150" fromto="-0.00145 0 -0.00614 0.00959 0 -0.01051"/>
+                <body name="right_ankle_roll_link" pos="0.013067 0 -0.018922" quat="1 0 0 0">
+                  <joint axis="0.999993677858222 0 0.00355587451777984" name="right_ankle_roll_joint" type="hinge" range="-0.26 0.26" armature="0.006266268" frictionloss="0.1"/>
+                  <inertial pos="0.008711 -0.000002 -0.021633" mass="0.6430" fullinertia="0.000361 0.001920 0.002002 0.000000 0.000123 0.000000"/>
+                  <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_ankle_roll_link" material="right_ankle_roll_material"/>
+                  <geom name="right_foot_toe_neg_collision" type="capsule" class="collision" size="0.01" fromto="0.03 -0.03 -0.035 0.09 -0.03 -0.035"/>
+                  <geom name="right_foot_outer_neg_collision" type="capsule" class="collision" size="0.01" fromto="-0.065 -0.02 -0.035 0.11 -0.02 -0.035"/>
+                  <geom name="right_foot_inner_neg_collision" type="capsule" class="collision" size="0.01" fromto="-0.0775 -0.01 -0.035 0.1225 -0.01 -0.035"/>
+                  <geom name="right_foot_center_collision" type="capsule" class="collision" size="0.01" fromto="-0.0825 0 -0.035 0.1275 0 -0.035"/>
+                  <geom name="right_foot_inner_pos_collision" type="capsule" class="collision" size="0.01" fromto="-0.0775 0.01 -0.035 0.1225 0.01 -0.035"/>
+                  <geom name="right_foot_outer_pos_collision" type="capsule" class="collision" size="0.01" fromto="-0.065 0.02 -0.035 0.11 0.02 -0.035"/>
+                  <geom name="right_foot_toe_pos_collision" type="capsule" class="collision" size="0.01" fromto="0.03 0.03 -0.035 0.09 0.03 -0.035"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <!-- WAIST -->
+      <body name="waist_roll_link" pos="-0.00757994881845658 -0.00301269924435144 0.0529838303646947" quat="1 0 0 0">
+        <joint axis="1 0 0" name="waist_roll_joint" type="hinge" range="-0.7 0.7" armature="0.0290856"/>
+        <inertial pos="-0.03058205 0.00004115 -0.00029517" mass="1.53201882" fullinertia="0.00221249 0.00166198 0.00164327 -0.00000117 -0.00000777 -0.00000329"/>
+        <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="waist_roll_link" material="waist_roll_material"/>
+        <geom name="waist_roll_neg_y_collision" type="capsule" class="collision" size="0.04164" fromto="-0.03686 -0.01336 -0.01336 -0.03686 -0.01336 0.02536"/>
+        <geom name="waist_roll_pos_y_collision" type="capsule" class="collision" size="0.04164" fromto="-0.03686 0.01336 -0.01336 -0.03686 0.01336 0.02536"/>
+        <body name="waist_yaw_link" pos="-0.0308449999997339 0 0.0679999999997294" quat="1 0 0 0">
+          <joint axis="0 0 -1" name="waist_yaw_joint" type="hinge" range="-2.91 2.91" armature="0.0290856"/>
+          <inertial pos="-0.001424 0.000080 0.128866" mass="8.3430" fullinertia="0.109179 0.092853 0.041145 -0.000027 0.002082 -0.000013"/>
+          <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="waist_yaw_link" material="waist_yaw_material"/>
+          <geom name="torso_lower_collision" type="capsule" class="collision" size="0.090" fromto="0.0100 0 0.0394 0.0100 0 0.0800"/>
+          <geom name="torso_middle_collision" type="capsule" class="collision" size="0.120" fromto="-0.0244 0 0.1450 -0.0244 0 0.2100"/>
+          <geom name="torso_upper_collision" type="capsule" class="collision" size="0.088" fromto="-0.0185 0 0.3350 -0.0185 0 0.33668"/>
+          <!-- LEFT ARM -->
+          <body name="left_shoulder_pitch_link" pos="0 0.116496194698121 0.19848715574272" quat="1 0 0 0">
+            <joint axis="0 0.99619 0.087156" name="left_shoulder_pitch_joint" type="hinge" range="-3.4 2.35" armature="0.00884"/>
+            <inertial pos="-0.00227488 0.05877203 -0.01145894" mass="0.82850012" fullinertia="0.00077624 0.00060519 0.00074547 0.00001858 -0.00000678 0.00008598"/>
+            <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_shoulder_pitch_link" material="left_shoulder_pitch_material"/>
+            <geom name="left_shoulder_pitch_collision" type="capsule" class="collision" size="0.03808" fromto="-0.00326 0.03582 -0.00238 -0.00326 0.06284 -0.01210"/>
+            <body name="left_shoulder_roll_link" pos="0.0287432951006891 0.0653494445514435 -0.014608906526987" quat="1 0 0 0">
+              <joint axis="1 0 0" name="left_shoulder_roll_joint" type="hinge" range="-0.47 2.9" armature="0.00313313"/>
+              <inertial pos="-0.01613398 0.00000564 -0.06609383" mass="0.76916758" fullinertia="0.00079857 0.00081142 0.00051033 0.00000012 -0.00012702 -0.00000004"/>
+              <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_shoulder_roll_link" material="left_shoulder_roll_material"/>
+              <geom name="left_shoulder_roll_collision" type="capsule" class="collision" size="0.04000" fromto="-0.01906 0 -0.06800 -0.01906 0 -0.00656"/>
+              <body name="left_shoulder_yaw_link" pos="-0.0190574930004302 0 -0.105000039994097" quat="1 0 0 0">
+                <joint axis="0 0 -1" name="left_shoulder_yaw_joint" type="hinge" range="-2.87 2.87" armature="0.00313313"/>
+                <inertial pos="0.01447570 -0.00112029 -0.08587480" mass="0.95227320" fullinertia="0.00179605 0.00188468 0.00081430 -0.00000292 0.00031386 -0.00001579"/>
+                <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_shoulder_yaw_link" material="left_shoulder_yaw_material"/>
+                <geom name="left_shoulder_yaw_collision" type="capsule" class="collision" size="0.04008" fromto="0.01816 0.00008 -0.10150 0.00008 0.00008 -0.01708"/>
+                <body name="left_elbow_link" pos="0.020796 -0.031888 -0.10414" quat="1 0 0 0">
+                  <joint axis="0 -1 0" name="left_elbow_joint" type="hinge" range="-1.6 1.24" armature="0.00313313"/>
+                  <inertial pos="0.07222795 0.03107894 -0.01809537" mass="0.77922872" fullinertia="0.00060310 0.00112121 0.00118539 -0.00005057 0.00006993 0.00001181"/>
+                  <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_elbow_link" material="left_elbow_material"/>
+                  <geom name="left_elbow_collision" type="capsule" class="collision" size="0.04220" fromto="0.00487 0.03186 -0.00484 0.07959 0.03186 -0.01404"/>
+                  <body name="left_wrist_roll_link" pos="0.116093381994033 0.031859446289993 -0.0187927584979322" quat="1 0 0 0">
+                    <joint axis="1 0 0" name="left_wrist_roll_joint" type="hinge" range="-2.56 2.56" armature="0.00313313"/>
+                    <inertial pos="0.01827024 0.00000000 0.01027564" mass="0.16115938" fullinertia="0.00013435 0.00015892 0.00014383 0.00000000 -0.00003765 0.00000000"/>
+                    <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_wrist_roll_link" material="left_wrist_roll_material"/>
+                    <geom name="left_wrist_roll_collision" type="capsule" class="collision" size="0.03650" fromto="0.01445 0 0 0.04795 0 0"/>
+                    <body name="left_wrist_yaw_link" pos="0.053 0 0.020701" quat="1 0 0 0">
+                      <joint axis="0 0 -1" name="left_wrist_yaw_joint" type="hinge" range="-1.22 1.22" armature="0.00313313"/>
+                      <inertial pos="0.03084697 0.00040090 -0.02788482" mass="1.03494219" fullinertia="0.00054429 0.00151988 0.00149427 -0.00001216 -0.00005099 -0.00000019"/>
+                      <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_wrist_yaw_link" material="left_wrist_yaw_material"/>
+                      <geom name="left_wrist_yaw_collision" type="capsule" class="collision" size="0.03245" fromto="0 0 -0.02868 0.06213 0 -0.02538"/>
+                      <body name="left_wrist_pitch_link" pos="0.062136 0.029458 -0.026067" quat="1 0 0 0">
+                        <joint axis="0 1 0" name="left_wrist_pitch_joint" type="hinge" range="-1.22 1.22" armature="0.00313313"/>
+                        <inertial pos="0.02303536 -0.00952864 0.00000000" mass="0.07319805" fullinertia="0.00003995 0.00005202 0.00006476 0.00001970 0.00000000 0.00000000"/>
+                        <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="left_wrist_pitch_link" material="left_wrist_pitch_material"/>
+                        <geom name="left_wrist_pitch_collision" type="capsule" class="collision" size="0.03100" fromto="0 -0.02300 0 0.04200 -0.02372 0"/>
+                        <body name="lh_base_link" pos="0.066 -0.02792 -0.00041" childclass="hand" quat="0 0.707107 0 0.707107">
+                          <geom name="lh_base_link" type="mesh" mesh="lh_base_link" rgba="0.85 0.85 0.85 1"/>
+                          <geom name="lh_base_palm_capsule1" type="capsule" fromto="-0.020 0.002000 0.020000 0.016 0.002000 0.020000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <geom name="lh_base_palm_capsule2" type="capsule" fromto="-0.020 0.002000 0.036000 0.016 0.002000 0.036000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <geom name="lh_base_palm_capsule3" type="capsule" fromto="-0.020 -0.001 0.052000 0.016 -0.001 0.052000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <geom name="lh_base_palm_capsule4" type="capsule" fromto="-0.020 -0.006 0.070000 0.016 -0.006 0.070000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <inertial pos="0.00074258 -0.0074101 0.047286" mass="0.10796" fullinertia="4.6383E-05 6.715E-05  3.0034E-05                              -3.2407E-08 1.9335E-07  1.5535E-06"/>
+                          <body name="lh_finger11_link" pos="0.019352 0.0078052 0.03432" quat="1 0 2.8309e-05 0">
+                            <joint name="lh_finger11" axis="0 0 1" range="0 1.75"/>
+                            <geom name="lh_finger11_link" type="mesh" mesh="lh_finger11_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="0.0084275 0.0014873 0.00095853" mass="0.0027298" fullinertia="3.5725E-07 3.2865E-07 1.0938E-07                                -7.4158E-09 -3.5014E-08 -1.169E-08"/>
+                            <body name="lh_finger12_link" pos="0.015 0.0024172 0.0067143" quat="0.634058337 0.312998804 0.466441982 0.531444872">
+                              <joint name="lh_finger12" axis="-1 0 0" range="0 1.40"/>
+                              <geom name="lh_finger12_link" type="mesh" mesh="lh_finger12_link" rgba="0.9 0.9 0.9 1"/>
+                              <inertial pos="-0.021058 0.028795 -0.019946" mass="0.15692" fullinertia="3.0961E-04 1.3891E-04 2.2363E-04                                   5.4172E-05  5.3321E-06 -3.9727E-05"/>
+                              <body name="lh_finger13_link" pos="0 0 0.040273" quat="1 0 0 0">
+                                <joint name="lh_finger13" axis="-1 0 0" range="0 1.13"/>
+                                <geom name="lh_finger13_link" type="mesh" mesh="lh_finger13_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="2.0798E-05 -0.0010263 0.0087715" mass="0.0051235" fullinertia="2.4095E-07 3.0808E-07 1.6137E-07                                    -4.7789E-10 -9.7647E-10 -2.5035E-09"/>
+                                <body name="lh_finger14_link" pos="0 0 0" quat="1 0 0 0">
+                                  <geom name="lh_finger14_link" type="mesh" mesh="lh_finger14_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                  <inertial pos="-3.8304E-06 0.0042573 0.012288" mass="0.0024051" fullinertia="6.5145E-08 9.9513E-08 5.5445E-08                                      -3.3333E-10 -5.3723E-10  4.5334E-09"/>
+                                  <geom name="lh_finger14_link_capsule" type="capsule" fromto="-0.000006 0.004524 0.009831 -0.000006 0.004524 0.017441" size="0.007065" class="hand" contype="1" conaffinity="1" group="3"/>
+                                </body>
+                                <geom name="lh_finger13_link_capsule" type="capsule" fromto="0.000000 -0.000794 0.003434 0.000000 -0.000794 0.017172" size="0.007412" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="lh_finger12_link_capsule" type="capsule" fromto="0.000006 -0.002284 0.005287 0.000006 -0.002284 0.034424" size="0.009916" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="lh_finger11_link_capsule" type="capsule" fromto="0.007513 0.001974 -0.007432 0.007513 0.001974 0.007430" size="0.009242" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="lh_finger21_link" pos="0.026322 -0.0053264 0.083909" quat="0.995621825 0.00392656836 0.0492796683 0.0793301865">
+                            <joint name="lh_finger21" axis="-1 0 0" range="0 1.40"/>
+                            <geom name="lh_finger21_link" type="mesh" mesh="lh_finger21_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="3.7099E-06 -0.00011919 0.014618" mass="0.003938" fullinertia="3.1596E-07 3.4221E-07 1.5546E-07                                -4.1456E-11 -5.5676E-11 -2.8999E-08"/>
+                            <body name="lh_finger22_link" pos="0 0.0030778 0.027857" quat="0.998486782 -0.0549922448 0 0">
+                              <joint name="lh_finger22" axis="-1 0 0" range="0 1.75"/>
+                              <geom name="lh_finger22_link" type="mesh" mesh="lh_finger22_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="3.4856E-05 -0.0023817 0.010735" mass="0.0035951" fullinertia="3.7147E-07 3.7949E-07 5.7613E-08                                   7.6809E-11 -2.1746E-09 -1.1538E-08"/>
+                              <body name="lh_finger23_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="lh_finger23_link" type="mesh" mesh="lh_finger23_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="7.8368E-05 0.0020018 0.019395" mass="0.0019493" fullinertia="9.2479E-08 9.8313E-08 2.6652E-08                                     3.0475E-11 -2.7428E-11 -1.5567E-08"/>
+                                <geom name="lh_finger23_link_capsule" type="capsule" fromto="0.000009 0.002344 0.012445 0.000009 0.002344 0.027554" size="0.005515" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="lh_finger22_link_capsule" type="capsule" fromto="0.000002 -0.001229 -0.001677 0.000002 -0.001229 0.027762" size="0.005471" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="lh_finger21_link_capsule" type="capsule" fromto="-0.000001 -0.000694 0.003665 -0.000001 -0.000694 0.025084" size="0.007167" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="lh_finger31_link" pos="0.0085306 -0.006534 0.088185" quat="0.99962476 0.000178280165 0.00671105195 0.0265568889">
+                            <joint name="lh_finger31" axis="-1 0 0" range="0 1.40"/>
+                            <geom name="lh_finger31_link" type="mesh" mesh="lh_finger31_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="2.5591E-06 8.5087E-05 0.016695" mass="0.0046564" fullinertia="4.6404E-07 4.9011E-07 1.8452E-07                                -6.6121E-11 -4.4012E-11 -4.5262E-08"/>
+                            <body name="lh_finger32_link" pos="0 0.0037175 0.032318" quat="1 0 0 0">
+                              <joint name="lh_finger32" axis="-1 0 0" range="0 1.75"/>
+                              <geom name="lh_finger32_link" type="mesh" mesh="lh_finger32_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="5.3761E-07 -1.2538E-05 0.012568" mass="0.0039652" fullinertia="5.1368E-07 5.0101E-07 8.7117E-08                                  -4.1127E-10 -1.5216E-09 -1.0082E-07"/>
+                              <body name="lh_finger33_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="lh_finger33_link" type="mesh" mesh="lh_finger33_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="-2.1786E-06 0.0059988 0.02098" mass="0.0022728" fullinertia="1.4797E-07 1.4043E-07 4.3712E-08                                     1.6047E-11 -8.1878E-13 -4.353E-08"/>
+                                <geom name="lh_finger33_link_capsule" type="capsule" fromto="-0.000008 0.006367 0.012441 -0.000008 0.006367 0.029820" size="0.006381" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="lh_finger32_link_capsule" type="capsule" fromto="-0.000027 0.001713 -0.000187 -0.000027 0.001713 0.029789" size="0.006631" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="lh_finger31_link_capsule" type="capsule" fromto="0.000004 -0.000394 0.003727 0.000004 -0.000394 0.029505" size="0.007227" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="lh_finger41_link" pos="-0.0088876 -0.0072813 0.087396" quat="0.999224471 0.000755792843 -0.0307999871 -0.0245203034">
+                            <joint name="lh_finger41" axis="-1 0 0" range="0 1.40"/>
+                            <geom name="lh_finger41_link" type="mesh" mesh="lh_finger41_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="2.0328E-06 -0.00060204 0.014928" mass="0.0041427" fullinertia="3.621E-07  3.8957E-07 1.6169E-07                                -4.6417E-11 -4.1481E-11 -3.1589E-08"/>
+                            <body name="lh_finger42_link" pos="0 0.0025283 0.02942" quat="1 0 0 0">
+                              <joint name="lh_finger42" axis="-1 0 0" range="0 1.75"/>
+                              <geom name="lh_finger42_link" type="mesh" mesh="lh_finger42_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="2.8428E-05 -0.001525 0.011155" mass="0.0038285" fullinertia="3.9947E-07 4.0449E-07 6.5075E-08                                  -3.73E-11  -2.2809E-09 -3.5369E-08"/>
+                              <body name="lh_finger43_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="lh_finger43_link" type="mesh" mesh="lh_finger43_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="8.2647E-05 0.0034199 0.020014" mass="0.0019493" fullinertia="9.2476E-08 9.5853E-08 2.9109E-08                                     4.4007E-11 -6.2162E-11 -2.0306E-08"/>
+                                <geom name="lh_finger43_link_capsule" type="capsule" fromto="0.000012 0.003716 0.013060 0.000012 0.003716 0.027887" size="0.005673" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="lh_finger42_link_capsule" type="capsule" fromto="0.000000 -0.000778 -0.001469 0.000000 -0.000778 0.028096" size="0.005610" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="lh_finger41_link_capsule" type="capsule" fromto="-0.000007 -0.001103 0.003366 -0.000007 -0.001103 0.026895" size="0.006886" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="lh_finger51_link" pos="-0.026448 -0.0055489 0.08298" quat="0.99357051 -0.0427328518 -0.0722174255 -0.0760012352">
+                            <joint name="lh_finger51" axis="-1 0 0" range="0 1.40"/>
+                            <geom name="lh_finger51_link" type="mesh" mesh="lh_finger51_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="0.0005971 -0.0018425 0.013171" mass="0.0034504" fullinertia="2.3783E-07 2.6908E-07 1.3534E-07                                -2.64E-10 -3.398E-09 -7.554E-09"/>
+                            <body name="lh_finger52_link" pos="0 0 0.025024" quat="0.998822457 0.0485149482 0 0">
+                              <joint name="lh_finger52" axis="-1 0 0" range="0 1.75"/>
+                              <geom name="lh_finger52_link" type="mesh" mesh="lh_finger52_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="3.1581E-05 -0.0009964 0.0084913" mass="0.0034586" fullinertia="2.5318E-07 2.5376E-07 6.4634E-08                                  -6.386E-11  -1.0687E-09 -2.5784E-08"/>
+                              <body name="lh_finger53_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="lh_finger53_link" type="mesh" mesh="lh_finger53_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="0.00010532 0.0043692 0.016718" mass="0.0014962" fullinertia="4.394E-08  4.5405E-08 2.1333E-08                                     4.4189E-11  2.3366E-10 -1.0753E-08"/>
+                                <geom name="lh_finger53_link_capsule" type="capsule" fromto="0.000073 0.004075 0.012814 0.000073 0.004075 0.022037" size="0.005592" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="lh_finger52_link_capsule" type="capsule" fromto="0.000024 -0.000590 -0.001705 0.000024 -0.000590 0.022147" size="0.005621" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="lh_finger51_link_capsule" type="capsule" fromto="0.000004 -0.001567 0.003463 0.000004 -0.001567 0.022418" size="0.006965" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+          <!-- RIGHT ARM -->
+          <body name="right_shoulder_pitch_link" pos="0 -0.116496194698064 0.198487155742749" quat="1 0 0 0">
+            <joint axis="0 -0.99619 0.087156" name="right_shoulder_pitch_joint" type="hinge" range="-2.35 3.4" armature="0.00884"/>
+            <inertial pos="-0.00227477 -0.05856201 -0.01145858" mass="0.82850796" fullinertia="0.00077392 0.00060520 0.00074316 -0.00001370 -0.00000678 -0.00008562"/>
+            <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_shoulder_pitch_link" material="right_shoulder_pitch_material"/>
+            <geom name="right_shoulder_pitch_collision" type="capsule" class="collision" size="0.03808" fromto="-0.00326 -0.06284 -0.01210 -0.00326 -0.03582 -0.00238"/>
+            <body name="right_shoulder_roll_link" pos="0.0287432951007422 -0.0653494445235536 -0.0146089065305009" quat="1 0 0 0">
+              <joint axis="1 0 0" name="right_shoulder_roll_joint" type="hinge" range="-2.9 0.47" armature="0.00313313"/>
+              <inertial pos="-0.01626203 0.00000539 -0.06810375" mass="0.80442734" fullinertia="0.00087815 0.00088810 0.00052415 0.00000011 -0.00013154 -0.00000005"/>
+              <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_shoulder_roll_link" material="right_shoulder_roll_material"/>
+              <geom name="right_shoulder_roll_collision" type="capsule" class="collision" size="0.04000" fromto="-0.01906 0 -0.07700 -0.01906 0 -0.00656"/>
+              <body name="right_shoulder_yaw_link" pos="-0.0190573923593691 0 -0.105000126276637" quat="1 0 0 0">
+                <joint axis="0 0 -1" name="right_shoulder_yaw_joint" type="hinge" range="-2.87 2.87" armature="0.00313313"/>
+                <inertial pos="0.01430772 0.00112150 -0.08592529" mass="0.95225273" fullinertia="0.00179792 0.00188417 0.00081194 -0.00000160 0.00031064 0.00001448"/>
+                <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_shoulder_yaw_link" material="right_shoulder_yaw_material"/>
+                <geom name="right_shoulder_yaw_collision" type="capsule" class="collision" size="0.04008" fromto="0.01816 -0.00008 -0.10150 0.00008 -0.00008 -0.01708"/>
+                <body name="right_elbow_link" pos="0.0207956801502895 0.031887525882762 -0.104135222723484" quat="1 0 0 0">
+                  <joint axis="0 1 0" name="right_elbow_joint" type="hinge" range="-1.24 1.6" armature="0.00313313"/>
+                  <inertial pos="0.07222795 -0.03090613 -0.01799316" mass="0.77922499" fullinertia="0.00060275 0.00112238 0.00118388 0.00005257 0.00007112 -0.00001226"/>
+                  <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_elbow_link" material="right_elbow_material"/>
+                  <geom name="right_elbow_collision" type="capsule" class="collision" size="0.04220" fromto="0.00487 -0.03186 -0.00484 0.07959 -0.03186 -0.01404"/>
+                  <body name="right_wrist_roll_link" pos="0.11609334409225 -0.031859369715491 -0.0187927299688337" quat="1 0 0 0">
+                    <joint axis="1 0 0" name="right_wrist_roll_joint" type="hinge" range="-2.56 2.56" armature="0.00313313"/>
+                    <inertial pos="0.01827024 0.00000000 0.01027555" mass="0.16115938" fullinertia="0.00013435 0.00015892 0.00014383 0.00000000 -0.00003765 0.00000000"/>
+                    <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_wrist_roll_link" material="right_wrist_roll_material"/>
+                    <geom name="right_wrist_roll_collision" type="capsule" class="collision" size="0.03650" fromto="0.01445 0 0 0.04795 0 0"/>
+                    <body name="right_wrist_yaw_link" pos="0.053 0 0.020701" quat="1 0 0 0">
+                      <joint axis="0 0 -1" name="right_wrist_yaw_joint" type="hinge" range="-1.22 1.22" armature="0.00313313"/>
+                      <inertial pos="0.03084434 -0.00041157 -0.02787816" mass="1.03493727" fullinertia="0.00054424 0.00152006 0.00149435 0.00001173 -0.00005112 0.00000048"/>
+                      <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_wrist_yaw_link" material="right_wrist_yaw_material"/>
+                      <geom name="right_wrist_yaw_collision" type="capsule" class="collision" size="0.03245" fromto="0 0 -0.02868 0.06213 0 -0.02567"/>
+                      <body name="right_wrist_pitch_link" pos="0.062136 -0.029458 -0.026067" quat="1 0 0 0">
+                        <joint axis="0 -1 0" name="right_wrist_pitch_joint" type="hinge" range="-1.22 1.22" armature="0.00313313"/>
+                        <inertial pos="0.02282168 0.00967600 0.00000000" mass="0.07221264" fullinertia="0.00003980 0.00005175 0.00006439 -0.00001987 0.00000000 0.00000000"/>
+                        <geom type="mesh" class="visual" pos="0 0 0" quat="1 0 0 0" mesh="right_wrist_pitch_link" material="right_wrist_pitch_material"/>
+                        <geom name="right_wrist_pitch_collision" type="capsule" class="collision" size="0.03100" fromto="0 0.02300 0 0.04200 0.02372 0"/>
+                        <body name="rh_base_link" pos="0.066 0.02781 -0.00007" childclass="hand" quat="0 0.707107 0 0.707107">
+                          <geom name="rh_base_link" type="mesh" mesh="rh_base_link" rgba="0.85 0.85 0.85 1"/>
+                          <geom name="rh_base_palm_capsule1" type="capsule" fromto="-0.020 -0.002000 0.020000 0.016 -0.002000 0.020000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <geom name="rh_base_palm_capsule2" type="capsule" fromto="-0.020 -0.002000 0.036000 0.016 -0.002000 0.036000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <geom name="rh_base_palm_capsule3" type="capsule" fromto="-0.020 0.001 0.052000 0.016 0.001 0.052000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <geom name="rh_base_palm_capsule4" type="capsule" fromto="-0.020 0.006 0.070000 0.016 0.006 0.070000" size="0.012" class="hand" contype="1" conaffinity="1" group="3"/>
+                          <inertial pos="0.00044529 0.0074122 0.047285" mass="0.10795" fullinertia="4.6381E-05 6.7147E-05 3.0034E-05                              2.7508E-08  1.863E-07  -1.5554E-06"/>
+                          <body name="rh_finger11_link" pos="0.019011 -0.007805 0.03432" quat="0.707105482 1.07614779e-05 -1.07614383e-05 0.70710808">
+                            <joint name="rh_finger11" axis="0 0 -1" range="0 1.75"/>
+                            <geom name="rh_finger11_link" type="mesh" mesh="rh_finger11_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="-0.0014872 -0.0084274 0.00095867" mass="0.0027298" fullinertia="3.2865E-07 3.5725E-07 1.0938E-07                                -7.416E-09  1.1689E-08  3.5012E-08"/>
+                            <body name="rh_finger12_link" pos="-0.0024172 -0.015 0.0067143" quat="0.818358684 0.559689109 -0.10773922 0.0736846433">
+                              <joint name="rh_finger12" axis="-1 0 0" range="0 1.40"/>
+                              <geom name="rh_finger12_link" type="mesh" mesh="rh_finger12_link" rgba="0.9 0.9 0.9 1"/>
+                              <inertial pos="0.021017 0.028207 -0.020207" mass="0.15691" fullinertia="3.1329E-04 1.4267E-04 2.2524E-04                                  -5.4214E-05 -3.0162E-06 -3.8971E-05"/>
+                              <body name="rh_finger13_link" pos="0 0 0.040273" quat="1 0 0 0">
+                                <joint name="rh_finger13" axis="-1 0 0" range="0 1.13"/>
+                                <geom name="rh_finger13_link" type="mesh" mesh="rh_finger13_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="2.0803E-05 -0.0010263 0.0087716" mass="0.0051235" fullinertia="2.4095E-07 3.0808E-07 1.6137E-07                                    -4.7783E-10 -9.7696E-10 -2.5033E-09"/>
+                                <body name="rh_finger14_link" pos="0 0 0" quat="1 0 0 0">
+                                  <geom name="rh_finger14_link" type="mesh" mesh="rh_finger14_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                  <inertial pos="-3.9568E-06 0.0042569 0.012288" mass="0.0024048" fullinertia="6.5133E-08 9.9517E-08 5.5452E-08                                      -3.3089E-10 -5.4015E-10 4.5348E-09"/>
+                                  <geom name="rh_finger14_link_capsule" type="capsule" fromto="-0.000006 0.004524 0.009831 -0.000006 0.004524 0.017441" size="0.007065" class="hand" contype="1" conaffinity="1" group="3"/>
+                                </body>
+                                <geom name="rh_finger13_link_capsule" type="capsule" fromto="0.000000 -0.000794 0.003434 0.000000 -0.000794 0.017172" size="0.007412" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="rh_finger12_link_capsule" type="capsule" fromto="0.000006 -0.002284 0.005287 0.000006 -0.002284 0.034424" size="0.009916" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="rh_finger11_link_capsule" type="capsule" fromto="-0.001986 -0.007513 -0.007420 -0.001986 -0.007513 0.007410" size="0.009259" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="rh_finger21_link" pos="0.026269 0.0052799 0.083877" quat="0.995115351 -0.00469010486 0.0596021898 -0.0785558373">
+                            <joint name="rh_finger21" axis="1 0 0" range="0 1.40"/>
+                            <geom name="rh_finger21_link" type="mesh" mesh="rh_finger21_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="-3.1071E-06 -0.00017638 0.014617" mass="0.0039377" fullinertia="3.1595E-07 3.4097E-07 1.5671E-07                                -3.4302E-11  6.472E-11  3.2752E-08"/>
+                            <body name="rh_finger22_link" pos="0 -0.0036408 0.027789" quat="1 0 0 0">
+                              <joint name="rh_finger22" axis="1 0 0" range="0 1.75"/>
+                              <geom name="rh_finger22_link" type="mesh" mesh="rh_finger22_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="-3.4858E-05 0.00071691 0.010973" mass="0.0035951" fullinertia="3.7147E-07 3.6852E-07 6.8574E-08                                  -2.5545E-10  2.1606E-09  5.9509E-08"/>
+                              <body name="rh_finger23_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="rh_finger23_link" type="mesh" mesh="rh_finger23_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="-7.8448E-05 -0.004936 0.018863" mass="0.0019493" fullinertia="9.2478E-08 9.1954E-08 3.301E-08                                     2.6283E-11  3.1426E-11  2.5642E-08"/>
+                                <geom name="rh_finger23_link_capsule" type="capsule" fromto="-0.000009 -0.005183 0.012114 -0.000009 -0.005183 0.026176" size="0.005989" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="rh_finger22_link_capsule" type="capsule" fromto="-0.000002 -0.000532 -0.001084 -0.000002 -0.000532 0.026536" size="0.005913" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="rh_finger21_link_capsule" type="capsule" fromto="-0.000001 0.000364 0.003752 -0.000001 0.000364 0.024948" size="0.007248" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="rh_finger31_link" pos="0.008744 0.006507 0.088166" quat="0.997923896 0.0534646898 0.0246704656 -0.0260920226">
+                            <joint name="rh_finger31" axis="1 0 0" range="0 1.40"/>
+                            <geom name="rh_finger31_link" type="mesh" mesh="rh_finger31_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="-2.463E-06 0.0016883 0.016609" mass="0.0046564" fullinertia="4.6403E-07 4.9622E-07 1.7841E-07                                -6.2008E-11  5.3483E-11  1.1987E-08"/>
+                            <body name="rh_finger32_link" pos="0 -0.00026526 0.03253" quat="1 0 0 0">
+                              <joint name="rh_finger32" axis="1 0 0" range="0 1.75"/>
+                              <geom name="rh_finger32_link" type="mesh" mesh="rh_finger32_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="-4.2116E-07 0.0013472 0.012495" mass="0.0039648" fullinertia="5.136E-07  5.1755E-07 7.0491E-08                                  -2.467E-10  1.5491E-09  5.4832E-08"/>
+                              <body name="rh_finger33_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="rh_finger33_link" type="mesh" mesh="rh_finger33_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="2.3154E-06 -0.0037373 0.021499" mass="0.0022727" fullinertia="1.4796E-07 1.4852E-07 3.561E-08                                     1.5864E-11 -3.152E-13  3.2337E-08"/>
+                                <geom name="rh_finger33_link_capsule" type="capsule" fromto="0.000008 -0.004158 0.012582 0.000008 -0.004158 0.031216" size="0.005917" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="rh_finger32_link_capsule" type="capsule" fromto="0.000027 0.000251 -0.001366 0.000027 0.000251 0.031640" size="0.005624" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="rh_finger31_link_capsule" type="capsule" fromto="-0.000004 0.001520 0.003507 -0.000004 0.001520 0.029950" size="0.007006" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="rh_finger41_link" pos="-0.0088463 0.0073041 0.087413" quat="0.998653824 0.0417140623 -0.0163168056 0.0261579467">
+                            <joint name="rh_finger41" axis="1 0 0" range="0 1.40"/>
+                            <geom name="rh_finger41_link" type="mesh" mesh="rh_finger41_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="-2.0192E-06 0.0018776 0.014821" mass="0.0041427" fullinertia="3.6211E-07 3.9328E-07 1.5797E-07                                -4.5157E-11  4.6434E-11  1.1678E-08"/>
+                            <body name="rh_finger42_link" pos="0 0 0.029529" quat="0.999110788 -0.0421619986 0 0">
+                              <joint name="rh_finger42" axis="1 0 0" range="0 1.75"/>
+                              <geom name="rh_finger42_link" type="mesh" mesh="rh_finger42_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="-2.8427E-05 0.0015404 0.011153" mass="0.0038285" fullinertia="3.9947E-07 4.0458E-07 6.4978E-08                                  -3.4225E-11  2.2812E-09  3.4902E-08"/>
+                              <body name="rh_finger43_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="rh_finger43_link" type="mesh" mesh="rh_finger43_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="-8.2684E-05 -0.0033924 0.020019" mass="0.0019493" fullinertia="9.2478E-08 9.5911E-08 2.9054E-08                                     4.3975E-11  6.2557E-11  2.0215E-08"/>
+                                <geom name="rh_finger43_link_capsule" type="capsule" fromto="-0.000016 -0.003689 0.013067 -0.000016 -0.003689 0.027899" size="0.005670" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="rh_finger42_link_capsule" type="capsule" fromto="0.000000 0.000801 -0.001469 0.000000 0.000801 0.028113" size="0.005611" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="rh_finger41_link_capsule" type="capsule" fromto="-0.000002 0.001587 0.003142 -0.000002 0.001587 0.027235" size="0.006660" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                          <body name="rh_finger51_link" pos="-0.026313 0.0056254 0.083042" quat="0.994616218 0.0426201544 -0.0552343841 0.076624178">
+                            <joint name="rh_finger51" axis="1 0 0" range="0 1.40"/>
+                            <geom name="rh_finger51_link" type="mesh" mesh="rh_finger51_link" rgba="0.9 0.9 0.9 1"/>
+                            <inertial pos="-2.2824E-06 0.0018149 0.013139" mass="0.0034504" fullinertia="2.3794E-07 2.6911E-07 1.3519E-07                                -2.6265E-12  8.6014E-11  7.2418E-09"/>
+                            <body name="rh_finger52_link" pos="0 0 0.025024" quat="1 0 0 0">
+                              <joint name="rh_finger52" axis="1 0 0" range="0 1.75"/>
+                              <geom name="rh_finger52_link" type="mesh" mesh="rh_finger52_link" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0" group="2"/>
+                              <inertial pos="-3.1534E-05 0.001792 0.0083594" mass="0.0034587" fullinertia="2.5319E-07 2.5692E-07 6.1477E-08                                   3.7687E-11  1.0696E-09  7.5776E-09"/>
+                              <body name="rh_finger53_link" pos="0 0 0" quat="1 0 0 0">
+                                <geom name="rh_finger53_link" type="mesh" mesh="rh_finger53_link" rgba="0.2 0.2 0.2 1" contype="0" conaffinity="0" group="2"/>
+                                <inertial pos="-0.0001026 -0.0027756 0.017057" mass="0.0014968" fullinertia="4.3984E-08 4.7233E-08 1.9545E-08                                     2.7281E-11 -2.4817E-10  8.3311E-09"/>
+                                <geom name="rh_finger53_link_capsule" type="capsule" fromto="-0.000073 -0.002577 0.013178 -0.000073 -0.002577 0.022661" size="0.005421" class="hand" contype="1" conaffinity="1" group="3"/>
+                              </body>
+                              <geom name="rh_finger52_link_capsule" type="capsule" fromto="-0.000024 0.000956 -0.001613 -0.000024 0.000956 0.022482" size="0.005693" class="hand" contype="1" conaffinity="1" group="3"/>
+                            </body>
+                            <geom name="rh_finger51_link_capsule" type="capsule" fromto="-0.000004 0.001567 0.003463 -0.000004 0.001567 0.022418" size="0.006965" class="hand" contype="1" conaffinity="1" group="3"/>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <asset>
+    <mesh file="meshes/base_link.STL"/>
+    <mesh file="meshes/left_hip_pitch_link.STL"/>
+    <mesh file="meshes/left_hip_roll_link.STL"/>
+    <mesh file="meshes/left_hip_yaw_link.STL"/>
+    <mesh file="meshes/left_knee_link.STL"/>
+    <mesh file="meshes/left_ankle_pitch_link.STL"/>
+    <mesh file="meshes/left_ankle_roll_link.STL"/>
+    <mesh file="meshes/right_hip_pitch_link.STL"/>
+    <mesh file="meshes/right_hip_roll_link.STL"/>
+    <mesh file="meshes/right_hip_yaw_link.STL"/>
+    <mesh file="meshes/right_knee_link.STL"/>
+    <mesh file="meshes/right_ankle_pitch_link.STL"/>
+    <mesh file="meshes/right_ankle_roll_link.STL"/>
+    <mesh file="meshes/waist_roll_link.STL"/>
+    <mesh file="meshes/waist_yaw_link.STL"/>
+    <mesh file="meshes/left_shoulder_pitch_link.STL"/>
+    <mesh file="meshes/left_shoulder_roll_link.STL"/>
+    <mesh file="meshes/left_shoulder_yaw_link.STL"/>
+    <mesh file="meshes/left_elbow_link.STL"/>
+    <mesh file="meshes/left_wrist_roll_link.STL"/>
+    <mesh file="meshes/left_wrist_pitch_link.STL"/>
+    <mesh file="meshes/left_wrist_yaw_link.STL"/>
+    <mesh file="meshes/right_shoulder_pitch_link.STL"/>
+    <mesh file="meshes/right_shoulder_roll_link.STL"/>
+    <mesh file="meshes/right_shoulder_yaw_link.STL"/>
+    <mesh file="meshes/right_elbow_link.STL"/>
+    <mesh file="meshes/right_wrist_roll_link.STL"/>
+    <mesh file="meshes/right_wrist_pitch_link.STL"/>
+    <mesh file="meshes/right_wrist_yaw_link.STL"/>
+    <material name="base_link_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_hip_pitch_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_hip_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_hip_yaw_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_knee_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_ankle_pitch_material" rgba="0.650980 0.619608 0.588235 1"/>
+    <material name="left_ankle_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_hip_pitch_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_hip_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_hip_yaw_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_knee_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_ankle_pitch_material" rgba="0.650980 0.619608 0.588235 1"/>
+    <material name="right_ankle_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="waist_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="waist_yaw_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_shoulder_pitch_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_shoulder_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_shoulder_yaw_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_elbow_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_wrist_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_wrist_pitch_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="left_wrist_yaw_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_shoulder_pitch_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_shoulder_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_shoulder_yaw_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_elbow_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_wrist_roll_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_wrist_pitch_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <material name="right_wrist_yaw_material" rgba="0.752941 0.752941 0.752941 1"/>
+    <mesh name="lh_base_link" file="meshes/hand/left/base_link.STL"/>
+    <mesh name="lh_finger11_link" file="meshes/hand/left/finger11_link.STL"/>
+    <mesh name="lh_finger12_link" file="meshes/hand/left/finger12_link.STL"/>
+    <mesh name="lh_finger13_link" file="meshes/hand/left/finger13_link.STL"/>
+    <mesh name="lh_finger14_link" file="meshes/hand/left/finger14_link.STL"/>
+    <mesh name="lh_finger21_link" file="meshes/hand/left/finger21_link.STL"/>
+    <mesh name="lh_finger22_link" file="meshes/hand/left/finger22_link.STL"/>
+    <mesh name="lh_finger23_link" file="meshes/hand/left/finger23_link.STL"/>
+    <mesh name="lh_finger31_link" file="meshes/hand/left/finger31_link.STL"/>
+    <mesh name="lh_finger32_link" file="meshes/hand/left/finger32_link.STL"/>
+    <mesh name="lh_finger33_link" file="meshes/hand/left/finger33_link.STL"/>
+    <mesh name="lh_finger41_link" file="meshes/hand/left/finger41_link.STL"/>
+    <mesh name="lh_finger42_link" file="meshes/hand/left/finger42_link.STL"/>
+    <mesh name="lh_finger43_link" file="meshes/hand/left/finger43_link.STL"/>
+    <mesh name="lh_finger51_link" file="meshes/hand/left/finger51_link.STL"/>
+    <mesh name="lh_finger52_link" file="meshes/hand/left/finger52_link.STL"/>
+    <mesh name="lh_finger53_link" file="meshes/hand/left/finger53_link.STL"/>
+    <mesh name="rh_base_link" file="meshes/hand/right/base_link.STL"/>
+    <mesh name="rh_finger11_link" file="meshes/hand/right/finger11_link.STL"/>
+    <mesh name="rh_finger12_link" file="meshes/hand/right/finger12_link.STL"/>
+    <mesh name="rh_finger13_link" file="meshes/hand/right/finger13_link.STL"/>
+    <mesh name="rh_finger14_link" file="meshes/hand/right/finger14_link.STL"/>
+    <mesh name="rh_finger21_link" file="meshes/hand/right/finger21_link.STL"/>
+    <mesh name="rh_finger22_link" file="meshes/hand/right/finger22_link.STL"/>
+    <mesh name="rh_finger23_link" file="meshes/hand/right/finger23_link.STL"/>
+    <mesh name="rh_finger31_link" file="meshes/hand/right/finger31_link.STL"/>
+    <mesh name="rh_finger32_link" file="meshes/hand/right/finger32_link.STL"/>
+    <mesh name="rh_finger33_link" file="meshes/hand/right/finger33_link.STL"/>
+    <mesh name="rh_finger41_link" file="meshes/hand/right/finger41_link.STL"/>
+    <mesh name="rh_finger42_link" file="meshes/hand/right/finger42_link.STL"/>
+    <mesh name="rh_finger43_link" file="meshes/hand/right/finger43_link.STL"/>
+    <mesh name="rh_finger51_link" file="meshes/hand/right/finger51_link.STL"/>
+    <mesh name="rh_finger52_link" file="meshes/hand/right/finger52_link.STL"/>
+    <mesh name="rh_finger53_link" file="meshes/hand/right/finger53_link.STL"/>
+  </asset>
+  <equality>
+    <joint name="lh_eq_thumb" joint1="lh_finger13" joint2="lh_finger12" polycoef="-0.015082 0.929 -0.045837 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="lh_eq_index" joint1="lh_finger22" joint2="lh_finger21" polycoef="0.038265 0.8847 0.383882 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="lh_eq_middle" joint1="lh_finger32" joint2="lh_finger31" polycoef="0.035946 0.8485 0.435448 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="lh_eq_ring" joint1="lh_finger42" joint2="lh_finger41" polycoef="0.043170 0.8321 0.452637 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="lh_eq_pinky" joint1="lh_finger52" joint2="lh_finger51" polycoef="0.035218 0.7349 0.429718 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="rh_eq_thumb" joint1="rh_finger13" joint2="rh_finger12" polycoef="-0.015082 0.929 -0.045837 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="rh_eq_index" joint1="rh_finger22" joint2="rh_finger21" polycoef="0.038265 0.8847 0.383882 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="rh_eq_middle" joint1="rh_finger32" joint2="rh_finger31" polycoef="0.035946 0.8485 0.435448 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="rh_eq_ring" joint1="rh_finger42" joint2="rh_finger41" polycoef="0.043170 0.8321 0.452637 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+    <joint name="rh_eq_pinky" joint1="rh_finger52" joint2="rh_finger51" polycoef="0.035218 0.7349 0.429718 0 0" solref="0.01 1" solimp="0.9 0.99 0.001 0.5 2"/>
+  </equality>
+  <actuator>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="left_hip_pitch_joint" joint="left_hip_pitch_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="left_hip_roll_joint" joint="left_hip_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-55 55" name="left_hip_yaw_joint" joint="left_hip_yaw_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="left_knee_joint" joint="left_knee_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-64 64" name="left_ankle_pitch_joint" joint="left_ankle_pitch_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-64 64" name="left_ankle_roll_joint" joint="left_ankle_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="right_hip_pitch_joint" joint="right_hip_pitch_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="right_hip_roll_joint" joint="right_hip_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-55 55" name="right_hip_yaw_joint" joint="right_hip_yaw_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="right_knee_joint" joint="right_knee_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-64 64" name="right_ankle_pitch_joint" joint="right_ankle_pitch_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-64 64" name="right_ankle_roll_joint" joint="right_ankle_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="waist_roll_joint" joint="waist_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-140 140" name="waist_yaw_joint" joint="waist_yaw_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-55 55" name="left_shoulder_pitch_joint" joint="left_shoulder_pitch_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="left_shoulder_roll_joint" joint="left_shoulder_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="left_shoulder_yaw_joint" joint="left_shoulder_yaw_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="left_elbow_joint" joint="left_elbow_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="left_wrist_roll_joint" joint="left_wrist_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="left_wrist_yaw_joint" joint="left_wrist_yaw_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="left_wrist_pitch_joint" joint="left_wrist_pitch_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-55 55" name="right_shoulder_pitch_joint" joint="right_shoulder_pitch_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="right_shoulder_roll_joint" joint="right_shoulder_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="right_shoulder_yaw_joint" joint="right_shoulder_yaw_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="right_elbow_joint" joint="right_elbow_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="right_wrist_roll_joint" joint="right_wrist_roll_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="right_wrist_yaw_joint" joint="right_wrist_yaw_joint"/>
+    <motor class="RP1" gear="1" ctrlrange="-32 32" name="right_wrist_pitch_joint" joint="right_wrist_pitch_joint"/>
+    <position name="lh_act_finger11" joint="lh_finger11" kp="50" kv="2.0" ctrlrange="0 1.75"/>
+    <position name="lh_act_finger12" joint="lh_finger12" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="lh_act_finger21" joint="lh_finger21" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="lh_act_finger31" joint="lh_finger31" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="lh_act_finger41" joint="lh_finger41" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="lh_act_finger51" joint="lh_finger51" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="rh_act_finger11" joint="rh_finger11" kp="50" kv="2.0" ctrlrange="0 1.75"/>
+    <position name="rh_act_finger12" joint="rh_finger12" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="rh_act_finger21" joint="rh_finger21" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="rh_act_finger31" joint="rh_finger31" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="rh_act_finger41" joint="rh_finger41" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+    <position name="rh_act_finger51" joint="rh_finger51" kp="50" kv="2.0" ctrlrange="0 1.40"/>
+  </actuator>
+  <sensor>
+    <framequat name="orientation" objtype="site" noise="0.001" objname="imu"/>
+    <framepos name="position" objtype="site" noise="0.001" objname="imu"/>
+    <gyro name="angular-velocity" site="imu" noise="0.005" cutoff="34.9"/>
+    <velocimeter name="linear-velocity" site="imu" noise="0.001" cutoff="30"/>
+    <accelerometer name="linear-acceleration" site="imu" noise="0.005" cutoff="157"/>
+    <magnetometer name="magnetometer" site="imu"/>
+  </sensor>
+  <visual>
+    <global offwidth="1920" offheight="1080"/>
+  </visual>
+</mujoco>

@@ -122,11 +122,19 @@ class VelocityEstimationModule(MLP):
         velocity_pred = super().forward(fused)
         self.last_velocity_pred = velocity_pred
         if store_aux_targets and critic_group is not None:
-            self.last_velocity_target = last_history_frame(
-                critic_group["base_lin_vel"],
-                self.dims.history_length,
-                self.dims.velocity_dim,
-            ).detach()
+            if torch.is_tensor(critic_group):
+                hist = self.dims.history_length
+                self.last_velocity_target = last_history_frame(
+                    critic_group[..., : hist * self.dims.velocity_dim],
+                    hist,
+                    self.dims.velocity_dim,
+                )
+            else:
+                self.last_velocity_target = last_history_frame(
+                    critic_group["base_lin_vel"],
+                    self.dims.history_length,
+                    self.dims.velocity_dim,
+                ).detach()
         else:
             self.last_velocity_target = None
 
@@ -266,9 +274,19 @@ class SSREstimationModule(nn.Module):
         parts.append(depth_latent)
         return torch.cat(parts, dim=-1), velocity_pred, fused
 
-    def _store_aux_targets(self, critic_group: TensorDict | None) -> None:
+    def _store_aux_targets(self, critic_group: TensorDict | torch.Tensor | None) -> None:
         if critic_group is None:
             self.last_velocity_target = None
+            self.last_foot_height_target = None
+            self.last_foothold_target = None
+            return
+        if torch.is_tensor(critic_group):
+            hist = self.dims.history_length
+            self.last_velocity_target = last_history_frame(
+                critic_group[..., : hist * self.dims.velocity_dim],
+                hist,
+                self.dims.velocity_dim,
+            ).detach()
             self.last_foot_height_target = None
             self.last_foothold_target = None
             return
@@ -277,17 +295,20 @@ class SSREstimationModule(nn.Module):
             self.dims.history_length,
             self.dims.velocity_dim,
         ).detach()
-        left = last_history_frame(
-            critic_group["left_foot_height_map"],
-            self.dims.history_length,
-            self.dims.foot_height_dim,
-        )
-        right = last_history_frame(
-            critic_group["right_foot_height_map"],
-            self.dims.history_length,
-            self.dims.foot_height_dim,
-        )
-        self.last_foot_height_target = torch.cat((left, right), dim=-1).detach()
+        if "left_foot_height_map" in critic_group.keys() and "right_foot_height_map" in critic_group.keys():
+            left = last_history_frame(
+                critic_group["left_foot_height_map"],
+                self.dims.history_length,
+                self.dims.foot_height_dim,
+            )
+            right = last_history_frame(
+                critic_group["right_foot_height_map"],
+                self.dims.history_length,
+                self.dims.foot_height_dim,
+            )
+            self.last_foot_height_target = torch.cat((left, right), dim=-1).detach()
+        else:
+            self.last_foot_height_target = None
         self.last_foothold_target = None
 
     def set_foothold_teacher_target(self, teacher: torch.Tensor | None) -> None:
@@ -373,42 +394,58 @@ class SSREstimationModule(nn.Module):
 
 
 def resolve_estimation_dims(
-    policy_group: TensorDict,
-    critic_group: TensorDict,
+    policy_group: TensorDict | torch.Tensor,
+    critic_group: TensorDict | torch.Tensor | None,
     encoder_obs_names: list[str],
     depth_latent_dim: int,
     history_length: int,
     foot_height_actor_dim: int = 16,
+    proprio_term_dims: list[int] | None = None,
+    flat_dims: list[int] | None = None,
 ) -> SSREstimationDims:
-    proprio_term_dims: list[int] = []
-    for name, value in policy_group.items():
-        if name in encoder_obs_names:
-            continue
-        if value.ndim != 2:
-            raise ValueError(
-                f"SSR estimation expects flat proprio terms; got '{name}' with shape {tuple(value.shape)}."
-            )
-        if value.shape[-1] % history_length != 0:
-            raise ValueError(
-                f"Proprio term '{name}' dim {value.shape[-1]} is not divisible by "
-                f"history_length={history_length}."
-            )
-        proprio_term_dims.append(value.shape[-1] // history_length)
+    if torch.is_tensor(policy_group):
+        if flat_dims is not None:
+            proprio_term_dims = [dim // history_length for dim in flat_dims]
+        elif proprio_term_dims is None:
+            if policy_group.shape[-1] % history_length != 0:
+                raise ValueError(
+                    f"Flat policy dim {policy_group.shape[-1]} is not divisible by "
+                    f"history_length={history_length}."
+                )
+            proprio_term_dims = [policy_group.shape[-1] // history_length]
+        else:
+            proprio_term_dims = list(proprio_term_dims)
+    else:
+        proprio_term_dims = []
+        for name, value in policy_group.items():
+            if name in encoder_obs_names:
+                continue
+            if value.ndim != 2:
+                raise ValueError(
+                    f"SSR estimation expects flat proprio terms; got '{name}' with shape {tuple(value.shape)}."
+                )
+            if value.shape[-1] % history_length != 0:
+                raise ValueError(
+                    f"Proprio term '{name}' dim {value.shape[-1]} is not divisible by "
+                    f"history_length={history_length}."
+                )
+            proprio_term_dims.append(value.shape[-1] // history_length)
 
     if not proprio_term_dims:
         raise ValueError("SSR estimation requires at least one proprioceptive policy term.")
 
-    left = critic_group["left_foot_height_map"]
-    right = critic_group["right_foot_height_map"]
-    if left.shape[-1] != right.shape[-1]:
-        raise ValueError(
-            "Left and right foot height maps must have matching dimensions; "
-            f"got {left.shape[-1]} and {right.shape[-1]}."
-        )
-    # Foot height maps are configured as single-frame critic terms. Do not infer
-    # history from divisibility by the proprio history length: a 24x5 scan has
-    # 120 points and would otherwise be misread as 8 frames of 15 points.
-    foot_height_dim = left.shape[-1]
+    foot_height_dim = 0
+    if critic_group is not None and not torch.is_tensor(critic_group):
+        if "left_foot_height_map" in critic_group.keys() and "right_foot_height_map" in critic_group.keys():
+            left = critic_group["left_foot_height_map"]
+            right = critic_group["right_foot_height_map"]
+            if left.shape[-1] != right.shape[-1]:
+                raise ValueError(
+                    "Left and right foot height maps must have matching dimensions; "
+                    f"got {left.shape[-1]} and {right.shape[-1]}."
+                )
+            # Foot height maps are single-frame critic terms.
+            foot_height_dim = left.shape[-1]
 
     return SSREstimationDims(
         history_length=history_length,
@@ -422,27 +459,39 @@ def resolve_estimation_dims(
 
 
 def resolve_velocity_estimation_dims(
-    policy_group: TensorDict,
+    policy_group: TensorDict | torch.Tensor,
     encoder_obs_names: list[str],
     depth_latent_dim: int,
     history_length: int,
+    flat_dims: list[int] | None = None,
 ) -> VelocityEstimationDims:
     """Resolve velocity-estimator dimensions from the policy observation group."""
-    proprio_term_dims: list[int] = []
-    for name, value in policy_group.items():
-        if name in encoder_obs_names:
-            continue
-        if value.ndim != 2:
-            raise ValueError(
-                f"Velocity estimation expects flat proprio terms; got '{name}' "
-                f"with shape {tuple(value.shape)}."
-            )
-        if value.shape[-1] % history_length != 0:
-            raise ValueError(
-                f"Proprio term '{name}' dim {value.shape[-1]} is not divisible by "
-                f"history_length={history_length}."
-            )
-        proprio_term_dims.append(value.shape[-1] // history_length)
+    if torch.is_tensor(policy_group):
+        if flat_dims is not None:
+            proprio_term_dims = [dim // history_length for dim in flat_dims]
+        else:
+            if policy_group.shape[-1] % history_length != 0:
+                raise ValueError(
+                    f"Flat policy dim {policy_group.shape[-1]} is not divisible by "
+                    f"history_length={history_length}."
+                )
+            proprio_term_dims = [policy_group.shape[-1] // history_length]
+    else:
+        proprio_term_dims = []
+        for name, value in policy_group.items():
+            if name in encoder_obs_names:
+                continue
+            if value.ndim != 2:
+                raise ValueError(
+                    f"Velocity estimation expects flat proprio terms; got '{name}' "
+                    f"with shape {tuple(value.shape)}."
+                )
+            if value.shape[-1] % history_length != 0:
+                raise ValueError(
+                    f"Proprio term '{name}' dim {value.shape[-1]} is not divisible by "
+                    f"history_length={history_length}."
+                )
+            proprio_term_dims.append(value.shape[-1] // history_length)
     if not proprio_term_dims:
         raise ValueError(
             "Velocity estimation requires at least one proprioceptive policy term."

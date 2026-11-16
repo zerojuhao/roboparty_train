@@ -10,6 +10,7 @@ from .distribution import BetaDistribution, Distribution, GaussianDistribution, 
 from .mlp import MLP
 from .normalization import EmpiricalDiscountedVariationNormalization, EmpiricalNormalization
 from .rnn import RNN, HiddenState
+from .moe import MoeLayer
 
 __all__ = [
     "CNN",
@@ -22,4 +23,5 @@ __all__ = [
     "GaussianDistribution",
     "HeteroscedasticGaussianDistribution",
     "HiddenState",
+    "MoeLayer",
 ]

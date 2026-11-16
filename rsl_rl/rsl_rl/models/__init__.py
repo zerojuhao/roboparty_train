@@ -10,6 +10,7 @@ from .attention_model import AttentionModel
 from .mlp_model import MLPModel
 from .parkour_model import ParkourModel
 from .rnn_model import RNNModel
+from .encoder_model import EncoderModel, EncoderMoEModel
 
 __all__ = [
     "CNNModel",
@@ -17,4 +18,6 @@ __all__ = [
     "MLPModel",
     "ParkourModel",
     "RNNModel",
+    "EncoderModel",
+    "EncoderMoEModel",
 ]

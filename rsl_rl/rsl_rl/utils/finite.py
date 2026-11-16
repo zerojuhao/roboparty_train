@@ -23,10 +23,15 @@ def nonfinite_flag(value, *, device=None):
     """
     groups = {}
     for _, tensor in _floating_leaves(value, ""):
-        groups.setdefault(tensor.device, []).append(torch.isfinite(tensor).all())
+        groups.setdefault(tensor.device, []).append(tensor)
     target = device if device is not None else next(iter(groups), "cpu")
-    flags = [(~torch.stack(checks).all()).to(device=target, dtype=torch.int32)
-             for checks in groups.values()]
+    flags = []
+    for tensors in groups.values():
+        scalars = [tensor.reshape(()) for tensor in tensors if tensor.numel() == 1]
+        checks = [torch.isfinite(tensor).all() for tensor in tensors if tensor.numel() != 1]
+        if scalars:
+            checks.append(torch.isfinite(torch.stack(scalars)).all())
+        flags.append((~torch.stack(checks).all()).to(device=target, dtype=torch.int32))
     if not flags:
         return torch.zeros((), device=target, dtype=torch.int32)
     return torch.stack(flags).amax()

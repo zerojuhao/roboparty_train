@@ -14,12 +14,16 @@ def quality_metrics(model):
     metrics = {key: model.validation_p95.new_zeros(()) for key in (
         "wm/context_fraction", "wm/no_push_fraction", "wm/fb_projection_fraction",
         "wm/fb_projection_residual", "wm/recorded_z_relative_drift", "wm/trusted_fraction",
-        "wm/action_radius_fraction", "wm/disagreement_fraction", "wm/trusted_prefix_steps_mean",
-        "wm/imagination_disagreement", "wm/imagination_action_distance", "wm/accepted_count",
+        "wm/action_radius_fraction", "wm/trusted_prefix_steps_mean",
+        "wm/imagination_action_distance", "wm/accepted_count",
         "wm/actor_loss", "wm/actor_weight", "wm/imagined_return", "wm/imagination_updates",
         "wm/reward_sum", "wm/terminal_value", "wm/terminal_contribution", "wm/reward_weights_norm",
         "wm/sequence_value_ready", "wm/sequence_value_updates", "wm/sequence_value_loss",
         "wm/sequence_value_target",
+        "wm/discriminator_reward_sum", "wm/discriminator_terminal_value",
+        "wm/discriminator_return", "wm/discriminator_weight", "wm/fb_return",
+        "wm/tracking_fraction", "wm/tracking_pose_loss", "wm/tracking_return", "wm/tracking_weight",
+        "wm/tracking_body_position_mse", "wm/tracking_rotation_chordal_mse", "wm/tracking_height_mse",
     )}
     for step in {1, 4, 8, 16, 32, cfg.horizon}:
         if step <= cfg.horizon:
@@ -67,9 +71,8 @@ def rollout(model, agent, batch, latents, trusted, metrics):
     )
     member = int(model.updates) % cfg.ensemble_size
     action_ok = torch.ones_like(trusted)
-    disagreement_ok = torch.ones_like(trusted)
     prefix = torch.zeros_like(trusted, dtype=torch.float32)
-    disagreements, action_distances = [], []
+    action_distances = []
     states, observations = [state], []
     obs = model.codec.observation(state, previous_action, history, batch["heading"][:, 0].detach(),
                                   batch["velocity"][:, 0].detach(), batch["valid"][:, 0].detach(), noisy=True)
@@ -81,20 +84,13 @@ def rollout(model, agent, batch, latents, trusted, metrics):
             action = distribution.sample(clip=agent.cfg.stddev_clip).float()
         prediction = model.predict(state, action, xi, member)
         with torch.no_grad():
-            disagreement = torch.stack([
-                model._scaled_state_error(prediction.detach(),
-                                          model.predict(state.detach(), action.detach(), xi, other)).sqrt()
-                for other in range(cfg.ensemble_size) if other != member
-            ]).amax(0)
             distance = ((model.codec.env_action(action) - model.codec.env_action(batch["action"][:, step]))
                         / model.codec.action_rescale).abs().amax(-1)
-            disagreement_ok &= disagreement <= cfg.imagination_max_disagreement
             action_ok &= distance <= cfg.imagination_action_radius
-            trusted = trusted & disagreement_ok & action_ok
+            trusted = trusted & action_ok
             prefix += trusted.float()
             if step + 1 in {1, 4, 8, 16, 32, cfg.horizon}:
                 metrics[f"wm/trusted_fraction_h{step + 1}"] = trusted.float().mean()
-            disagreements.append(disagreement)
             action_distances.append(distance)
         history = model.codec.advance_history(history, obs)
         previous_action = model.codec.env_action(action)
@@ -108,9 +104,7 @@ def rollout(model, agent, batch, latents, trusted, metrics):
     metrics.update({
         "wm/trusted_fraction": trusted.float().mean(),
         "wm/action_radius_fraction": action_ok.float().mean(),
-        "wm/disagreement_fraction": disagreement_ok.float().mean(),
         "wm/trusted_prefix_steps_mean": prefix.mean(),
-        "wm/imagination_disagreement": torch.stack(disagreements).mean(),
         "wm/imagination_action_distance": torch.stack(action_distances).mean(),
     })
     return states, observations, trusted
@@ -122,19 +116,60 @@ def score_backward(model, agent, states, observations):
     physical = torch.stack(states[1:], dim=1).flatten(0, 1)
     flat_obs = {key: torch.stack([obs[key] for obs in observations[1:]], dim=1).flatten(0, 1)
                 for key in observations[0]}
-    embeddings, privileged = [], []
+    embeddings, privileged, poses = [], [], []
     chunk_size = int(getattr(model.cfg, "scoring_chunk_size", 2048))
     for start in range(0, physical.shape[0], chunk_size):
         stop = start + chunk_size
         parts = {key: value[start:stop] for key, value in flat_obs.items()}
         body = model.kinematics(physical[start:stop])
+        if getattr(model.cfg, "tracking_coef", 0) > 0:
+            from .world_model_tracking import POSE_DIM
+
+            poses.append(body[:, :POSE_DIM])
         parts.update(agent._obs_normalizer.normalize_dict({"privileged_state": body}))
         with agent._autocast_context():
             embeddings.append(agent._target_backward_map(agent._privileged_input(parts)).float())
         privileged.append(parts["privileged_state"])
     body_observations = torch.cat(privileged).reshape(batch_size, horizon, -1)
-    observations[-1]["privileged_state"] = body_observations[:, -1]
+    for step, obs in enumerate(observations[1:]):
+        obs["privileged_state"] = body_observations[:, step]
+    if poses:
+        raw = torch.cat(poses).reshape(batch_size, horizon, -1)
+        for step, obs in enumerate(observations[1:]):
+            obs["world_model_pose"] = raw[:, step]
     return torch.cat(embeddings).reshape(batch_size, horizon, -1)
+
+
+def score_discriminator(model, agent, states, observations, latents):
+    """Score current states, matching the real discriminator critic's reward timing."""
+    body = model.kinematics(states[0])
+    observations[0].update(agent._obs_normalizer.normalize_dict({"privileged_state": body}))
+    inputs = torch.stack([agent._privileged_input(obs) for obs in observations[:-1]], dim=1)
+    batch_size, horizon = inputs.shape[:2]
+    inputs, z = inputs.flatten(0, 1), latents[:, :horizon].flatten(0, 1)
+    rewards = []
+    for start in range(0, inputs.shape[0], model.cfg.scoring_chunk_size):
+        stop = start + model.cfg.scoring_chunk_size
+        with agent._autocast_context():
+            logits = agent._discriminator.compute_logits(obs=inputs[start:stop], z=z[start:stop])
+        rewards.append(agent.discriminator_reward_from_logits(logits))
+    return torch.cat(rewards).reshape(batch_size, horizon)
+
+
+def discriminator_weight(agent, scale, reference):
+    # One detached real-batch FB scale is shared by every imagined microbatch.
+    scale = scale if agent.cfg.scale_reg else 1.0
+    return reference.new_tensor(agent.cfg.reg_coeff) * torch.as_tensor(
+        scale, device=reference.device, dtype=reference.dtype).detach()
+
+
+def discriminator_return_metrics(metrics, reward_sum, terminal, discount, coefficient):
+    returns = reward_sum + discount * terminal
+    metrics.update({"wm/discriminator_reward_sum": reward_sum.detach().mean(),
+                    "wm/discriminator_terminal_value": terminal.detach().mean(),
+                    "wm/discriminator_return": returns.detach().mean(),
+                    "wm/discriminator_weight": coefficient.detach()})
+    return returns
 
 
 def accepted_count(trusted, metrics, update_counters):
@@ -175,7 +210,7 @@ def return_metrics(metrics, reward_sum, terminal, discount, weights):
 
 
 def fb_imagination_loss(model, agent, batch, *, total_batch_size=None, actor_weight=None,
-                        update_counters=True):
+                        update_counters=True, discriminator_scale=1.0):
     """Fixed-z reward and its paired terminal F; optional externally managed update."""
     cfg = model.cfg
     ready, metrics = quality_metrics(model)
@@ -198,8 +233,12 @@ def fb_imagination_loss(model, agent, batch, *, total_batch_size=None, actor_wei
                     "wm/fb_projection_fraction": projection_ok.float().mean(),
                     "wm/fb_projection_residual": residual.mean()})
     latents = z[:, None].expand(-1, cfg.horizon + 1, -1)
+    use_discriminator = getattr(cfg, "discriminator_reward", False)
+    critic = ((agent._target_critic_shared if agent.shared_value_net else agent._target_critic)
+              if use_discriminator else None)
     with frozen(model.members, agent._target_backward_map, agent._target_forward_map,
-                getattr(agent._actor, "velocity_estimator", None)):
+                getattr(agent._actor, "velocity_estimator", None), critic,
+                agent._discriminator if use_discriminator else None):
         states, observations, trusted = rollout(model, agent, batch, latents, trusted, metrics)
         backward = score_backward(model, agent, states, observations)
         rewards = (backward * weights[:, None]).sum(-1)
@@ -215,6 +254,19 @@ def fb_imagination_loss(model, agent, batch, *, total_batch_size=None, actor_wei
         terminal = terminal.reshape(-1)
         return_metrics(metrics, returns, terminal, agent.cfg.discount ** cfg.horizon, weights)
         returns = returns + agent.cfg.discount ** cfg.horizon * terminal
+        metrics["wm/fb_return"] = returns.detach().mean()
+        if use_discriminator:
+            disc_rewards = score_discriminator(model, agent, states, observations, latents)
+            with agent._autocast_context():
+                qs = critic(agent._full_input(observations[-1]), z, terminal_action)
+                if agent.shared_value_net:
+                    qs = qs[0]
+            _, _, disc_terminal = agent._targets_uncertainty(qs.float(), agent.cfg.actor_pessimism_penalty)
+            coefficient = discriminator_weight(agent, discriminator_scale, returns)
+            disc_returns = discriminator_return_metrics(
+                metrics, (disc_rewards * discounts).sum(-1), disc_terminal.reshape(-1),
+                agent.cfg.discount ** cfg.horizon, coefficient)
+            returns = returns + coefficient * disc_returns
     loss = actor_return_loss(model, returns, trusted, metrics, total_batch_size=total_batch_size,
                              actor_weight=actor_weight, update_counters=update_counters)
     return loss, metrics

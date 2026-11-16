@@ -68,10 +68,31 @@ class UFOPrivilegedKinematics(nn.Module):
         if not math.isfinite(self.root_height_offset):
             raise ValueError("Root height offset must be finite")
         urdf = ET.fromstring(description)
-        # RP1 adds actuator armature to URDF dynamics; it does not affect FK.
-        for dynamics in urdf.findall("joint/dynamics"):
-            dynamics.attrib.pop("armature", None)
-        self.chain = pk.build_chain_from_urdf(ET.tostring(urdf))
+        if urdf.tag == "robot":
+            # RP1 adds actuator armature to URDF dynamics; it does not affect FK.
+            for dynamics in urdf.findall("joint/dynamics"):
+                dynamics.attrib.pop("armature", None)
+            self.chain = pk.build_chain_from_urdf(ET.tostring(urdf))
+        elif urdf.tag == "mujoco":
+            from pytorch_kinematics import mjcf
+
+            # MuJoCo 3.12 enum hashes differ from the NumPy integer joint types.
+            mjcf.JOINT_TYPE_MAP = {int(key): value for key, value in mjcf.JOINT_TYPE_MAP.items()}
+            # FK needs only bodies and joints, not meshes, sites or controllers.
+            for parent in urdf.iter():
+                for child in list(parent):
+                    if child.tag in {"asset", "geom", "site", "sensor", "actuator",
+                                     "contact", "equality", "tendon"}:
+                        parent.remove(child)
+            root = urdf.find("worldbody/body")
+            if root is None or root.get("name") != self.body_names[0]:
+                raise ValueError("UFO MJCF requires the robot root body first")
+            # The floating root pose is supplied by state, not the spawn pose.
+            for key in ("pos", "quat", "euler", "axisangle", "xyaxes", "zaxis"):
+                root.attrib.pop(key, None)
+            self.chain = pk.build_chain_from_mjcf(ET.tostring(urdf).decode(), body=self.body_names[0])
+        else:
+            raise ValueError(f"Expected URDF <robot> or MJCF <mujoco>, got <{urdf.tag}>")
         chain_joint_names = self.chain.get_joint_parameter_names()
         if (len(self.joint_names) != 24 or len(set(self.joint_names)) != 24
                 or set(self.joint_names) != set(chain_joint_names)):
@@ -95,7 +116,12 @@ class UFOPrivilegedKinematics(nn.Module):
         self.register_buffer("joint_frames", torch.tensor(joint_frames, dtype=torch.long))
         self.register_buffer("ancestors", ancestors)
         self.register_buffer("axes", self.chain.axes.detach().clone())
+        self._compiled_observation = None
         self.to(device=device, dtype=dtype)
+
+    def compile_observation(self, mode="default"):
+        options = {**torch._inductor.list_mode_options(mode), "inplace_buffers": False}
+        self._compiled_observation = torch.compile(self._observation, fullgraph=True, options=options)
 
     def _apply(self, fn, recurse=True):
         result = super()._apply(fn, recurse=recurse)
@@ -128,7 +154,10 @@ class UFOPrivilegedKinematics(nn.Module):
             if bodies:
                 result = self._body_kinematics(state, analytical_grad=analytical_grad)
                 return tuple(result[key] for key in self._body_fields)
-            return (self._observation(state, analytical_grad=analytical_grad),)
+            # AOT backward does not support higher derivatives; keep that path eager.
+            observation = (self._compiled_observation if analytical_grad and self._compiled_observation is not None
+                           else self._observation)
+            return (observation(state, analytical_grad=analytical_grad),)
 
     def _body_kinematics(self, state, *, analytical_grad=True):
         if state.ndim != 2 or state.shape[-1] != 59:

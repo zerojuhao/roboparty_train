@@ -3,10 +3,12 @@
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import timedelta
 
 import torch
 
@@ -67,6 +69,57 @@ def merge_tracking_shards(results, motion_keys, num_motions):
     if any(count != num_motions for count in counts.values()):
         raise ValueError("Tracking evaluation metric coverage is incomplete")
     return {"metrics": {key: value / counts[key] for key, value in sums.items()}, "clips": clips}
+
+
+def gather_tracking_shards_via_files(
+    directory, global_step, eval_mode, rank, world_size, result, group, *, timeout_seconds=1860
+):
+    """Exchange evaluation shards through shared storage instead of object collectives.
+
+    Tracking results contain per-clip dictionaries and optional phase-error arrays. Sending
+    those objects through a Gloo object collective made the training ranks sit at 0% GPU
+    utilization after the evaluator children had already completed. The shared filesystem
+    keeps the collective payload to three small barriers and leaves the serialized evidence
+    available when an aggregation failure needs diagnosis.
+    """
+    if world_size < 2:
+        return [result]
+    mode = eval_mode or "legacy"
+    round_dir = os.path.join(directory, f".shards_{global_step}_{mode}")
+    if rank == 0:
+        shutil.rmtree(round_dir, ignore_errors=True)
+        os.makedirs(round_dir, exist_ok=True)
+    timeout = timedelta(seconds=max(30.0, float(timeout_seconds)))
+    torch.distributed.monitored_barrier(group=group, timeout=timeout, wait_all_ranks=True)
+
+    compact = {
+        key: result[key]
+        for key in ("motion_keys", "motion_ids", "sums", "counts", "clips", "phase_errors", "eval_mode")
+        if key in result
+    }
+    temporary = os.path.join(round_dir, f"rank{rank}.pt.tmp.{os.getpid()}")
+    destination = os.path.join(round_dir, f"rank{rank}.pt")
+    torch.save(compact, temporary)
+    os.replace(temporary, destination)
+    torch.distributed.monitored_barrier(group=group, timeout=timeout, wait_all_ranks=True)
+
+    merged_path = os.path.join(round_dir, "merged.pt")
+    if rank == 0:
+        try:
+            results = [torch.load(os.path.join(round_dir, f"rank{index}.pt"),
+                                  map_location="cpu", weights_only=False)
+                       for index in range(world_size)]
+            payload = {"results": results}
+        except Exception as exc:
+            payload = {"error": f"{type(exc).__name__}: {exc}"}
+        temporary = merged_path + f".tmp.{os.getpid()}"
+        torch.save(payload, temporary)
+        os.replace(temporary, merged_path)
+    torch.distributed.monitored_barrier(group=group, timeout=timeout, wait_all_ranks=True)
+    payload = torch.load(merged_path, map_location="cpu", weights_only=False)
+    if "error" in payload:
+        raise RuntimeError("Tracking shard aggregation failed: " + payload["error"])
+    return payload["results"]
 
 
 class PersistentTrackingEvaluator:

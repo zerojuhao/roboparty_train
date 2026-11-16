@@ -1,0 +1,300 @@
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2025-2026, The RoboLab Project Developers.
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+import argparse
+import sys
+from pathlib import Path
+
+from robolab.utils.kitless_runtime import configure_kitless_runtime, parse_isaaclab_cli, run_resolved_task, sim_is_running
+
+configure_kitless_runtime()
+
+import cli_args  # isort: skip
+
+# add argparse arguments
+parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
+parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument(
+    "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
+)
+parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+parser.add_argument("--plane", action='store_true', help="Use plane terrain")
+parser.add_argument("--push_robot", action='store_true', help="Push robot during playing")
+parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument(
+    "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
+)
+parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--steps", type=int, default=0, help="Stop after this many policy steps; zero runs continuously.")
+parser.add_argument("--velocity", type=float, nargs=3, metavar=("VX", "VY", "WZ"),
+                    help="Hold one user velocity command during playback.")
+
+# append RSL-RL cli arguments
+cli_args.add_rsl_rl_args(parser)
+args_cli = parse_isaaclab_cli(parser)
+
+"""Check for installed RSL-RL version."""
+
+import importlib.metadata as metadata
+
+from packaging import version
+
+installed_version = metadata.version("rsl-rl-lib")
+
+"""Rest everything follows."""
+
+import gymnasium as gym
+import os
+import time
+import torch
+
+from rsl_rl.runners import DistillationRunner, FbCprRunner, OnPolicyRunner
+from rsl_rl.runners.fbcpr_runner import default_rsl_rl_log_root
+
+from isaaclab.envs import (
+    DirectMARLEnv,
+    DirectMARLEnvCfg,
+    DirectRLEnvCfg,
+    ManagerBasedRLEnvCfg,
+    multi_agent_to_single_agent,
+)
+from isaaclab.utils.assets import retrieve_file_path
+from isaaclab.utils.dict import print_dict
+
+from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
+from isaaclab_tasks.utils import get_checkpoint_path
+from isaaclab.markers import VisualizationMarkers
+
+import isaaclab_tasks  # noqa: F401
+import robolab.tasks  # noqa: F401
+
+def visualize_attention(map_scan, root_pose, output_attn, visualizer):
+    root_pos = root_pose[:, :3]  # shape (B, 3)
+    map_scan_world = -map_scan + root_pos.unsqueeze(1).unsqueeze(1)  # shape (B, W, L, 3)
+    B = root_pos.shape[0]
+
+    max_attn_per_env, _ = torch.max(output_attn.view(B, -1), dim=1)
+    max_attn_per_env[max_attn_per_env == 0] = 1.0
+    normalized_attn = output_attn / max_attn_per_env.view(B, 1, 1)
+    normalized_attn = normalized_attn.view(-1)
+    # print(normalized_attn)
+    attention_indices = torch.zeros_like(normalized_attn, dtype=torch.int)
+    for i in range(10):
+        color_mask = (normalized_attn > 0.1 * i)
+        color_mask = torch.bitwise_and(color_mask, normalized_attn < 0.1 * (i + 1))
+        attention_indices[color_mask] = i
+    visualizer.visualize(translations=map_scan_world.view(-1, 3), marker_indices=attention_indices)
+
+def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
+    # grab task name for checkpoint path
+    task_name = args_cli.task.split(":")[-1]
+    train_task_name = task_name.replace("-Play", "")
+
+    # override configurations with non-hydra CLI arguments
+    agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+
+    # handle deprecated configurations
+    if agent_cfg.class_name != "FbCprRunner":
+        agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
+
+    # rsl-rl 3.x 的 PPO/PPOAMP 不支持 Isaac Lab 2.3 为 5.0 预留的字段
+    if version.parse(installed_version) < version.parse("5.0.0"):
+        for key in ("optimizer", "share_cnn_encoders"):
+            if hasattr(agent_cfg.algorithm, key):
+                delattr(agent_cfg.algorithm, key)
+
+    # set the environment seed
+    # note: certain randomizations occur in the environment initialization so we set the seed here
+    env_cfg.seed = agent_cfg.seed
+    env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+
+    manager_based = isinstance(env_cfg, ManagerBasedRLEnvCfg)
+    if manager_based:
+        for group in vars(env_cfg.observations).values():
+            if hasattr(group, 'enable_corruption'):
+                group.enable_corruption = False
+    else:
+        env_cfg.noise.add_noise = False
+    if not args_cli.push_robot:
+        env_cfg.events.push_robot = None
+    env_cfg.episode_length_s = 40.0
+    if manager_based:
+        env_cfg.commands.base_velocity.heading_command = False
+    else:
+        env_cfg.commands.heading_command = False
+        env_cfg.commands.rel_standing_envs = 0.0
+
+    if args_cli.plane:
+        env_cfg.scene.terrain.terrain_generator = None
+        env_cfg.scene.terrain.terrain_type = "plane"
+
+    if env_cfg.scene.terrain.terrain_generator is not None:
+        env_cfg.scene.terrain.terrain_generator.num_rows = 5
+        env_cfg.scene.terrain.terrain_generator.num_cols = 5
+        env_cfg.scene.terrain.terrain_generator.curriculum = False
+        env_cfg.scene.terrain.terrain_generator.difficulty_range = (1.0, 1.0)
+
+    if hasattr(env_cfg, "attn_enc"):
+        visualizer = VisualizationMarkers(env_cfg.attn_enc.marker_cfg)
+
+    if hasattr(env_cfg, 'interrupt') and env_cfg.interrupt.use_interrupt:
+        env_cfg.interrupt.interrupt_ratio = 1.0
+
+    # specify directory for logging experiments
+    log_root_path = os.path.join(default_rsl_rl_log_root(), agent_cfg.experiment_name)
+    print(f"[INFO] Loading experiment from directory: {log_root_path}")
+    if args_cli.checkpoint:
+        resume_path = retrieve_file_path(args_cli.checkpoint)
+    else:
+        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+
+    log_dir = os.path.dirname(resume_path)
+
+    # set the log directory for the environment (works for all environment types)
+    env_cfg.log_dir = log_dir
+
+    # create isaac environment
+    from robolab.tasks.manager_based.amp.mdp.force_estimation import configure_force_estimation
+    configure_force_estimation(env_cfg, agent_cfg)
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    if not manager_based:
+        env.unwrapped.command_generator.command[:] = 0.0
+
+    if hasattr(env_cfg, 'interrupt') and env_cfg.interrupt.use_interrupt:
+        env.unwrapped.interrupt_rad_curriculum = torch.ones(env_cfg.scene.num_envs, dtype=torch.float, device=env.unwrapped.device, requires_grad=False)
+
+    # convert to single-agent instance if required by the RL algorithm
+    if isinstance(env.unwrapped, DirectMARLEnv):
+        env = multi_agent_to_single_agent(env)
+
+    # wrap for video recording
+    if args_cli.video:
+        video_kwargs = {
+            "video_folder": os.path.join(log_dir, "videos", "play"),
+            "step_trigger": lambda step: step == 0,
+            "video_length": args_cli.video_length,
+            "disable_logger": True,
+        }
+        print("[INFO] Recording videos during training.")
+        print_dict(video_kwargs, nesting=4)
+        env = gym.wrappers.RecordVideo(env, **video_kwargs)
+
+    # wrap around environment for rsl-rl
+    env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+    if args_cli.velocity is not None:
+        velocity = torch.tensor(args_cli.velocity, device=env.unwrapped.device)
+        if manager_based:
+            command = env.unwrapped.command_manager.get_term('base_velocity')
+            command._update_command = lambda: command.vel_command_b.copy_(velocity.expand_as(command.vel_command_b))
+            command._update_command()
+            env.unwrapped.obs_buf = env.unwrapped.observation_manager.compute(update_history=True)
+        else:
+            env.unwrapped.command_generator.command[:] = velocity
+
+    print(f"[INFO]: Loading model checkpoint from: {resume_path}")
+    # load previously trained model
+    if agent_cfg.class_name == "OnPolicyRunner":
+        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    elif agent_cfg.class_name == "DistillationRunner":
+        runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    elif agent_cfg.class_name == "FbCprRunner":
+        runner = FbCprRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    else:
+        raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+    if isinstance(runner, FbCprRunner):
+        runner.load(resume_path, load_optimizer=False)
+    else:
+        runner.load(resume_path, map_location=agent_cfg.device)
+
+    # obtain the trained policy for inference
+    policy = runner.get_inference_policy(device=env.unwrapped.device)
+
+    if not manager_based and not getattr(args_cli, 'headless', True):
+        from robolab.utils.keyboard import Keyboard
+        keyboard = Keyboard(env)  # noqa:F841
+
+    dt = env.unwrapped.step_dt
+
+    # reset environment
+    obs = env.get_observations()
+    timestep = 0
+    # simulate environment
+    while sim_is_running(env):
+        start_time = time.time()
+        # run everything in inference mode
+        with torch.inference_mode():
+            if hasattr(env_cfg, "attn_enc"):
+                actions, output_attn = policy(obs, return_attention=True)
+                height_scan = (
+                    env.unwrapped.height_scanner.data.pos_w[:, :3].unsqueeze(1) - env.unwrapped.height_scanner.data.ray_hits_w[..., :3]
+                )
+                grid_size = env.unwrapped.height_scanner.cfg.pattern_cfg.size  # [L,W] (m)
+                resolution = env.unwrapped.height_scanner.cfg.pattern_cfg.resolution
+                grid_shape = (int(grid_size[0] / resolution) + 1, int(grid_size[1] / resolution) + 1)
+                L = grid_shape[0]
+                W = grid_shape[1]
+                B = height_scan.shape[0]
+                height_scan = height_scan.view(B, W, L, 3)
+                height_scan[..., 2] = torch.clamp(height_scan[..., 2], min=-1.0+env.unwrapped.cfg.normalization.height_scan_offset, max=1.0+env.unwrapped.cfg.normalization.height_scan_offset)
+                height_scan[..., :2] = torch.nan_to_num(height_scan[..., :2], nan=0.0, posinf=0.0, neginf=-0.0)
+                height_scan[..., 2] = torch.nan_to_num(height_scan[..., 2], nan=1.0+env.unwrapped.cfg.normalization.height_scan_offset, posinf=1.0+env.unwrapped.cfg.normalization.height_scan_offset, neginf=-1.0+env.cfg.normalization.height_scan_offset)
+                root_pose = env.unwrapped.robot.data.root_pos_w
+                visualize_attention(height_scan, root_pose, output_attn, visualizer)
+            else:
+                actions = policy(obs)
+            obs, _, _, _ = env.step(actions)
+        timestep += 1
+        if args_cli.steps > 0 and timestep >= args_cli.steps:
+            break
+        if args_cli.video:
+            # Exit the play loop after recording one video
+            if timestep == args_cli.video_length:
+                break
+
+        # time delay for real-time evaluation
+        sleep_time = dt - (time.time() - start_time)
+        if args_cli.real_time and sleep_time > 0:
+            time.sleep(sleep_time)
+    # close the simulator
+    env.close()
+
+
+if __name__ == "__main__":
+    run_resolved_task(args_cli, main)

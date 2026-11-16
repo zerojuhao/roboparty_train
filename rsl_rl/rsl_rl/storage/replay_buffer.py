@@ -120,13 +120,18 @@ class TrajectoryDictBuffer:
             )
         return self._sampling_cache[key]
 
+    def _gather(self, indices, keys):
+        return {key: _tree_map(lambda value: value[indices], self.storage[key]) for key in keys}
+
+    def _gather_transition(self, indices, next_indices):
+        output = self._gather(indices, self.output_key_t)
+        if self.output_key_tp1:
+            output["next"] = self._gather(next_indices, self.output_key_tp1)
+        return output
+
     def sample(self, batch_size: int, seq_length: int | None = None):
         seq_length = seq_length or self.seq_length
         assert batch_size % seq_length == 0
-        output, offset = {}, 0
-        if len(self.output_key_tp1) > 0:
-            output["next"] = {}
-            offset = 1
         num_slices = batch_size // seq_length
         lengths, starts, valid_windows, trajectory_ids = self._sampling_metadata(seq_length)
         idxs = _get_idxs(
@@ -140,12 +145,8 @@ class TrajectoryDictBuffer:
             valid_windows=valid_windows,
         )
         idxs = idxs.to(torch.long).unbind(-1)
-        for k in self.output_key_t:
-            output[k] = _tree_map(lambda x: x[idxs], self.storage[k])
-        idxs = ((idxs[0] + 1) % self.capacity, *idxs[1:])
-        for k in self.output_key_tp1:
-            output["next"][k] = _tree_map(lambda x: x[idxs], self.storage[k])
-        return output
+        next_idxs = ((idxs[0] + 1) % self.capacity, *idxs[1:])
+        return self._gather_transition(idxs, next_idxs)
 
     def update_priorities(self, priorities, idxs=None) -> None:
         """Update trajectory sampling weights without changing within-trajectory sampling."""
@@ -214,10 +215,7 @@ class TrajectoryDictBuffer:
         relative = torch.minimum(time.expand(num_slices, -1), lengths[:, None] - 1)
         starts = self.start_idx[rows].reshape(num_slices, 1)
         indices = (starts + offsets[:, None] + relative).flatten()
-        output = {key: _tree_map(lambda value: value[indices], self.storage[key])
-                  for key in self.output_key_t}
-        output["next"] = {key: _tree_map(lambda value: value[indices + 1], self.storage[key])
-                          for key in self.output_key_tp1}
+        output = self._gather_transition(indices, indices + 1)
         output["lengths"], output["valid"] = lengths, valid
         output["trajectory_ids"] = rows
         return output
@@ -231,7 +229,8 @@ class ReplayBuffer:
                  output_key_tp1=("observation", "terminated"), end_key="truncated",
                  compact_depth_history: bool = False,
                  depth_history_offsets=(35, 30, 25, 20, 15, 10, 5, 0),
-                 transition_outcomes: bool = False):
+                 transition_outcomes: bool = False,
+                 actor_history_spec=()):
         if capacity < 2 * num_envs:
             raise ValueError("replay capacity must hold at least two vector-environment steps")
         self.transition_capacity = capacity
@@ -243,6 +242,11 @@ class ReplayBuffer:
         self.end_key = end_key
         self.transition_outcomes = transition_outcomes
         self.terminal_observations = {}
+        self.actor_history = None
+        if actor_history_spec:
+            from .replay_actor_history import ReplayActorHistory
+
+            self.actor_history = ReplayActorHistory(actor_history_spec, num_envs, self.capacity, device)
         self.compact_depth_history = compact_depth_history
         self.depth_history_offsets = tuple(depth_history_offsets) if compact_depth_history else ()
         if compact_depth_history:
@@ -276,6 +280,8 @@ class ReplayBuffer:
             self.storage[self.end_key][(self._idx - 1) % self.capacity] = True
             self._recompute = True
         self._depth_new_segment = True
+        if self.actor_history is not None:
+            self.actor_history.new_segment = True
 
     @torch.no_grad()
     def extend(self, data: Dict, *, final_observation=None) -> None:
@@ -305,6 +311,8 @@ class ReplayBuffer:
                             lambda x: x[offset, ids].detach().to(self.device).clone(), final_observation
                         ),
                     }
+        if self.actor_history is not None:
+            data = self.actor_history.compact(data, self)
         if self.compact_depth_history:
             data = self._compact_depth(data)
         if self.storage is None:
@@ -483,6 +491,8 @@ class ReplayBuffer:
             output[k] = _tree_map(lambda x: x[idxs], self.storage[k])
         if self.compact_depth_history and "observation" in output:
             output["observation"] = self._restore_depth(output["observation"], idxs)
+        if self.actor_history is not None and "observation" in output:
+            output["observation"] = self.actor_history.restore(output["observation"], idxs, self)
         current_idxs = idxs
         idxs = ((idxs[0] + 1) % self.capacity, *idxs[1:])
         for k in self.output_key_tp1:
@@ -490,6 +500,8 @@ class ReplayBuffer:
             output["next"][k] = _tree_map(lambda x: x[source_idxs], self.storage[k])
         if self.compact_depth_history and "observation" in output.get("next", {}):
             output["next"]["observation"] = self._restore_depth(output["next"]["observation"], idxs)
+        if self.actor_history is not None and "observation" in output.get("next", {}):
+            output["next"]["observation"] = self.actor_history.restore(output["next"]["observation"], idxs, self)
         if self.transition_outcomes and "observation" in output.get("next", {}):
             self._restore_terminal_observations(output["next"]["observation"], current_idxs)
         return output

@@ -35,8 +35,9 @@ IsaacLab-3.0/
 
 # Public robot assets and unified motion data are versioned with this checkout.
 # Keep the path skeleton documentation even when a local bundle is absent.
-!/robo_newton/robolab/data/
-!/robo_newton/robolab/data/**
+!/robolab/robolab/data/
+!/robolab/robolab/data/**
+/robolab/robolab/data/generated/
 /data
 /ufo_data
 
@@ -49,7 +50,7 @@ IsaacLab-3.0/
 /project_ops/
 
 # Local package metadata.
-/robo_newton/*.egg-info/
+/robolab/*.egg-info/
 
 # Archived source trees and old Git metadata
 archives/
