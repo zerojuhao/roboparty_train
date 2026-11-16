@@ -40,6 +40,10 @@ class body_compliance(ManagerTermBase):
         for name in ('std', 'target_accel', 'force_scale_bw', 'force_filter_time_s', 'target_tanh_k'):
             if not math.isfinite(p[name]) or p[name] <= 0:
                 raise ValueError(f'{name} must be finite and positive')
+        force_reward_scale = p.get('force_reward_scale', 1.0)
+        if not math.isfinite(force_reward_scale) or force_reward_scale <= 0:
+            raise ValueError('force_reward_scale must be finite and positive')
+        self.force_reward_scale = force_reward_scale
         if len(p['max_speed']) != 3 or not all(math.isfinite(v) and v > 0 for v in p['max_speed']):
             raise ValueError('max_speed must contain positive forward, backward and lateral speeds')
         for name in ('force_deadband_bw', 'target_sustain_s'):
@@ -75,7 +79,7 @@ class body_compliance(ManagerTermBase):
 
     def __call__(self, env, command_name, std, max_speed, target_accel, force_deadband_bw, force_scale_bw,
                  force_filter_time_s, force_range_n, target_force_range_n, target_tanh_k=2.0,
-                 target_sustain_s=0.3):
+                 target_sustain_s=0.3, force_reward_scale=1.0):
         robot = env.scene['robot']
         push = env.event_manager.get_term_cfg('sustained_standing_push').func
         force_w = push.applied_force.sum(dim=1)
@@ -117,4 +121,5 @@ class body_compliance(ManagerTermBase):
         mask = zero_command & (presence > 0.5)
         self._force_error_sum.add_(error_sq.sqrt() * mask)
         self._force_count.add_(mask)
-        return torch.exp(-error_sq / std**2)
+        score = torch.exp(-error_sq / std**2)
+        return torch.where(zero_command, score * self.force_reward_scale, score)

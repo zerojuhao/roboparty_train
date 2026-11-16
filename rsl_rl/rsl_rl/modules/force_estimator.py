@@ -181,8 +181,11 @@ class ForceEstimator(nn.Module):
         if raw.shape[-1] != COMPACT_FORCE_DIM:
             raise ValueError(f'Compact force layout must be {COMPACT_FORCE_DIM} (fxyz, yaw_torque, tau10)')
         arm_error = (raw[..., 4:14] - target[..., 4:14]/10.).square()
+        force_error = (raw[..., :3]-target[..., :3]/50.).square().mean(-1)
+        loaded = ((target[..., :2].detach().norm(dim=-1) - 5.) / 5.).clamp(0., 1.)
+        loaded = loaded.square() * (3. - 2. * loaded)
         return {
-            'force': (raw[..., :3]-target[..., :3]/50.).square().mean(),
+            'force': balanced_contact_mean(force_error, loaded),
             'yaw_moment': (raw[..., 3]-target[..., 3]/10.).square().mean(),
             'arm_torque': balanced_joint_torque_mean(arm_error, target[..., 4:14]),
         }

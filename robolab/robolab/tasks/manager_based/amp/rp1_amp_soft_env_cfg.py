@@ -224,6 +224,7 @@ class SoftRewardsCfg:
             'target_force_range_n': (10.0, 15.0),
             'target_tanh_k': 2.0,
             'target_sustain_s': 0.1,
+            'force_reward_scale': 2.0,
         },
     )
     track_ang_vel_z_exp = RewTerm(
@@ -259,7 +260,7 @@ class SoftRewardsCfg:
     )
     arm_compliance = RewTerm(
         func=arm_compliance,
-        weight=1.0,
+        weight=1.5,
         params={
             'asset_cfg': SceneEntityCfg(
                 'robot', body_names=['left_wrist_link', 'right_wrist_link'], preserve_order=True,
@@ -270,11 +271,12 @@ class SoftRewardsCfg:
             'command_name': 'base_velocity',
             'power_scale_w': 5.0,
             'torque_scale_nm': 2.0,
+            'yield_scale_w': 2.0,
             'damping_allowance': 8.0,
             'resistance_tolerance_nm': 0.5,
             'limit_margin': 0.25,
-            'max_joint_speed': 0.8,
-            'overspeed_weight': 0.1,
+            'max_joint_speed': 1.0,
+            'overspeed_weight': 0.05,
             'all_arm_links': True,
             'passive_joint_torque_range_nm': (1.0, 2.0),
             'rest_joint_pos': ARM_REST_JOINT_POS,
@@ -467,26 +469,26 @@ class SoftEventCfg(EventCfg):
                 preserve_order=True,
             ),
             'command_name': 'base_velocity',
-            'point_force_probability': 0.5,
+            'point_force_probability': 0.7,
             'point_force_range_n': (0.0, 20.0),
             'contact_count_range': (1, 4),
             'point_offset_range': (-0.03, 0.03),
             'coherent_pull_probability': 0.3,
             'arm_couple_probability': 0.25,
             'small_horizontal_pull_probability': 0.3,
-            'torso_horizontal_pull_probability': 0.5,
+            'torso_horizontal_pull_probability': 0.7,
             'torso_horizontal_force_range_n': (0.0, 20.0),
             'torso_yaw_probability': 0.25,
-            'zero_command_torso_yaw_probability': 0.5,
+            'zero_command_torso_yaw_probability': 0.7,
             'torso_yaw_torque_range_nm': (0.0, 10.0),
-            'arm_joint_torque_probability': 0.5,
+            'arm_joint_torque_probability': 0.7,
             'arm_joint_torque_range_nm': (0.0, 5.0),
             'arm_joint_limit_margin_rad': math.radians(25.),
             'max_total_force_ratio': 0.20,
             'duration_range_s': (1.0, 3.0),
             'long_duration_probability': 0.25,
             'long_duration_range_s': (10.0, 12.0),
-            'rest_range_s': (4.0, 8.0),
+            'rest_range_s': (2.0, 4.0),
             'initial_rest_range_s': (0.2, 0.6),
             'ramp_time_range_s': (0.05, 0.4),
             'abrupt_release_probability': 0.25,
@@ -497,8 +499,8 @@ class SoftEventCfg(EventCfg):
 
 @configclass
 class RP1AmpSoftEnvCfg(AmpEnvCfg):
-    compliance_env_fraction: float = 0.5
-    command_compliance_env_fraction: float = 0.5
+    compliance_env_fraction: float = 0.3
+    command_compliance_env_fraction: float = 0.7
     observations: SoftObservationsCfg = SoftObservationsCfg()
     commands: SoftCommandsCfg = SoftCommandsCfg()
     rewards: SoftRewardsCfg = SoftRewardsCfg()

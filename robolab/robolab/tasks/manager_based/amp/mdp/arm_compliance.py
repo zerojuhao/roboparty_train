@@ -83,13 +83,13 @@ class full_body_return(ManagerTermBase):
 
 
 class arm_compliance(ManagerTermBase):
-    """Substep-averaged positive power + excess opposing effort with soft-limit protection."""
+    """Yield with external joint torque: gated mean of τv, hold, and a light v² cost."""
 
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         p = cfg.params
         for name in ('force_filter_time_s', 'power_scale_w', 'force_scale_bw', 'torque_scale_nm',
-                     'damping_allowance', 'max_joint_speed', 'limit_margin'):
+                     'damping_allowance', 'max_joint_speed', 'limit_margin', 'yield_scale_w'):
             if not math.isfinite(p[name]) or p[name] <= 0:
                 raise ValueError(f'{name} must be finite and positive')
         for name in ('force_deadband_bw', 'resistance_tolerance_nm', 'overspeed_weight'):
@@ -105,11 +105,12 @@ class arm_compliance(ManagerTermBase):
         self.passive_weight = 1.0
         self.power_scale_w = p['power_scale_w']
         self.torque_scale_nm = p['torque_scale_nm']
+        self.yield_scale_w = p['yield_scale_w']
         self.damping_allowance = p['damping_allowance']
         self.resistance_tolerance_nm = p.get('resistance_tolerance_nm', 0.5)
         self.limit_margin = p['limit_margin']
         self.max_joint_speed = p['max_joint_speed']
-        self.overspeed_weight = p.get('overspeed_weight', 0.1)
+        self.overspeed_weight = p.get('overspeed_weight', 0.05)
         self.torque_range_nm = p['passive_joint_torque_range_nm']
 
         self.robot = env.scene[p['asset_cfg'].name]
@@ -149,7 +150,9 @@ class arm_compliance(ManagerTermBase):
         self.passive_observed_gate = torch.zeros(n, 2, 5, device=device)
         self._power_sum = torch.zeros(n, 2, 5, device=device)
         self._hold_sum = torch.zeros(n, 2, 5, device=device)
+        self._yield_sum = torch.zeros(n, 2, 5, device=device)
         self._speed_sum = torch.zeros(n, 2, 5, device=device)
+        self._open_sum = torch.zeros(n, 2, 5, device=device)
         self._substeps = 0
         self._snapshot = None
         self._contact_slots = None
@@ -178,7 +181,9 @@ class arm_compliance(ManagerTermBase):
     def begin_passive_step(self):
         self._power_sum.zero_()
         self._hold_sum.zero_()
+        self._yield_sum.zero_()
         self._speed_sum.zero_()
+        self._open_sum.zero_()
         self._substeps = 0
         self._snapshot = None
 
@@ -204,16 +209,20 @@ class arm_compliance(ManagerTermBase):
         free = (remaining / self.limit_margin).clamp(0., 1.)
         presence = (ext.abs() / self.torque_scale_nm).clamp(0., 1.)
         weight = gate * presence * free
+        opened = gate * free
 
         power = (motor * v).clamp_min(0.)
         opposing = (-ext.sign() * motor).clamp_min(0.)
         allowance = self.resistance_tolerance_nm + self.damping_allowance * v.abs()
         hold = (opposing - allowance).clamp_min(0.)
-        speed = (v.abs() / self.max_joint_speed - 1.).clamp_min(0.).square()
+        yield_power = (ext * v).clamp_min(0.)
+        speed = (v / self.max_joint_speed).square()
 
         self._power_sum.add_(power * weight)
         self._hold_sum.add_(hold * weight)
-        self._speed_sum.add_(speed * gate)
+        self._yield_sum.add_(yield_power * opened)
+        self._speed_sum.add_(speed * opened)
+        self._open_sum.add_(opened)
         self.passive_observed_gate.copy_(gate)
         self._substeps += 1
         self._snapshot = None
@@ -222,7 +231,7 @@ class arm_compliance(ManagerTermBase):
         ids = slice(None) if env_ids is None else env_ids
         for buf in (self.filtered_force_w, self.filtered_joint_torque, self.activation,
                     self.motion_blend, self.passive_observed_gate,
-                    self._power_sum, self._hold_sum, self._speed_sum):
+                    self._power_sum, self._hold_sum, self._yield_sum, self._speed_sum, self._open_sum):
             buf[ids] = 0
         for force in self._contact_forces:
             force[ids] = 0
@@ -230,8 +239,8 @@ class arm_compliance(ManagerTermBase):
 
     def __call__(self, env, asset_cfg, force_filter_time_s, force_deadband_bw, force_scale_bw,
                  power_scale_w, torque_scale_nm, damping_allowance, max_joint_speed, limit_margin,
-                 passive_joint_torque_range_nm,
-                 resistance_tolerance_nm=0.5, overspeed_weight=0.1,
+                 passive_joint_torque_range_nm, yield_scale_w,
+                 resistance_tolerance_nm=0.5, overspeed_weight=0.05,
                  command_name='base_velocity', rest_joint_pos=None, all_arm_links=True):
         push = env.event_manager.get_term_cfg('sustained_standing_push').func
         self._ensure_contacts(push, all_arm_links)
@@ -277,12 +286,16 @@ class arm_compliance(ManagerTermBase):
 
         power = self._power_sum / steps
         hold = self._hold_sum / steps
-        speed = self._speed_sum / steps
-        cost = (power / self.power_scale_w + hold / self.torque_scale_nm
-                + self.overspeed_weight * speed).sum((1, 2))
+        mass = self._open_sum.sum((1, 2)).clamp_min(1.)
+        yield_w = self._yield_sum.sum((1, 2)) / mass / self.yield_scale_w
+        speed = self._speed_sum.sum((1, 2)) / mass
+        cost = (power / self.power_scale_w + hold / self.torque_scale_nm).sum((1, 2))
+        cost = cost + self.overspeed_weight * speed
 
         log = env.extras.setdefault('log', {})
         log['Interaction/arm_positive_power_w'] = power.sum((1, 2)).mean()
         log['Interaction/arm_hold_nm'] = hold.sum((1, 2)).mean()
+        log['Interaction/arm_yield_w'] = (self._yield_sum.sum((1, 2)) / mass).mean()
+        log['Interaction/arm_speed_sq'] = speed.mean()
         log['Interaction/arm_load_fraction'] = gate.mean()
-        return -cost
+        return yield_w - cost
