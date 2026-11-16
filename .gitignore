@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+.venv
 .venv/
 .env
 .vscode/
@@ -21,6 +22,7 @@ IsaacLab-3.0/
 /wandb
 /amp_data
 /outputs
+/exports
 /videos
 /recordings
 /cache
