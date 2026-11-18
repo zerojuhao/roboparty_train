@@ -1,6 +1,7 @@
 """Task partitions, AMP route, yaw compliance, and stepping rewards for RP1 AMP Soft."""
 
 import math
+import re
 
 import torch
 from isaaclab.managers import ManagerTermBase
@@ -64,6 +65,12 @@ class yaw_compliance(ManagerTermBase):
         lo, hi = p['target_torque_range_nm']
         if not all(math.isfinite(v) for v in (lo, hi)) or not 0 <= lo < hi:
             raise ValueError('target_torque_range_nm must be finite, nonnegative and increasing')
+        force_std = p.get('force_std')
+        if force_std is not None and (not math.isfinite(force_std) or force_std <= 0):
+            raise ValueError('force_std must be finite and positive')
+        scale = p.get('force_reward_scale', 1.0)
+        if not math.isfinite(scale) or scale <= 0:
+            raise ValueError('force_reward_scale must be finite and positive')
 
         n, device = env.num_envs, env.device
         self.filtered_torque_z = torch.zeros(n, device=device)
@@ -88,7 +95,7 @@ class yaw_compliance(ManagerTermBase):
     def __call__(self, env, command_name, std, max_yaw_rate, reference_length,
                  torque_deadband_bw, torque_scale_bw, filter_time_s,
                  target_torque_range_nm=(10., 20.), target_tanh_k=2.0, target_sustain_s=0.3,
-                 target_accel=2.0):
+                 target_accel=2.0, force_std=None, force_reward_scale=1.0):
         robot = env.scene['robot']
         push = env.event_manager.get_term_cfg('sustained_standing_push').func
         torque_b = quat_apply_inverse(robot.data.root_quat_w.torch, push.explicit_torso_torque_w)
@@ -123,7 +130,12 @@ class yaw_compliance(ManagerTermBase):
         mask = zero_command & (presence > 0.5)
         self._force_error_sum.add_(error.abs() * mask)
         self._force_count.add_(mask)
-        return torch.exp(-error.square() / std**2)
+        # Torque following gets its own (wider) kernel while the torque or its ramped target is live.
+        follow = torch.maximum(presence, (self.force_target_yaw_rate.abs() / 0.2).clamp(0., 1.))
+        width = std if force_std is None else std + (force_std - std) * follow * zero_command
+        score = torch.exp(-error.square() / torch.as_tensor(width, device=error.device).square())
+        # Torque following is weighted by force_reward_scale, like the linear follow term.
+        return score * torch.where(zero_command, 1. + (force_reward_scale - 1.) * follow, torch.ones_like(score))
 
 
 def reward_motion_target(env, command_name):
@@ -188,3 +200,57 @@ class soft_feet_air_time(ManagerTermBase):
         self.peak_lift.masked_fill_(supported | ~activity[:, None], 0.)
         self.eligible.copy_(torch.where(supported, activity[:, None], self.eligible))
         return reward
+
+
+class soft_undesired_contacts(ManagerTermBase):
+    """Count non-foot contacts; an arm yielding under load may touch the body for free.
+
+    Only an arm released from return by its own load (``full_body_return.arm_gate`` below
+    ``release_threshold``, which also covers the short return after release) is exempt, so an idle
+    arm resting or clamped on the body keeps paying. The net-force sensor cannot tell body from
+    ground, so exempt links must be above ``min_height_m``; a non-arm body link is exempt only while
+    an exempt arm link touches too (the collision pair). Leg-on-leg and ground contact keep counting.
+    """
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        p = cfg.params
+        if not math.isfinite(p['min_height_m']) or p['min_height_m'] < 0:
+            raise ValueError('min_height_m must be finite and nonnegative')
+        sensor = env.scene.sensors[p['sensor_cfg'].name]
+        robot = env.scene[p.get('asset_name', 'robot')]
+        ids = p['sensor_cfg'].body_ids
+        ids = list(range(len(sensor.body_names))) if isinstance(ids, slice) else list(ids)
+        names = [sensor.body_names[i] for i in ids]
+        arm = re.compile(p['arm_body_names'])
+        body = re.compile(p['body_names_hit_by_arm'])
+        self.is_arm = torch.tensor([bool(arm.fullmatch(n)) for n in names], device=env.device)
+        self.is_body = torch.tensor([bool(body.fullmatch(n)) and not arm.fullmatch(n) for n in names],
+                                    device=env.device)
+        if not self.is_arm.any():
+            raise ValueError('arm_body_names matched no contact bodies')
+        self.robot_ids = [robot.body_names.index(n) for n in names]
+        self.sensor_ids = ids
+        side = [0 if n.startswith('left_') else 1 if n.startswith('right_') else -1 for n in names]
+        if any(s < 0 for s, a in zip(side, self.is_arm.tolist()) if a):
+            raise ValueError('arm contact bodies must be prefixed left_ or right_')
+        self.arm_side = torch.tensor([max(s, 0) for s in side], device=env.device)
+
+    def __call__(self, env, threshold, sensor_cfg, command_name, arm_body_names, body_names_hit_by_arm,
+                 min_height_m, release_threshold=0.5, asset_name='robot'):
+        sensor = env.scene.sensors[sensor_cfg.name]
+        history = sensor.data.net_forces_w_history
+        history = history.torch if hasattr(history, 'torch') else history
+        contact = history[:, :, self.sensor_ids].norm(dim=-1).amax(1) > threshold
+        robot = env.scene[asset_name]
+        height = robot.data.body_pos_w.torch[:, self.robot_ids, 2] - env.scene.env_origins[:, 2:3]
+        raised = height > min_height_m
+        zero = (env.command_manager.get_command(command_name) == 0).all(-1)[:, None]
+        recovery = env.reward_manager.get_term_cfg('full_body_return').func
+        yielding = (recovery.arm_gate < release_threshold)[:, self.arm_side]  # per contact body
+        arm_self = contact & raised & self.is_arm & yielding & zero
+        exempt = arm_self | (zero & raised & self.is_body & arm_self.any(-1, keepdim=True))
+        counted = contact & ~exempt
+        log = env.extras.setdefault('log', {})
+        log['Interaction/self_contact_exempt'] = (contact & exempt).sum(-1).float().mean()
+        return counted.sum(-1).float()

@@ -58,7 +58,8 @@ class RP1AmpSoftRunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
-        force_style_reward_scale=1.0,
+        # Floor of the force-dependent style scale; equals min(arm_style_scale, body_style_scale).
+        force_style_reward_scale=0.5,
         symmetry_cfg=RslRlSymmetryCfg(
             use_data_augmentation=False,
             use_mirror_loss=True,

@@ -26,7 +26,9 @@ from .mdp.body_compliance import body_compliance
 from .mdp.commands import FilteredUniformVelocityCommandCfg
 from .mdp.events import sustained_standing_push
 from .mdp.force_estimation import compact_interaction_critic_state, force_vel_target
-from .mdp.soft import SoftVelocityCommand, amp_task_route, soft_feet_air_time, yaw_compliance
+from .mdp.soft import (
+    SoftVelocityCommand, amp_task_route, soft_feet_air_time, soft_undesired_contacts, yaw_compliance,
+)
 from .rp1_amp_env_cfg import AMP_NUM_STEPS, KEY_BODY_NAMES
 
 LOWER_JOINT_NAMES = [
@@ -224,7 +226,10 @@ class SoftRewardsCfg:
             'target_force_range_n': (10.0, 15.0),
             'target_tanh_k': 2.0,
             'target_sustain_s': 0.1,
-            'force_reward_scale': 2.0,
+            # Zero-command force following (pull present or ramped target live) is weighted x3;
+            # unloaded standing and commanded walking keep x1. Same exp kernel (std) as commands.
+            'force_reward_scale': 3.0,
+            'force_std': 0.5,
         },
     )
     track_ang_vel_z_exp = RewTerm(
@@ -242,6 +247,8 @@ class SoftRewardsCfg:
             'target_torque_range_nm': (2.0, 5.0),
             'target_tanh_k': 2.0,
             'target_sustain_s': 0.1,
+            'force_std': 0.5,
+            'force_reward_scale': 3.0,
         },
     )
     is_alive = RewTerm(func=mdp.is_alive, weight=0.5)
@@ -270,31 +277,51 @@ class SoftRewardsCfg:
             'force_filter_time_s': 0.05,
             'command_name': 'base_velocity',
             'power_scale_w': 5.0,
-            'torque_scale_nm': 2.0,
+            # Holding is charged per 1 N*m so a held 3 N*m load costs more than the later return.
+            'torque_scale_nm': 1.0,
             'yield_scale_w': 2.0,
             'damping_allowance': 8.0,
-            'resistance_tolerance_nm': 0.0,
+            'resistance_tolerance_nm': 0.25,
             'limit_margin': 0.25,
             'max_joint_speed': 1.0,
-            'overspeed_weight': 0.05,
+            'overspeed_weight': 0.3,
             'all_arm_links': True,
-            'passive_joint_torque_range_nm': (1.0, 2.0),
+            # Moderate joint torques already count as load (gate fully open from 1 N*m).
+            'passive_joint_torque_range_nm': (0.5, 1.0),
             'rest_joint_pos': ARM_REST_JOINT_POS,
+            # Style relief (force_style_reward_scale) fades over this time after an arm load ends.
+            'style_relief_release_s': 1.0,
+            # Zero-command style weight under an arm load / under whole-body follow. The smaller one
+            # must equal the runner's force_style_reward_scale.
+            'arm_style_scale': 0.5,
+            # Lower D favors real steps over bracing, so whole-body follow keeps full style weight.
+            'body_style_scale': 1.0,
         },
     )
     full_body_return = RewTerm(
         func=full_body_return,
-        weight=-1.2,
+        weight=-1.0,
         params={
             'asset_cfg': SceneEntityCfg('robot'),
             'command_name': 'base_velocity',
             'return_std': 0.1,
-            'posture_weight': 3.0,
+            'motion_target_threshold': 0.15,
+            'posture_weight': 1.5,
             'recovery_time_s': 0.3,
             'arm_velocity_weight': 2.0,
-            'return_max_speed': 0.4,
-            'arm_fast_return_weight': 8.0,
-            'return_speed_threshold': 0.8,
+            # Outward speed below this is free (sway, PD sag, exploration).
+            'away_speed_deadband': 0.3,
+            'return_max_speed': 1.0,
+            'arm_fast_return_weight': 2.0,
+            # Return speed limit: return_speed_floor + |error|, capped at return_speed_threshold (rad/s).
+            # Overspeed is Huber (unsaturated) so a 10 rad/s snap-back costs far more than 2 rad/s.
+            'return_speed_threshold': 1.5,
+            'return_speed_floor': 0.5,
+            'overspeed_saturates': False,
+            # Follow targets (m/s, rad/s) that release the velocity terms while stepping under pulls.
+            'motion_speed_range': (0.02, 0.10),
+            'motion_yaw_range': (0.05, 0.20),
+            'whole_body_releases_posture': False,
         },
     )
     pelvis_orientation_l2 = RewTerm(
@@ -404,11 +431,18 @@ class SoftRewardsCfg:
         },
     )
     undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
+        func=soft_undesired_contacts,
         weight=-1.0,
         params={
             'sensor_cfg': SceneEntityCfg('contact_forces', body_names='^(?!.*ankle_roll_link$).*$'),
             'threshold': 1.0,
+            'command_name': 'base_velocity',
+            # Zero-command arm-to-body contact while that arm yields to a load is not a fault.
+            'arm_body_names': r'.*_(shoulder_(pitch|roll|yaw)|elbow|wrist)_link',
+            'body_names_hit_by_arm': r'base_link|waist_.*_link|.*_hip_.*_link',
+            'min_height_m': 0.2,
+            # Only an arm released from return by its own load (and its short return) is exempt.
+            'release_threshold': 0.5,
         },
     )
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
@@ -498,8 +532,8 @@ class SoftEventCfg(EventCfg):
 
 @configclass
 class RP1AmpSoftEnvCfg(AmpEnvCfg):
-    compliance_env_fraction: float = 0.3
-    command_compliance_env_fraction: float = 0.7
+    compliance_env_fraction: float = 0.5
+    command_compliance_env_fraction: float = 0.5
     observations: SoftObservationsCfg = SoftObservationsCfg()
     commands: SoftCommandsCfg = SoftCommandsCfg()
     rewards: SoftRewardsCfg = SoftRewardsCfg()
@@ -507,10 +541,7 @@ class RP1AmpSoftEnvCfg(AmpEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.actions.joint_pos.scale = {
-            '.*(hip|knee|ankle|waist).*': 0.25,
-            '.*(shoulder|elbow|wrist).*': 3.0,
-        }
+        self.actions.joint_pos.scale = 0.25
         self.scene.robot = RP1_24DOF_CFG.replace(prim_path='{ENV_REGEX_NS}/Robot')
         self.scene.robot.init_state.pos = (0.0, 0.0, 0.78)
         self.sim.use_newton_actuators = False

@@ -40,6 +40,9 @@ class body_compliance(ManagerTermBase):
         for name in ('std', 'target_accel', 'force_scale_bw', 'force_filter_time_s', 'target_tanh_k'):
             if not math.isfinite(p[name]) or p[name] <= 0:
                 raise ValueError(f'{name} must be finite and positive')
+        force_std = p.get('force_std')
+        if force_std is not None and (not math.isfinite(force_std) or force_std <= 0):
+            raise ValueError('force_std must be finite and positive')
         force_reward_scale = p.get('force_reward_scale', 1.0)
         if not math.isfinite(force_reward_scale) or force_reward_scale <= 0:
             raise ValueError('force_reward_scale must be finite and positive')
@@ -79,7 +82,7 @@ class body_compliance(ManagerTermBase):
 
     def __call__(self, env, command_name, std, max_speed, target_accel, force_deadband_bw, force_scale_bw,
                  force_filter_time_s, force_range_n, target_force_range_n, target_tanh_k=2.0,
-                 target_sustain_s=0.3, force_reward_scale=1.0):
+                 target_sustain_s=0.3, force_reward_scale=1.0, force_std=None):
         robot = env.scene['robot']
         push = env.event_manager.get_term_cfg('sustained_standing_push').func
         force_w = push.applied_force.sum(dim=1)
@@ -121,5 +124,12 @@ class body_compliance(ManagerTermBase):
         mask = zero_command & (presence > 0.5)
         self._force_error_sum.add_(error_sq.sqrt() * mask)
         self._force_count.add_(mask)
-        score = torch.exp(-error_sq / std**2)
-        return torch.where(zero_command, score * self.force_reward_scale, score)
+        # Force following gets its own (wider) kernel while a pull is present or its ramped target
+        # is still nonzero; commanded walking and unloaded standing keep ``std``.
+        follow = torch.maximum(presence, (self.force_target_velocity_b.norm(dim=-1) / 0.1).clamp(0., 1.))
+        width = std if force_std is None else std + (force_std - std) * follow * zero_command
+        score = torch.exp(-error_sq / torch.as_tensor(width, device=error_sq.device).square())
+        # Force following (pull present or ramped target still live) is weighted by force_reward_scale;
+        # unloaded zero-command standing and commanded walking keep weight 1.
+        scale = 1. + (self.force_reward_scale - 1.) * follow
+        return torch.where(zero_command, score * scale, score)
