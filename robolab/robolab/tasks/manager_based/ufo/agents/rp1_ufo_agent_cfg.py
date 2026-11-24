@@ -10,7 +10,6 @@ from .fb_cpr_cfg import (
     FbCprDiscriminatorCfg,
     FbCprMlpModelCfg,
     FbCprResidualModelCfg,
-    UFOWorldModelCfg,
 )
 
 
@@ -27,16 +26,10 @@ class FbCprAlgorithmCfg:
 
 @configclass
 class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
-    """RP1 UFO training with MBFB imagination and independent command critics."""
+    """RP1 UFO training with independent command critics."""
 
     class_name: str = "FbCprRunner"
     algorithm: FbCprAlgorithmCfg = FbCprAlgorithmCfg()
-    # Preserve real-data fitting and H32 while limiting imagined actor work.
-    world_model: UFOWorldModelCfg = UFOWorldModelCfg(
-        hidden_dims=[512, 512, 512],
-        imagination_batch_size=256,
-        imagination_interval=4,
-    )
 
     experiment_name: str = "rp1_ufo"
     wandb_project: str = "rp1_ufo"
@@ -206,7 +199,6 @@ class RP1UFORunnerCfg(RslRlBaseRunnerCfg):
     torch_compile_mode: str | None = "default"
     cuda_graph_fb: bool = True
     cuda_graph_critics: bool = True
-    cuda_graph_actor: bool = True
     compile_context_critics: bool = True
     # Match WBC precision handling: fp32 master weights and optimizer state,
     # with update-network forwards under bf16 autocast.

@@ -542,7 +542,7 @@ class PufoAgent(FbCprAuxAgent):
             self.context_critic_optimizer.zero_grad(set_to_none=True)
             parameters = tuple(self._context_critic_shared.parameters())
             if getattr(self.cfg, "cuda_graph_critics", False) and obs.is_cuda:
-                from .world_model_mbfb_graph import WorldModelGraph
+                from .cuda_graphs import StaticGraph
 
                 if self._context_graph is None or not self._context_graph.matches(inputs):
                     # Graph warmup/capture must not overlap an outstanding collective.
@@ -553,7 +553,7 @@ class PufoAgent(FbCprAuxAgent):
                         return diagnostics, torch.autograd.grad(loss, parameters)
 
                     self._context_graph = None
-                    self._context_graph = WorldModelGraph(evaluate, inputs, obs.device)
+                    self._context_graph = StaticGraph(evaluate, inputs, obs.device)
                 diagnostics, gradients = self._context_graph.replay(inputs)
                 for parameter, gradient in zip(parameters, gradients):
                     parameter.grad = gradient

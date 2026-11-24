@@ -325,25 +325,17 @@ class ResidualActor(nn.Module):
         seq = [ResidualBlock(hidden_dim, activation, layer_norm) for _ in range(hidden_layers)]
         seq += [Block(hidden_dim, action_dim, None, layer_norm)]
         self.policy = nn.Sequential(*seq)
-        self.fp32_output = False
 
-    def forward(self, obs, z, std, *, detach_velocity=True):
+    def forward(self, obs, z, std):
         velocity_estimate = None
         policy_obs = obs
         if self.estimate_velocity:
             velocity_estimate = self.velocity_estimator(obs)
-            # Imagined BPTT freezes estimator weights but needs its input Jacobian.
-            policy_obs = torch.cat([obs, velocity_estimate.detach() if detach_velocity else velocity_estimate], dim=-1)
+            policy_obs = torch.cat([obs, velocity_estimate.detach()], dim=-1)
         z_embedding = self.embed_z(torch.cat([policy_obs, z], dim=-1))
         s_embedding = self.embed_s(policy_obs)
         embedding = torch.cat([s_embedding, z_embedding], dim=-1)
-        if self.fp32_output:
-            for index in range(len(self.policy) - 1):
-                embedding = self.policy[index](embedding)
-            with torch.autocast(embedding.device.type, enabled=False):
-                mu = torch.tanh(self.policy[-1](embedding.float()))
-        else:
-            mu = torch.tanh(self.policy(embedding))
+        mu = torch.tanh(self.policy(embedding))
         std = torch.ones_like(mu) * std
         dist = TruncatedNormal(mu, std)
         if velocity_estimate is not None:

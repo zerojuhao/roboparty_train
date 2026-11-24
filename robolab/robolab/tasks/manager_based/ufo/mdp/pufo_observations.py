@@ -46,7 +46,7 @@ class depth_image(ManagerTermBase):
         self.integer_delay = cfg.params.get("integer_delay", False)
         history_skip_frames = cfg.params["history_skip_frames"]
         num_output_frames = cfg.params["num_output_frames"]
-        images = self.sensor.data.output[self.data_type].torch
+        images = getattr(self.sensor.data.output[self.data_type], "torch", self.sensor.data.output[self.data_type])
         if images.ndim != 5 or images.shape[-1] != 1:
             raise ValueError(f"PUFO depth history must be [env, frames, height, width, 1], got {images.shape}")
         self.history_length = images.shape[1]
@@ -85,7 +85,7 @@ class depth_image(ManagerTermBase):
         delayed_frame_ranges: tuple[int, int],
         integer_delay: bool = False,
     ) -> torch.Tensor:
-        images = self.sensor.data.output[self.data_type].torch.squeeze(-1)
+        images = getattr(self.sensor.data.output[self.data_type], "torch", self.sensor.data.output[self.data_type]).squeeze(-1)
         # Match the reference sampler: subtract continuous delay, then floor frame indices.
         frame_indices = (
             self.history_length - 1 - self.frame_offsets.unsqueeze(0) - self.delayed_frames.unsqueeze(1)

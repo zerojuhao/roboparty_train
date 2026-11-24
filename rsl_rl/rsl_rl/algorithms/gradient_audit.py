@@ -33,13 +33,6 @@ def eager_gradient_diagnostics(method):
     return wrapped
 
 
-def enable_compiled_gradient_audit():
-    # AOT backward must preserve buffers for per-loss autograd.grad calls.
-    import torch._functorch.config as config
-
-    config.donated_buffer = False
-
-
 def parameter_gradient_metrics(terms, parameters):
     parameters = tuple(p for p in parameters if p.requires_grad)
     if not parameters:

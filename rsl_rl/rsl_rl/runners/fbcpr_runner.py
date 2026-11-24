@@ -332,93 +332,6 @@ class FbCprRunner:
             obs_dims, mgr.action_manager.total_action_dim, train_cfg,
             device=self.device, inference_only=inference_only,
         )
-        self.world_model_adapter = None
-        wm_cfg = getattr(train_cfg, "world_model", {})
-        wm_cfg = wm_cfg if isinstance(wm_cfg, dict) else vars(wm_cfg)
-        self.world_model_enabled = bool(wm_cfg.get("enabled", False)) and not inference_only
-        if self.world_model_enabled:
-            if self.visual_enabled or not self.context_enabled or self.num_envs < 2:
-                raise ValueError("World model requires non-visual UFO with context and at least two environments")
-            if "world_model" not in mgr.observation_manager.group_obs_dim:
-                raise ValueError("Enable world model observations before constructing the environment")
-            from robolab.tasks.manager_based.ufo.mdp.world_model_state import WorldModelAdapter
-            from ..algorithms.world_model import UFOWorldModel
-
-            self.world_model_adapter = WorldModelAdapter(mgr, self.action_rescale, getattr(train_cfg, "clip_actions", None))
-            kinematics = None
-            if wm_cfg.get("objective", "context") in {"mbfb", "fb_value", "fb_sequence"}:
-                from ..algorithms.world_model_kinematics import UFOPrivilegedKinematics
-                from robolab.tasks.manager_based.ufo.mdp.observations import local_self_obs
-                from robolab.tasks.manager_based.ufo.mdp.world_model_state import world_model_state
-
-                robot = mgr.scene["robot"]
-                origins = mgr.scene.env_origins[:, 2]
-                if not torch.allclose(origins, origins[:1].expand_as(origins)):
-                    raise ValueError("UFO imagination requires a shared ground height")
-                kinematics = UFOPrivilegedKinematics(
-                    robot.cfg.spawn.asset_path, robot.joint_names, robot.body_names,
-                    device=self.device, root_height_offset=float(origins[0]),
-                )
-                with torch.no_grad():
-                    reconstructed = kinematics(world_model_state(mgr))
-                    actual = local_self_obs(mgr)
-                    component_errors = [float(error.abs().amax()) for error in
-                                        (reconstructed - actual).split((1, 72, 150, 75, 75), dim=-1)]
-                    torch.testing.assert_close(
-                        reconstructed, actual, atol=1e-3, rtol=1e-4,
-                        msg=("Differentiable UFO kinematics does not match the simulator observation; "
-                             f"max errors [height, position, rotation, linear velocity, angular velocity]={component_errors}"),
-                    )
-            model_type, model_kwargs = UFOWorldModel, {"velocity_dim": self.agent.velocity_dim}
-            if wm_cfg.get("objective") == "mbfb":
-                from ..algorithms.world_model_mbfb import MBFBWorldModel
-
-                if "world_model_position" not in mgr.observation_manager.group_obs_dim:
-                    raise ValueError("MBFB requires pre-reset root position observations")
-                model_type = MBFBWorldModel
-                model_kwargs["dt"] = self.control_dt
-            self.agent.world_model = model_type(
-                wm_cfg,
-                self.world_model_adapter.codec_kwargs(),
-                self.world_model_adapter.xi().shape[-1],
-                self.agent.actor_obs_dim,
-                self.agent.z_dim,
-                self.device,
-                kinematics=kinematics,
-                **model_kwargs,
-            )
-            compile_mode = getattr(train_cfg, "torch_compile_mode", None)
-            if wm_cfg.get("objective") == "mbfb" and compile_mode is not None:
-                options = {**torch._inductor.list_mode_options(compile_mode), "inplace_buffers": False}
-                model = self.agent.world_model
-                if wm_cfg.get("compile_geometry", False):
-                    model.kinematics.compile_observation(compile_mode)
-                model.dynamics.forward = torch.compile(model.dynamics.forward, options=options)
-                model.observe = torch.compile(model.observe, dynamic=True, options=options)
-                if wm_cfg.get("compile_model_math", False):
-                    model.dynamics.normalized_error = torch.compile(
-                        model.dynamics.normalized_error, dynamic=False, options=options
-                    )
-            startup = (
-                "startup=fit-then-imagine"
-                if wm_cfg.get("objective") == "mbfb"
-                else f"warmup={wm_cfg['warmup_updates']} model updates"
-            )
-            print(
-                f"[WM] enabled: window={wm_cfg['window_length']}, horizon={wm_cfg['horizon']}, "
-                f"hidden_dims={wm_cfg['hidden_dims']}, "
-                f"fit_batches={wm_cfg['fit_batches']}, update_interval={wm_cfg['update_interval']}, "
-                f"imagination_batch={wm_cfg['imagination_batch_size']}, "
-                f"imagination_interval={wm_cfg['imagination_interval']}, "
-                f"svg_cuda_graph={wm_cfg.get('cuda_graph_imagination', False)}, "
-                f"fit_cuda_graph={wm_cfg.get('cuda_graph_dynamics', False)}, "
-                f"forward_cuda_graph={wm_cfg.get('cuda_graph_forward', False)}, "
-                f"value_cuda_graph={wm_cfg.get('cuda_graph_value', False)}, "
-                f"{startup}, actor_weight={wm_cfg['actor_weight']}, "
-                f"forward_weight={self.agent.world_model.cfg.forward_weight}, "
-                f"forward_horizon={self.agent.world_model.cfg.forward_horizon}",
-                flush=True,
-            )
         self._broadcast_agent_state()
 
         self.history = make_ufo_history(self.num_envs, device, history_lengths if self.visual_enabled else None)
@@ -434,8 +347,7 @@ class FbCprRunner:
             capacity=replay_capacity(self.cfg, self.num_envs),
             num_envs=self.num_envs,
             device=self.device,
-            output_key_t=("observation", "action", "z", "aux_rewards")
-                         + (("world_model",) if self.world_model_enabled else ()),
+            output_key_t=("observation", "action", "z", "aux_rewards"),
             output_key_tp1=(
                 "observation",
                 "terminated",
@@ -532,19 +444,6 @@ class FbCprRunner:
                 self.writer.add_scalar(key, value, global_step)
             self.writer.flush()
 
-    def _check_mbfb_actor_progress(self, metrics, global_step):
-        model = getattr(self.agent, "world_model", None)
-        if model is None or model.cfg.objective != "mbfb":
-            return
-        thresholds = {"actor/grad_norm": 1e-10, "actor/output_update_max": 1e-12, "actor/action_std": 1e-5}
-        stalled = all(float(metrics[key]) < limit for key, limit in thresholds.items())
-        self._actor_stalled_logs = getattr(self, "_actor_stalled_logs", 0) + 1 if stalled else 0
-        if self._actor_stalled_logs >= 5:
-            if self.is_main_process and self.log_dir:
-                report = {"global_step": global_step, **{key: float(metrics[key]) for key in thresholds}}
-                Path(self.log_dir, "actor_stalled.json").write_text(json.dumps(report, indent=2) + "\n")
-            raise RuntimeError("MBFB actor stopped changing for five logging intervals")
-
     @staticmethod
     def _print_training_metrics(metrics, global_step, update, fps):
         losses = [f"{key}={value:.4f}" for key, value in metrics.items() if "loss" in key.lower()]
@@ -628,8 +527,6 @@ class FbCprRunner:
         return tree.unsqueeze(0)
 
     def _env_action(self, action: torch.Tensor) -> torch.Tensor:
-        if getattr(self, "world_model_enabled", False):
-            return self.agent.world_model.codec.env_action(action)
         return torch.clamp(action * self.action_rescale, -self.action_rescale, self.action_rescale)
 
     def _evaluate_reward_terms(self) -> dict[str, torch.Tensor]:
@@ -660,7 +557,8 @@ class FbCprRunner:
         command = self._mgr_env.command_manager.get_term("motion")
         snapshot = {"episode_length": self._mgr_env.episode_length_buf.detach().clone()}
         for name in ("root_state_w", "joint_pos", "joint_vel", "applied_torque", "joint_pos_target"):
-            value = getattr(robot.data, name, None)
+            # ArticulationData.applied_torque is deprecated; the actuator collection owns the applied effort.
+            value = robot.actuators.applied_effort if name == "applied_torque" else getattr(robot.data, name, None)
             if value is not None:
                 value = value if torch.is_tensor(value) else value.torch
                 snapshot[name] = value.detach().clone()
@@ -920,9 +818,6 @@ class FbCprRunner:
             self._check_finite_rollout({"action": action, "env_action": env_action}, "actions")
             before_physics = self._physics_snapshot()
             before_physics["env_action"] = env_action.detach().clone()
-            if getattr(self, "world_model_enabled", False):
-                self.world_model_adapter.begin_step()
-                wm_xi = self.world_model_adapter.xi()
             next_obs_buf, env_reward, dones, step_infos = self._step_training_environment(env_action, before_physics)
             dones = dones.to(self.device)
             action_truncated = dones.bool()
@@ -1006,31 +901,6 @@ class FbCprRunner:
                 transition["depth_episode_start"] = (terminated | truncated).unsqueeze(-1)
             else:
                 transition["actor_history_start"] = (terminated | truncated).unsqueeze(-1)
-            if getattr(self, "world_model_enabled", False):
-                wm_next = next_obs_buf["world_model"].to(self.device)
-                if bool(dones.any()):
-                    wm_next = torch.where(dones.bool()[:, None],
-                                          step_infos["final_obs"]["world_model"].to(self.device), wm_next)
-                wm_next, wm_disturbance, wm_disturbance_mask = self.world_model_adapter.transition_outcome(wm_next, dones)
-                transition["world_model"] = {
-                    "state": obs_buf["world_model"], "next_state": wm_next,
-                    "disturbance": wm_disturbance,
-                    "disturbance_mask": wm_disturbance_mask,
-                    "xi": wm_xi,
-                    "heading": self._context.heading_target_world.clone(),
-                    "velocity": self._context.velocity_target_world.clone(),
-                    "valid": torch.cat((self._context.heading_valid, self._context.velocity_valid), -1).float(),
-                }
-                if self.agent.world_model.cfg.objective == "mbfb":
-                    position = obs_buf["world_model_position"]
-                    next_position = next_obs_buf["world_model_position"].to(self.device)
-                    if bool(dones.any()):
-                        next_position = torch.where(dones.bool()[:, None],
-                                                    step_infos["final_obs"]["world_model_position"].to(self.device),
-                                                    next_position)
-                    transition["world_model"].update(position=position, next_position=next_position)
-                    self.agent.world_model.record(transition["world_model"], position, next_position,
-                                                  obs_dict["last_action"], action, dones)
             self.history.add(current_obs_values)
             final_observation = None
             if bool(dones.any()):
@@ -1108,7 +978,6 @@ class FbCprRunner:
                     last_log_step = global_step
                     metrics = {key: value / metric_counts[key] for key, value in metric_sums.items()}
                     metrics = self._average_metrics(metrics)
-                    self._check_mbfb_actor_progress(metrics, global_step)
                     metric_sums, metric_counts = {}, {}
                     training_time = interval_collection_time + interval_update_time
                     fps = interval_env_steps / max(training_time, 1e-9)
@@ -1814,9 +1683,6 @@ class FbCprRunner:
                     "num_envs": self.num_envs,
                     "reward_term_scales": getattr(self, "_reward_term_scales", {}),
                     "replay_checkpoint": replay_name if self.checkpoint_replay else None,
-                    "world_model_version": self.agent.world_model.version if self.world_model_enabled else None,
-                    "world_model_config": self.agent.world_model.cfg_dict if self.world_model_enabled else None,
-                    "world_model_contract": self._world_model_checkpoint_contract() if self.world_model_enabled else None,
                     "motion_phase_curriculum": self._motion_curriculum_checkpoint(),
                 }, temporary)
                 os.replace(temporary, path)
@@ -1862,40 +1728,6 @@ class FbCprRunner:
                     print(f"[CHECKPOINT] Removed older replay snapshot {candidate}; model retained", flush=True)
         except Exception as exc:
             print(f"[CHECKPOINT] WARNING: replay retention failed: {exc}", flush=True)
-
-    def _world_model_checkpoint_contract(self):
-        wm = self.agent.world_model
-        return {
-            "environment": self.world_model_adapter.checkpoint_contract(),
-            "networks": {
-                "hidden_dims": list(wm.cfg.hidden_dims),
-                "ensemble_size": wm.cfg.ensemble_size,
-                "value_hidden_dims": list(wm.cfg.value_hidden_dims),
-                "actor_obs_dim": self.agent.actor_obs_dim,
-                "z_dim": self.agent.z_dim,
-                "sequence_context_length": getattr(wm.cfg, "sequence_context_length", 10),
-            },
-            "return": {
-                "objective": getattr(wm.cfg, "objective", "context"),
-                "discriminator_reward": getattr(wm.cfg, "discriminator_reward", False),
-                "tracking_pose": getattr(wm.cfg, "tracking_coef", 0) > 0,
-                "tracking_z": getattr(wm.cfg, "tracking_z", False),
-                "tracking_z_window": (self.agent.cfg.seq_length if getattr(wm.cfg, "tracking_z", False) else None),
-                "discriminator_reward_type": (self.agent.discriminator_reward_type
-                                              if getattr(wm.cfg, "discriminator_reward", False) else None),
-                "imagination_horizon": getattr(wm.cfg, "horizon", 32),
-                "discount": float(self.cfg.discount),
-                "heading_weight": float(wm.cfg.heading_weight),
-                "velocity_weight": float(wm.cfg.velocity_weight),
-                "velocity_error_scale_mps": float(self.cfg.velocity_error_scale_mps),
-                **({"control_dt": self.control_dt, "svg_action_mode": wm.cfg.svg_action_mode}
-                   if getattr(wm.cfg, "objective", "context") == "mbfb" else {}),
-                **({"value_lambda": wm.cfg.value_lambda}
-                   if getattr(wm.cfg, "objective", "context") == "mbfb" else {}),
-            },
-            "kinematics": (wm.kinematics.checkpoint_contract()
-                           if getattr(wm, "kinematics", None) is not None else None),
-        }
 
     def _motion_curriculum_checkpoint(self):
         motion = self._mgr_env.command_manager.get_term("motion").motion_lib
@@ -1943,38 +1775,6 @@ class FbCprRunner:
             expert.set_phase_probabilities(motion.phase_probabilities(),
                                            bin_steps=round(curriculum.bin_seconds / self.control_dt))
 
-    def _validate_world_model_checkpoint_contract(self, payload):
-        """Validate the saved task and report an FB-only horizon migration."""
-        current = self._world_model_checkpoint_contract()
-        saved = payload.get("world_model_contract")
-        saved_return = saved.get("return") if isinstance(saved, dict) else None
-        current_return = current["return"]
-        if (isinstance(saved_return, dict)
-                and saved_return.get("objective") == current_return["objective"] == "mbfb"):
-            # Old v14 startup settings do not invalidate learned dynamics or value weights.
-            saved_return = {key: value for key, value in saved_return.items()
-                            if key not in {"gate_ratio", "value_warmup_updates"}}
-            saved = {**saved, "return": saved_return}
-        horizon_changed = (
-            payload.get("world_model_version") == getattr(self.agent.world_model, "version", None)
-            and payload.get("world_model_version") is not None
-            and isinstance(saved_return, dict)
-            and saved_return.get("objective") == current_return["objective"] == "fb_value"
-            and type(saved_return.get("imagination_horizon")) is int
-            and saved_return["imagination_horizon"] > 0
-            and saved_return["imagination_horizon"] != current_return["imagination_horizon"]
-        )
-        if horizon_changed:
-            saved = {**saved, "return": {**saved_return,
-                                        "imagination_horizon": current_return["imagination_horizon"]}}
-        changed = [key for key, value in current.items() if not isinstance(saved, dict) or saved.get(key) != value]
-        if changed:
-            raise ValueError(
-                "World model checkpoint contract mismatch: " + ", ".join(changed)
-                + ". Use the original environment/return settings or a baseline checkpoint with a fresh world model."
-            )
-        return horizon_changed
-
     def load(self, path, load_optimizer=True):
         payload = torch.load(path, map_location="cpu", weights_only=False)
         world_size = torch.distributed.get_world_size() if self.is_distributed else 1
@@ -2001,47 +1801,11 @@ class FbCprRunner:
                 f"current {current_dims['velocity_command']}. XYZ reference commands change actor/value "
                 "inputs; start a new training run. Old checkpoints remain supported by export_ufo_deploy.py."
             )
-        horizon_changed = False
-        if self.world_model_enabled and "world_model" in payload["model_state"]:
-            saved_version = payload.get("world_model_version")
-            if saved_version == 1:
-                # Version 1 did not save the full action/observation contract.
-                payload["model_state"].pop("world_model")
-                for key in ("world_model", "world_model_value", "world_model_sequence_value"):
-                    payload.get("optimizer_state", {}).pop(key, None)
-                if self.is_main_process:
-                    print("[WM] Version 1 checkpoint: retaining UFO policy; reinitializing dynamics/value "
-                          "because the old action contract cannot be verified", flush=True)
-            elif saved_version != self.agent.world_model.version:
-                # The state/action contract is part of the learned dynamics.  A
-                # checkpoint from an older contract cannot safely load its WM;
-                # Retain the policy and initialize a fresh world model instead.
-                payload["model_state"].pop("world_model")
-                for key in ("world_model", "world_model_value", "world_model_sequence_value"):
-                    payload.get("optimizer_state", {}).pop(key, None)
-                if self.is_main_process:
-                    print(
-                        f"[WM] Checkpoint version {saved_version} does not match {self.agent.world_model.version}; "
-                        "retaining UFO policy and initializing a fresh world model",
-                        flush=True,
-                    )
-            else:
-                horizon_changed = self._validate_world_model_checkpoint_contract(payload)
+        # Checkpoints from the removed world-model plugin carry extra
+        # "world_model*" entries; the agent loads only its own modules.
         if load_optimizer:
             self._restore_motion_curriculum(payload.get("motion_phase_curriculum"))
         self.agent.load_state_dict(payload["model_state"])
-        if horizon_changed:
-            wm = self.agent.world_model
-            wm.validation_p95.fill_(float("inf"))
-            wm.validated_at.fill_(-1)
-            wm.imagination_updates.zero_()
-            wm._imagination_batch = None
-            if self.is_main_process:
-                previous_horizon = payload["world_model_contract"]["return"]["imagination_horizon"]
-                print(f"[WM] FB imagination horizon changed from {previous_horizon} to {wm.cfg.horizon}; "
-                      "retaining dynamics and replay, restarting horizon validation and actor ramp", flush=True)
-        if self.world_model_enabled and "world_model" not in payload["model_state"] and self.is_main_process:
-            print("[WM] Baseline checkpoint: initializing a fresh world model", flush=True)
         if load_optimizer and "optimizer_state" in payload:
             self.agent.load_optimizer_state_dict(payload["optimizer_state"])
         self.tot_iterations = payload.get("iter", 0)
@@ -2063,11 +1827,12 @@ class FbCprRunner:
         available = bool(replay_dir and (replay_dir / "manifest.json").is_file() and all(
             (replay_dir / f"rank_{rank}" / "manifest.json").is_file() for rank in range(world_size)
         ))
-        wm_version = self.agent.world_model.version if self.world_model_enabled else None
-        if payload.get("world_model_version") != wm_version:
+        if payload.get("world_model_version") is not None:
+            # Replay saved by the removed world-model plugin has extra transition fields.
             available = False
             if self.is_main_process:
-                print("[WM] Replay model-state contract changed; collecting fresh real transitions", flush=True)
+                print("[RECOVERY] Replay was saved with world-model fields; collecting fresh real transitions",
+                      flush=True)
         # Stored aux_reward cannot be recomputed after changing the reward contract.
         if payload.get("reward_term_scales", {}) != getattr(self, "_reward_term_scales", {}):
             available = False

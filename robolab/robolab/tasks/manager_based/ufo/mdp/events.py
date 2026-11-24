@@ -34,10 +34,8 @@ def randomize_joint_calibration(
 ):
     """Sample one persistent joint zero/calibration offset per episode.
 
-    The offset changes the joint setpoint zero used by the position action. It
-    is kept outside the policy observation and is exposed to the optional
-    world model as simulator context, matching SuperMimic's hidden
-    per-episode calibration parameter.
+    The offset changes the joint setpoint zero used by the position action and
+    is kept outside the policy observation.
     """
     if env_ids is None or env_ids == slice(None):
         env_ids = torch.arange(env.num_envs, device=env.device)
@@ -60,9 +58,6 @@ def randomize_joint_calibration(
         (env_ids.numel(), nominal.shape[-1]), device=nominal.device, dtype=nominal.dtype
     ).uniform_(*offset_range)
     action._offset[env_ids] = nominal[env_ids] + offsets
-    if not hasattr(env, "_ufo_joint_calibration_offset"):
-        env._ufo_joint_calibration_offset = torch.zeros_like(nominal)
-    env._ufo_joint_calibration_offset[env_ids] = offsets
 
 
 def _align_reset_root_to_terrain(env: ManagerBasedRLEnv, env_ids, root_states: torch.Tensor) -> None:
@@ -328,13 +323,6 @@ def push_robot_by_setting_base_velocity(env: ManagerBasedRLEnv, env_ids, velocit
         env_ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
     if env_ids.numel() == 0:
         return
-    push_mask = getattr(env, "_ufo_wm_push_mask", None)
-    if push_mask is not None:
-        from .world_model_state import world_model_state
-
-        before = world_model_state(env)[env_ids].clone()
-        first_push = ~push_mask[env_ids]
-        env._ufo_wm_pre_push_state[env_ids[first_push]] = before[first_push]
     lin = robot.data.root_lin_vel_w.torch[env_ids]
     vel_lin = torch.zeros_like(lin)
     vel_ang = torch.zeros_like(lin)
@@ -344,7 +332,3 @@ def push_robot_by_setting_base_velocity(env: ManagerBasedRLEnv, env_ids, velocit
         target[:, idx] = torch.rand_like(target[:, idx]) * (hi - lo) + lo
     target_velocity = torch.cat((vel_lin, vel_ang), dim=-1)
     robot.write_root_velocity_to_sim_index(root_velocity=target_velocity, env_ids=env_ids)
-    if push_mask is not None:
-        # A push replaces COM velocity, so the final push in a step takes precedence.
-        env._ufo_wm_push_target[env_ids] = target_velocity
-        push_mask[env_ids] = True
