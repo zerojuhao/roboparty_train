@@ -72,12 +72,8 @@ class AMPDiscriminator(nn.Module):
 class PPOAMP(PPO):
     """PPO with independent discriminator routes and style rewards."""
 
-    def __init__(self, *args, amp_cfg: dict, obs_groups: dict, resume_learning_rate: float | None = None,
-                 force_style_reward_scale: float = 1.0, **kwargs):
+    def __init__(self, *args, amp_cfg: dict, obs_groups: dict, resume_learning_rate: float | None = None, **kwargs):
         super().__init__(*args, **kwargs)
-        if not math.isfinite(force_style_reward_scale) or not 0 <= force_style_reward_scale <= 1:
-            raise ValueError('force_style_reward_scale must be finite and within [0, 1]')
-        self.force_style_reward_scale = force_style_reward_scale
         if resume_learning_rate is not None and (not math.isfinite(resume_learning_rate) or resume_learning_rate <= 0):
             raise ValueError("resume_learning_rate must be finite and positive")
         self.resume_learning_rate = resume_learning_rate
@@ -155,8 +151,6 @@ class PPOAMP(PPO):
         for name, stats in self._rollout_distributions.items():
             self._reduce_distribution(stats)
             prefix = "AMP/rollout/style_reward" if name == "combined" else f"AMP/{name}/rollout_style_reward"
-            if name in ('force_style_scale', 'effective_style_reward'):
-                prefix = f'AMP/rollout/{name}'
             metrics[f"{prefix}_mean"] = self._distribution_mean(stats)
         self._rollout_distributions.clear()
         return metrics
@@ -242,16 +236,7 @@ class PPOAMP(PPO):
     def process_env_step(self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict) -> None:
         self.style_rewards, self.disc_score = self._collect_style_reward(obs)
         blend = self.discriminators["general"].task_style_lerp
-        scale = torch.ones_like(self.style_rewards)
-        if self.force_style_reward_scale != 1.0:
-            activation = extras.get('amp_force_activation')
-            if activation is None or activation.shape != self.style_rewards.shape:
-                raise ValueError('Force-dependent AMP requires completed-step amp_force_activation')
-            scale = 1.0 - (1.0 - self.force_style_reward_scale) * activation.clamp(0, 1)
-        self._record_rollout_distribution('force_style_scale', scale)
-        effective_style = self.style_rewards * scale
-        self._record_rollout_distribution('effective_style_reward', effective_style)
-        self.rewards_lerp = blend * rewards + (1.0 - blend) * effective_style
+        self.rewards_lerp = blend * rewards + (1.0 - blend) * self.style_rewards
         super().process_env_step(obs, self.rewards_lerp, dones, extras)
 
     def update(self) -> dict[str, float]:

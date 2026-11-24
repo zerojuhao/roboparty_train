@@ -37,6 +37,20 @@ def _sample_uniform_with_abs_min(
     return values
 
 
+def _sample_uniform_with_abs_min_capped(lower: float, upper: torch.Tensor, minimum: float) -> torch.Tensor:
+    """Per-sample version of ``_sample_uniform_with_abs_min`` with a tensor of upper bounds."""
+    negative_length = (upper.clamp(max=-minimum) - lower).clamp(min=0.0)
+    positive_start = max(lower, minimum)
+    positive_length = (upper - positive_start).clamp(min=0.0)
+    total_length = negative_length + positive_length
+    if bool((total_length <= 0.0).any()):
+        raise ValueError(f"A per-environment speed cap leaves no command with magnitude >= {minimum}.")
+    sample = torch.rand_like(upper) * total_length
+    return torch.where(
+        sample < negative_length, lower + sample, positive_start + (sample - negative_length)
+    )
+
+
 class FilteredUniformVelocityCommand(UniformVelocityCommand):
     """Sample all velocity axes uniformly while excluding low magnitudes.
 
@@ -47,6 +61,10 @@ class FilteredUniformVelocityCommand(UniformVelocityCommand):
     Standing and single-axis commands are mutually exclusive shares of all
     samples: ``rel_standing_envs`` stand still, ``single_axis_probability``
     keep only one axis, and the remainder keep every sampled axis.
+
+    With ``per_env_speed_caps`` each environment samples forward speed below its
+    own cap (``speed_caps``, raised/lowered by ``SpeedTrackingCurriculum``) and
+    accumulates episode tracking scores ``tracking_xy``/``tracking_yaw``.
     """
 
     def __init__(self, cfg: "FilteredUniformVelocityCommandCfg", env):
@@ -64,6 +82,22 @@ class FilteredUniformVelocityCommand(UniformVelocityCommand):
         self.segment_start_pos_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.segment_start_heading_w = torch.zeros(self.num_envs, device=self.device)
         self.segment_duration = torch.zeros(self.num_envs, device=self.device)
+        if cfg.per_env_speed_caps:
+            lower, upper = cfg.ranges.lin_vel_x
+            if not upper > max(lower, cfg.min_abs_lin_velocity):
+                raise ValueError("per_env_speed_caps needs a forward range above min_abs_lin_velocity.")
+            self.speed_caps = self.vel_command_b.new_full((self.num_envs,), upper)
+            self.tracking_xy = torch.zeros_like(self.speed_caps)
+            self.tracking_yaw = torch.zeros_like(self.speed_caps)
+            # CommandTerm.reset logs and clears only the selected environments' scores.
+            self.metrics["tracking_xy"] = self.tracking_xy
+            self.metrics["tracking_yaw"] = self.tracking_yaw
+
+    def reset(self, env_ids: Sequence[int] | None = None):
+        metrics = super().reset(env_ids)
+        if not self.cfg.log_success_rate:
+            self._env.extras.get("log", {}).pop("Metrics/success_rate", None)
+        return metrics
 
     def _resample_command(self, env_ids: Sequence[int] | slice | None):
         if env_ids is None or isinstance(env_ids, slice):
@@ -85,6 +119,11 @@ class FilteredUniformVelocityCommand(UniformVelocityCommand):
         for index in active_axes:
             lower, upper = ranges[index]
             minimum = self.cfg.min_abs_ang_velocity if index == 2 else self.cfg.min_abs_lin_velocity
+            if index == 0 and self.cfg.per_env_speed_caps:
+                self.vel_command_b[env_ids, 0] = _sample_uniform_with_abs_min_capped(
+                    lower, self.speed_caps[env_ids], minimum
+                )
+                continue
             self.vel_command_b[env_ids, index] = _sample_uniform_with_abs_min(
                 lower, upper, len(env_ids), self.device, minimum
             )
@@ -116,6 +155,15 @@ class FilteredUniformVelocityCommand(UniformVelocityCommand):
         self.segment_start_pos_w[env_ids] = self.robot.data.root_pos_w.torch[env_ids]
         self.segment_start_heading_w[env_ids] = self.robot.data.heading_w.torch[env_ids]
         self.segment_duration[env_ids] = self.time_left[env_ids]
+
+    def _update_metrics(self):
+        super()._update_metrics()
+        if not self.cfg.per_env_speed_caps:
+            return
+        xy_error = self.vel_command_b[:, :2] - self.robot.data.root_lin_vel_b.torch[:, :2]
+        yaw_error = self.vel_command_b[:, 2] - self.robot.data.root_ang_vel_b.torch[:, 2]
+        self.tracking_xy.add_(torch.exp(-xy_error.square().sum(dim=1) / 0.5**2) / self._env.max_episode_length)
+        self.tracking_yaw.add_(torch.exp(-yaw_error.square() / 0.5**2) / self._env.max_episode_length)
 
     @property
     def _segment_displacement_b(self) -> torch.Tensor:
@@ -155,3 +203,7 @@ class FilteredUniformVelocityCommandCfg(UniformVelocityCommandCfg):
     """Share of all commands that keep only one sampled axis and zero the rest."""
     max_lin_velocity: float | None = None
     """Optional cap on the combined XY command, including diagonal motion."""
+    per_env_speed_caps: bool = False
+    """Give every environment its own forward-speed cap for ``SpeedTrackingCurriculum``."""
+    log_success_rate: bool = True
+    """Keep Isaac Lab's ``Metrics/success_rate`` log entry."""

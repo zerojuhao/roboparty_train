@@ -24,7 +24,7 @@ from .amp_env_cfg import ANIMATION_TERM_NAME, AmpEnvCfg, EventCfg
 from .mdp.arm_compliance import arm_compliance, full_body_return
 from .mdp.body_compliance import body_compliance
 from .mdp.commands import FilteredUniformVelocityCommandCfg
-from .mdp.events import sustained_standing_push
+from .mdp.events import randomize_joint_setpoint_offset, sustained_standing_push
 from .mdp.force_estimation import compact_interaction_critic_state, force_vel_target
 from .mdp.soft import (
     SoftVelocityCommand, amp_task_route, soft_feet_air_time, soft_undesired_contacts, yaw_compliance,
@@ -223,8 +223,8 @@ class SoftRewardsCfg:
             'force_scale_bw': 0.03,
             'force_filter_time_s': 0.1,
             'force_range_n': (10.0, 15.0),
-            'target_force_range_n': (10.0, 15.0),
-            'target_tanh_k': 2.0,
+            'target_force_range_n': (10.0, 12.0),
+            'target_tanh_k': 3.0,
             'target_sustain_s': 0.1,
             # Zero-command force following (pull present or ramped target live) is weighted x3;
             # unloaded standing and commanded walking keep x1. Same exp kernel (std) as commands.
@@ -272,30 +272,23 @@ class SoftRewardsCfg:
             'asset_cfg': SceneEntityCfg(
                 'robot', body_names=['left_wrist_link', 'right_wrist_link'], preserve_order=True,
             ),
-            'force_deadband_bw': 0.015,
-            'force_scale_bw': 0.035,
             'force_filter_time_s': 0.05,
             'command_name': 'base_velocity',
             'power_scale_w': 5.0,
             # Holding is charged per 1 N*m so a held 3 N*m load costs more than the later return.
             'torque_scale_nm': 1.0,
-            'yield_scale_w': 2.0,
+            'yield_speed_scale_rad_s': 0.4,
+            'yield_reward_max': 0.4,
             'damping_allowance': 8.0,
+            'braking_allowance_cap_nm': 0.5,
             'resistance_tolerance_nm': 0.25,
             'limit_margin': 0.25,
-            'max_joint_speed': 1.0,
+            'max_joint_speed': 3.14,
             'overspeed_weight': 0.3,
             'all_arm_links': True,
             # Moderate joint torques already count as load (gate fully open from 1 N*m).
             'passive_joint_torque_range_nm': (0.5, 1.0),
             'rest_joint_pos': ARM_REST_JOINT_POS,
-            # Style relief (force_style_reward_scale) fades over this time after an arm load ends.
-            'style_relief_release_s': 1.0,
-            # Zero-command style weight under an arm load / under whole-body follow. The smaller one
-            # must equal the runner's force_style_reward_scale.
-            'arm_style_scale': 0.5,
-            # Lower D favors real steps over bracing, so whole-body follow keeps full style weight.
-            'body_style_scale': 1.0,
         },
     )
     full_body_return = RewTerm(
@@ -304,24 +297,26 @@ class SoftRewardsCfg:
         params={
             'asset_cfg': SceneEntityCfg('robot'),
             'command_name': 'base_velocity',
-            'return_std': 0.1,
-            'motion_target_threshold': 0.15,
-            'posture_weight': 1.5,
+            # Sum unloaded arms' absolute joint errors in radians, per policy step.
+            'posture_mode': 'unloaded_arm_l1',
+            'return_std': 1.0,  # required by the shared interface; unused for L1
+            'posture_weight': 1.0,
             'recovery_time_s': 0.3,
             'arm_velocity_weight': 2.0,
             # Outward speed below this is free (sway, PD sag, exploration).
             'away_speed_deadband': 0.3,
             'return_max_speed': 1.0,
             'arm_fast_return_weight': 2.0,
-            # Return speed limit: return_speed_floor + |error|, capped at return_speed_threshold (rad/s).
+            # Return overspeed starts above min(return_speed_floor + |error|, return_speed_threshold).
             # Overspeed is Huber (unsaturated) so a 10 rad/s snap-back costs far more than 2 rad/s.
-            'return_speed_threshold': 1.5,
+            'return_speed_threshold': 1.57,
             'return_speed_floor': 0.5,
             'overspeed_saturates': False,
             # Follow targets (m/s, rad/s) that release the velocity terms while stepping under pulls.
             'motion_speed_range': (0.02, 0.10),
             'motion_yaw_range': (0.05, 0.20),
             'whole_body_releases_posture': False,
+            'wrist_posture_release_range_nm': (0.5, 0.75),
         },
     )
     pelvis_orientation_l2 = RewTerm(
@@ -345,14 +340,6 @@ class SoftRewardsCfg:
             'std': math.radians(15.),
             'ang_vel_gate': 0.3,
             'yaw_reference_term': 'track_ang_vel_z_exp',
-        },
-    )
-    feet_orientation_l2 = RewTerm(
-        func=mdp.feet_orientation_l2,
-        weight=-0.1,
-        params={
-            'sensor_cfg': SceneEntityCfg('contact_forces', body_names='.*ankle_roll_link'),
-            'asset_cfg': SceneEntityCfg('robot', body_names='.*ankle_roll_link'),
         },
     )
     feet_slide = RewTerm(
@@ -420,6 +407,15 @@ class SoftRewardsCfg:
             'in_place_turn_weights': None,
         },
     )
+    feet_landing_peak_l2 = RewTerm(
+        func=mdp.feet_landing_peak_l2,
+        weight=-1.0,
+        params={
+            'sensor_cfg': SceneEntityCfg('contact_forces', body_names=['left_ankle_roll_link', 'right_ankle_roll_link'], preserve_order=True),
+            'asset_cfg': SceneEntityCfg('robot'),
+            'peak_threshold_bw': 1.0,
+        },
+    )
     feet_impact_velocity_l2 = RewTerm(
         func=mdp.feet_impact_velocity_l2,
         weight=-1.0,
@@ -473,6 +469,35 @@ class SoftEventCfg(EventCfg):
             'com_range': {'x': (-0.03, 0.03), 'y': (-0.03, 0.03), 'z': (-0.03, 0.03)},
         },
     )
+    # Resampled every reset from the cached defaults (not cumulative). Dry friction 0.1 N*m x (0.5, 5.0)
+    # = 0.05-0.5 N*m, so a released arm can stall on friction as on the real robot. The same factor
+    # also scales viscous friction (0.01 -> 0.005-0.05).
+    scale_joint_parameters = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        mode='reset',
+        params={
+            'asset_cfg': SceneEntityCfg('robot', joint_names=['.*_joint']),
+            'friction_distribution_params': (0.5, 5.0),
+            'armature_distribution_params': (0.8, 1.2),
+            'operation': 'scale',
+        },
+    )
+    # Link mass x0.8-1.2 (all bodies, startup); wider than the shared 0.9-1.1 so the real arm's smaller sag is covered.
+    scale_link_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode='startup',
+        params={
+            'asset_cfg': SceneEntityCfg('robot', body_names='.*'),
+            'mass_distribution_params': (0.8, 1.2),
+            'operation': 'scale',
+        },
+    )
+    # SuperMimic-style hidden joint zero/calibration error: setpoint-only offset, resampled every reset.
+    randomize_joint_setpoint_offset = EventTerm(
+        func=randomize_joint_setpoint_offset,
+        mode='reset',
+        params={'offset_range': (-0.03, 0.03)},
+    )
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode='interval',
@@ -502,29 +527,23 @@ class SoftEventCfg(EventCfg):
                 preserve_order=True,
             ),
             'command_name': 'base_velocity',
-            'point_force_probability': 0.7,
+            'trigger_probability': 0.7,
             'point_force_range_n': (0.0, 20.0),
             'contact_count_range': (1, 4),
             'point_offset_range': (-0.03, 0.03),
             'coherent_pull_probability': 0.3,
             'arm_couple_probability': 0.25,
             'small_horizontal_pull_probability': 0.3,
-            'torso_horizontal_pull_probability': 0.7,
             'torso_horizontal_force_range_n': (0.0, 20.0),
-            'torso_yaw_probability': 0.25,
-            'zero_command_torso_yaw_probability': 0.7,
             'torso_yaw_torque_range_nm': (0.0, 10.0),
-            'arm_joint_torque_probability': 0.7,
-            'arm_joint_torque_range_nm': (0.0, 5.0),
+            'arm_joint_torque_range_nm': (0.0, 10.0),
             'arm_joint_limit_margin_rad': math.radians(25.),
             'max_total_force_ratio': 0.20,
-            'duration_range_s': (1.0, 3.0),
-            'long_duration_probability': 0.25,
-            'long_duration_range_s': (10.0, 12.0),
-            'rest_range_s': (2.0, 4.0),
+            'duration_range_s': (0.0, 7.0),
+            'start_interval_range_s': (3.0, 7.0),
             'initial_rest_range_s': (0.2, 0.6),
             'ramp_time_range_s': (0.05, 0.4),
-            'abrupt_release_probability': 0.25,
+            'abrupt_release_probability': 1.0,
             'release_reserve_s': 3.0,
         },
     )

@@ -97,7 +97,7 @@ class AttnEncEnv(BaseEnv):
         )
         feet_height = torch.clamp(feet_height - 0.04, min=0.0, max=1.0)
         feet_height = torch.nan_to_num(feet_height, nan=1.0, posinf=1.0, neginf=0)
-        joint_torque = robot.data.applied_torque
+        joint_torque = robot.actuators.applied_effort
         joint_acc = robot.data.joint_acc
         root_quat_w = robot.data.root_quat_w.unsqueeze(1).expand(-1, 2, -1)
         root_pos_w = robot.data.root_pos_w.unsqueeze(1).expand(-1, 2, -1)

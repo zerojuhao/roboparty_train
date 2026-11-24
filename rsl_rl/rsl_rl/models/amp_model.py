@@ -41,6 +41,7 @@ class AMPModel(MLPModel):
         force_estimation_multi_contact=False,
         force_estimation_compact=False,
         enable_force_vel_target_estimation=False,
+        force_load_negative_weight=1.0,
         **kwargs,
     ):
         self.enable_velocity_estimation = enable_velocity_estimation
@@ -56,6 +57,9 @@ class AMPModel(MLPModel):
         self.force_estimation_multi_contact = force_estimation_multi_contact
         self.force_estimation_compact = force_estimation_compact
         self.enable_force_vel_target_estimation = enable_force_vel_target_estimation
+        if not (float(force_load_negative_weight) > 0.0):
+            raise ValueError('force_load_negative_weight must be positive')
+        self.force_load_negative_weight = float(force_load_negative_weight)
         if enable_force_vel_target_estimation and not force_estimation_compact:
             raise ValueError('Force-vel-target estimation requires compact force estimation')
         if force_estimation_compact and not (enable_force_estimation and force_estimation_multi_contact and force_estimation_with_torque):
@@ -141,7 +145,7 @@ class AMPModel(MLPModel):
                 if self.force_estimation_compact:
                     if raw.shape != target.shape:
                         raise ValueError('Compact force estimator and supervision layouts must match')
-                    terms = ForceEstimator.compact_loss_terms(raw, target)
+                    terms = ForceEstimator.compact_loss_terms(raw, target, self.force_load_negative_weight)
                     self._force_loss = sum(terms.values())
                     self._force_metrics = self._compact_force_metrics(raw, target)
                     self._force_metrics.update({f'Estimation/force_loss/{name}': value.detach()

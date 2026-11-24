@@ -269,7 +269,7 @@ def _diagnose_physics(env, steps):
             "root": robot.data.root_state_w.torch,
             "joint_pos": robot.data.joint_pos.torch,
             "joint_vel": robot.data.joint_vel.torch,
-            "effort": robot.data.applied_torque.torch,
+            "effort": robot.actuators.applied_effort.torch,
         }
         for name, value in values.items():
             finite = torch.isfinite(value).reshape(env.num_envs, -1).all(-1)
@@ -569,13 +569,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.log_dir = log_dir
 
     # create isaac environment
-    wm_cfg = getattr(agent_cfg, "world_model", None)
-    if wm_cfg is not None and wm_cfg.enabled:
-        if args_cli.task != "RP1-UFO":
-            raise ValueError("agent.world_model.enabled is currently supported only for RP1-UFO")
-        from robolab.tasks.manager_based.ufo.mdp.world_model_state import enable_world_model_observations
-
-        enable_world_model_observations(env_cfg, mbfb=wm_cfg.objective == "mbfb")
     from robolab.tasks.manager_based.amp.mdp.force_estimation import configure_force_estimation
     configure_force_estimation(env_cfg, agent_cfg)
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)

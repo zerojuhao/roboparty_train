@@ -302,7 +302,7 @@ def joint_torques_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEn
     """
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
-    return torch.sum(torch.square(asset.data.applied_torque[:, asset_cfg.joint_ids]), dim=1)
+    return torch.sum(torch.square(asset.actuators.applied_effort[:, asset_cfg.joint_ids]), dim=1)
 
 
 def joint_torque_saturation_l2(
@@ -323,11 +323,11 @@ def joint_torque_saturation_l2(
     if use_substep_peak:
         if asset_cfg.name != "robot":
             raise ValueError("Motor peak tracking is configured for robot only.")
-        ratio = env.motor_load.torque_ratio_peak[:, asset_cfg.joint_ids]
+        ratio = env.torque_ratio_peak[:, asset_cfg.joint_ids]
         excess = torch.relu(ratio - limit_ratio) / (1.0 - limit_ratio)
         return excess.square().amax(dim=1)
     asset: Articulation = env.scene[asset_cfg.name]
-    applied_torque = torch.abs(asset.data.applied_torque.torch[:, asset_cfg.joint_ids])
+    applied_torque = torch.abs(asset.actuators.applied_effort.torch[:, asset_cfg.joint_ids])
     effort_limits = asset.data.joint_effort_limits.torch[:, asset_cfg.joint_ids].clamp_min(1.0e-6)
     normalized_excess = torch.relu(applied_torque / effort_limits - float(limit_ratio)) / (1.0 - limit_ratio)
     return torch.mean(torch.square(normalized_excess), dim=1)
@@ -492,7 +492,7 @@ def joint_energy(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntity
     asset = env.scene[asset_cfg.name]
 
     qvel = asset.data.joint_vel[:, asset_cfg.joint_ids]
-    qfrc = asset.data.applied_torque[:, asset_cfg.joint_ids]
+    qfrc = asset.actuators.applied_effort[:, asset_cfg.joint_ids]
     return torch.sum(torch.abs(qvel) * torch.abs(qfrc), dim=-1)
 
 def feet_slide(
@@ -580,6 +580,55 @@ def feet_contact_force_l2(
         turning = (speed < 0.3) & (command[:, 2].abs() > 0.05)
         cost = torch.where(turning, turn_peak * peak + turn_mean * mean + turn_rising * rising, cost)
     return cost
+
+
+class feet_landing_peak_l2(ManagerTermBase):
+    '''Charge each qualified touchdown once, using the peak in its physics-rate window.'''
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self._n = env.cfg.decimation
+        sensor_cfg = cfg.params['sensor_cfg']
+        sensor = env.scene.sensors[sensor_cfg.name]
+        dt = env.cfg.sim.dt
+        if not math.isclose(dt, 0.005) or sensor.cfg.update_period not in (0, dt):
+            raise ValueError('Landing peak requires 5 ms force samples')
+        if sensor.cfg.history_length < self._n or len(sensor_cfg.body_ids) != 2:
+            raise ValueError('Landing peak requires both feet and a full control interval of force history')
+        shape = (self.num_envs, 2)
+        self._seen_contact = torch.zeros(shape, device=self.device, dtype=torch.bool)
+        self._air = torch.zeros(shape, device=self.device, dtype=torch.int32)
+        self._remaining = torch.zeros_like(self._air)
+        self._peak = torch.zeros(shape, device=self.device)
+        self._rate = torch.zeros(self.num_envs, device=self.device)
+        self._last_step = -1
+
+    def reset(self, env_ids=None):
+        ids = slice(None) if env_ids is None else env_ids
+        for state in (self._seen_contact, self._air, self._remaining, self._peak, self._rate):
+            state[ids] = 0
+
+    def __call__(self, env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, peak_threshold_bw: float = 1.5):
+        if self._last_step == env.common_step_counter:
+            return self._rate
+        sensor = env.scene.sensors[sensor_cfg.name]
+        bw = env.scene[asset_cfg.name].data.body_mass.torch.sum(1) * abs(env.cfg.sim.gravity[2])
+        loads = sensor.data.net_forces_w_history.torch[:, :self._n, sensor_cfg.body_ids, 2] / bw[:, None, None]
+        cost = torch.zeros_like(self._peak)
+        # Newest-first history: consume only new samples, oldest first, never polling a device tensor.
+        for k in reversed(range(self._n)):
+            f = loads[:, k]
+            contact = f >= 0.04
+            start = contact & self._seen_contact & (self._air >= 16)
+            self._seen_contact |= contact
+            self._air = torch.where(contact, 0, (self._air + 1).clamp_max(16))
+            self._remaining = torch.where(start, 12, self._remaining)
+            self._peak = torch.where(start, f, torch.maximum(self._peak, f))
+            cost += torch.where(self._remaining == 1, (self._peak - peak_threshold_bw).clamp_min(0).square(), 0.)
+            self._remaining = (self._remaining - 1).clamp_min(0)
+        self._rate = cost.sum(1) / env.step_dt
+        self._last_step = env.common_step_counter
+        return self._rate
 
 
 def feet_impact_velocity_l2(

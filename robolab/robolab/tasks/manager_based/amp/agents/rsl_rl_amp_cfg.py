@@ -91,9 +91,6 @@ class RslRlPpoAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
     adaptive_learning_rate_max: float = 1.0e-2
     """Upper bound for adaptive PPO rates, including restored or overridden rates."""
 
-    force_style_reward_scale: float = 1.0
-    """Retained AMP reward at full external-force activation; task reward is unchanged."""
-
     amp_cfg: RslRlAmpCfg = RslRlAmpCfg()
     """Configuration for the AMP (Adversarial Motion Priors) in the training."""
 

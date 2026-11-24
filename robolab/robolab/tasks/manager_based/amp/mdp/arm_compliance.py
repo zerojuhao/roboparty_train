@@ -23,6 +23,14 @@ class full_body_return(ManagerTermBase):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         p = cfg.params
+        mode = p.get('posture_mode', 'legacy')
+        if mode not in ('legacy', 'mean_square', 'unloaded_arm_l1'):
+            raise ValueError(f'Unknown posture_mode: {mode}')
+        if mode != 'legacy' and p.get('joint_posture_weight', 0.) != 0.:
+            raise ValueError('only legacy mode supports the additional joint posture cost')
+        gate_floor = p.get('posture_gate_mass_floor')
+        if gate_floor is not None and (mode != 'mean_square' or not 0. < gate_floor <= 10.):
+            raise ValueError('posture_gate_mass_floor requires mean_square and a value in (0, 10]')
         for name in ('return_std', 'recovery_time_s', 'posture_weight',
                      'return_max_speed', 'return_speed_threshold'):
             if not math.isfinite(p[name]) or p[name] <= 0:
@@ -33,7 +41,16 @@ class full_body_return(ManagerTermBase):
         deadband = p.get('away_speed_deadband', 0.)
         if not math.isfinite(deadband) or deadband < 0:
             raise ValueError('away_speed_deadband must be finite and nonnegative')
-        for name in ('arm_velocity_weight', 'arm_fast_return_weight'):
+        wrist_range = p.get('wrist_posture_release_range_nm')
+        if wrist_range is not None:
+            lo, hi = wrist_range
+            if not (math.isfinite(lo) and math.isfinite(hi) and 0 <= lo < hi):
+                raise ValueError('wrist_posture_release_range_nm must be finite, nonnegative and increasing')
+        joint_scale = p.get('joint_posture_scale_rad', math.radians(5.))
+        if not math.isfinite(joint_scale) or joint_scale <= 0:
+            raise ValueError('joint_posture_scale_rad must be finite and positive')
+        for name in ('arm_velocity_weight', 'arm_fast_return_weight',
+                     'joint_posture_weight', 'joint_posture_deadband_rad'):
             if not math.isfinite(p.get(name, 0.)) or p.get(name, 0.) < 0:
                 raise ValueError(f'{name} must be finite and non-negative')
         names = env.scene[p['asset_cfg'].name].joint_names
@@ -71,7 +88,10 @@ class full_body_return(ManagerTermBase):
                  return_speed_threshold=1.0, motion_target_threshold=0.0,
                  motion_speed_range=(0.02, 0.10), motion_yaw_range=(0.05, 0.20),
                  whole_body_releases_posture=False, away_speed_deadband=0.0,
-                 return_speed_floor=None, overspeed_saturates=True):
+                 return_speed_floor=None, overspeed_saturates=True,
+                 wrist_posture_release_range_nm=None, joint_posture_weight=0.,
+                 joint_posture_deadband_rad=math.radians(2.), joint_posture_scale_rad=math.radians(5.),
+                 posture_mode='legacy', posture_gate_mass_floor=None):
         arm = env.reward_manager.get_term_cfg('arm_compliance').func
         body = env.reward_manager.get_term_cfg('track_lin_vel_xy_exp').func
         yaw = env.reward_manager.get_term_cfg('track_ang_vel_z_exp').func
@@ -97,6 +117,14 @@ class full_body_return(ManagerTermBase):
         whole_release = torch.maximum(arm_loaded, whole)
         self.overspeed_gate.copy_(idle * (1. - whole_release))
         pose_release = whole_release if whole_body_releases_posture else arm_loaded
+        if posture_mode == 'unloaded_arm_l1':
+            push = env.event_manager.get_term_cfg('sustained_standing_push').func
+            pose_release = arm.applied_arm_load_mask(push).to(idle.dtype)[:, :, None]
+        elif wrist_posture_release_range_nm is not None:
+            # Extra weak-load relief is limited to wrist posture.
+            wrist_release = _smoothstep(arm.passive_observed_wrist_torque.abs(), wrist_posture_release_range_nm)
+            pose_release = pose_release.clone()
+            pose_release[..., -1] = torch.maximum(pose_release[..., -1], wrist_release)
         for gate, release in ((self.joint_gate, pose_release), (self.vel_gate, whole_release)):
             target = idle * (1. - release)
             gate.copy_(torch.minimum(target, torch.lerp(gate, target, alpha)))
@@ -105,7 +133,7 @@ class full_body_return(ManagerTermBase):
 
         data = env.scene[asset_cfg.name].data
         q = data.joint_pos.torch[:, self._joint_flat].reshape(-1, 2, 5)
-        rest = (arm.rest_positions if arm.rest_positions is not None
+        rest = (arm.rest_positions if posture_mode == 'legacy' and arm.rest_positions is not None
                 else data.default_joint_pos.torch[:, self._joint_flat].reshape(-1, 2, 5))
         error = q - rest
         velocity = data.joint_vel.torch[:, self._joint_flat].reshape_as(error)
@@ -117,12 +145,21 @@ class full_body_return(ManagerTermBase):
             limit = torch.full_like(error, return_speed_threshold)
         else:
             limit = (return_speed_floor + error.abs()).clamp_max(return_speed_threshold)
-        # Worst joint, not the 10-joint sum: one raised arm is enough, small rest noise must not stack.
         excess = (error.abs() - motion_target_threshold).clamp_min(0.)
-        # Fade posture as the joint already returns at the speed limit, otherwise snap-back beats overspeed.
         returning = (toward / limit).clamp(0., 1.)
-        posture = posture_weight * (
-            torch.tanh(excess / return_std) * self.joint_gate * (1. - returning)).amax((1, 2))
+        if posture_mode == 'unloaded_arm_l1':
+            # Radians, summed across joints in this step. No angle deadband or active-joint divisor.
+            posture = posture_weight * (error.abs() * self.joint_gate * (1. - .5 * returning)).sum((1, 2))
+        elif posture_mode == 'mean_square':
+            weighted = (excess / return_std).square() * self.joint_gate * (1. - .5 * returning)
+            if posture_gate_mass_floor is None:
+                posture = posture_weight * weighted.mean((1, 2))  # historical fixed denominator
+            else:
+                mass = self.joint_gate.sum((1, 2)).clamp_min(posture_gate_mass_floor)
+                posture = posture_weight * (weighted.sum((1, 2)) / mass)
+        else:
+            posture = posture_weight * (
+                torch.tanh(excess / return_std) * self.joint_gate * (1. - returning)).amax((1, 2))
         # Small outward drift (sway, PD sag, exploration) is free; only deliberate swings pay.
         swing = (away - away_speed_deadband).clamp_min(0.)
         vel_away = arm_velocity_weight * (torch.tanh(swing / return_max_speed) * self.vel_gate).amax((1, 2))
@@ -135,6 +172,18 @@ class full_body_return(ManagerTermBase):
         overspeed = arm_fast_return_weight * (over_cost * self.overspeed_gate).amax((1, 2))
 
         log = env.extras.setdefault('log', {})
+        if posture_mode == 'unloaded_arm_l1':
+            log['Interaction/return_unloaded_arm_l1_cost'] = posture.mean()
+        elif posture_mode == 'mean_square':
+            log['Interaction/return_square_posture_cost'] = posture.mean()
+        elif joint_posture_weight > 0.:
+            # Use default angles even if the legacy worst-joint term has a separate rest pose.
+            default_q = data.default_joint_pos.torch[:, self._joint_flat].reshape_as(q)
+            d2 = ((q - default_q).abs() - joint_posture_deadband_rad).clamp_min(0.).square()
+            # Fixed denominator: releasing one arm must not double the other arm's cost.
+            joint_cost = joint_posture_weight * (self.joint_gate * (d2 / (d2 + joint_posture_scale_rad**2))).mean((1, 2))
+            posture = posture + joint_cost
+            log['Interaction/return_joint_posture_cost'] = joint_cost.mean()
         log['Interaction/return_gate'] = self.gate.mean()
         log['Interaction/return_velocity_gate'] = self.vel_gate.mean()
         log['Interaction/return_motion_release'] = (zero.float() * whole[:, 0, 0]).mean()
@@ -155,11 +204,23 @@ class arm_compliance(ManagerTermBase):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         p = cfg.params
-        for name in ('force_filter_time_s', 'power_scale_w', 'force_scale_bw', 'torque_scale_nm',
-                     'damping_allowance', 'max_joint_speed', 'limit_margin', 'yield_scale_w'):
+        for name in ('force_filter_time_s', 'power_scale_w', 'torque_scale_nm',
+                     'damping_allowance', 'max_joint_speed', 'limit_margin'):
             if not math.isfinite(p[name]) or p[name] <= 0:
                 raise ValueError(f'{name} must be finite and positive')
-        for name in ('force_deadband_bw', 'resistance_tolerance_nm', 'overspeed_weight'):
+        self.yield_speed_scale = p.get('yield_speed_scale_rad_s')
+        self.yield_scale_w = p.get('yield_scale_w')
+        reward_max = p.get('yield_reward_max')
+        if self.yield_speed_scale is None and reward_max is None:
+            # Preserve the power-based reward when replaying an older saved env config.
+            if self.yield_scale_w is None or not math.isfinite(self.yield_scale_w) or self.yield_scale_w <= 0:
+                raise ValueError('legacy yield_scale_w must be finite and positive')
+        else:
+            if self.yield_scale_w is not None or not all(
+                    x is not None and math.isfinite(x) and x > 0 for x in (self.yield_speed_scale, reward_max)):
+                raise ValueError('set positive yield_speed_scale_rad_s and yield_reward_max together, without yield_scale_w')
+            self.yield_reward_gain = reward_max / math.tanh(p['max_joint_speed'] / self.yield_speed_scale)
+        for name in ('resistance_tolerance_nm', 'overspeed_weight'):
             if not math.isfinite(p.get(name, 0.)) or p.get(name, 0.) < 0:
                 raise ValueError(f'{name} must be finite and non-negative')
         lo, hi = p['passive_joint_torque_range_nm']
@@ -172,8 +233,12 @@ class arm_compliance(ManagerTermBase):
         self.passive_weight = 1.0
         self.power_scale_w = p['power_scale_w']
         self.torque_scale_nm = p['torque_scale_nm']
-        self.yield_scale_w = p['yield_scale_w']
         self.damping_allowance = p['damping_allowance']
+        self.braking_allowance_cap_nm = p.get('braking_allowance_cap_nm')
+        if self.braking_allowance_cap_nm is not None and (
+            not math.isfinite(self.braking_allowance_cap_nm) or self.braking_allowance_cap_nm < 0
+        ):
+            raise ValueError('braking_allowance_cap_nm must be finite and non-negative')
         self.resistance_tolerance_nm = p.get('resistance_tolerance_nm', 0.5)
         self.limit_margin = p['limit_margin']
         self.max_joint_speed = p['max_joint_speed']
@@ -211,19 +276,14 @@ class arm_compliance(ManagerTermBase):
         n, device = env.num_envs, env.device
         self.filtered_force_w = torch.zeros(n, 2, 3, device=device)
         self.filtered_joint_torque = torch.zeros(n, 2, 5, device=device)
-        self.activation = torch.zeros(n, 2, device=device)
-        self.style_relief = torch.zeros(n, 2, device=device)
-        if not math.isfinite(p.get('style_relief_release_s', 1.0)) or p.get('style_relief_release_s', 1.0) <= 0:
-            raise ValueError('style_relief_release_s must be finite and positive')
-        for name in ('arm_style_scale', 'body_style_scale'):
-            if not 0 <= p.get(name, 0.5) <= 1:
-                raise ValueError(f'{name} must be within [0, 1]')
         self.joint_return_gate = torch.ones(n, 2, 5, device=device)
         self.motion_blend = torch.zeros(n, device=device)
         self.passive_observed_gate = torch.zeros(n, 2, 5, device=device)
+        self.passive_observed_wrist_torque = torch.zeros(n, 2, device=device)
         self._power_sum = torch.zeros(n, 2, 5, device=device)
         self._hold_sum = torch.zeros(n, 2, 5, device=device)
         self._yield_sum = torch.zeros(n, 2, 5, device=device)
+        self._yield_reward_sum = torch.zeros(n, device=device)
         self._speed_sum = torch.zeros(n, 2, 5, device=device)
         self._open_sum = torch.zeros(n, 2, 5, device=device)
         self._substeps = 0
@@ -248,6 +308,13 @@ class arm_compliance(ManagerTermBase):
             self._contact_forces.append(torch.zeros(
                 self._env.num_envs, len(slots), 3, device=self._env.device))
 
+    def applied_arm_load_mask(self, push):
+        # Unfiltered simulator loads. Check each link separately: opposing forces must not cancel.
+        loaded = push.applied_joint_torque.reshape(-1, 2, 5).ne(0).any(-1)
+        for side, slots in enumerate(self._contact_slots):
+            loaded[:, side] |= (push.applied_force[:, slots].ne(0) | push.applied_torque[:, slots].ne(0)).any((1, 2))
+        return loaded
+
     def _compute_gate(self, zero_command, ext):
         return _smoothstep(ext.abs(), self.torque_range_nm) * zero_command[:, None, None]
 
@@ -255,6 +322,7 @@ class arm_compliance(ManagerTermBase):
         self._power_sum.zero_()
         self._hold_sum.zero_()
         self._yield_sum.zero_()
+        self._yield_reward_sum.zero_()
         self._speed_sum.zero_()
         self._open_sum.zero_()
         self._substeps = 0
@@ -275,7 +343,7 @@ class arm_compliance(ManagerTermBase):
         q, v, ext, gate = self._snapshot
         data = self.robot.data
         limits = data.soft_joint_pos_limits.torch[:, self._joint_flat].reshape(-1, 2, 5, 2)
-        motor = data.applied_torque.torch[:, self._joint_flat].reshape_as(q)
+        motor = self.robot.actuators.applied_effort.torch[:, self._joint_flat].reshape_as(q)
 
         # Fade compliance as an outward load pushes the joint into its soft limit.
         remaining = torch.where(ext >= 0, limits[..., 1] - q, q - limits[..., 0])
@@ -286,41 +354,56 @@ class arm_compliance(ManagerTermBase):
 
         power = (motor * v).clamp_min(0.)
         opposing = (-ext.sign() * motor).clamp_min(0.)
-        allowance = self.resistance_tolerance_nm + self.damping_allowance * v.abs()
+        along = (ext.sign() * v).clamp_min(0.)
+        if self.braking_allowance_cap_nm is None:
+            # Legacy saved reward configs use a symmetric, uncapped allowance.
+            damping = self.damping_allowance * v.abs()
+        else:
+            # Only passive braking while moving along the load earns extra allowance.
+            damping = (self.damping_allowance * along).clamp_max(self.braking_allowance_cap_nm)
+            damping = torch.where(motor * v < 0., damping, 0.)
+        allowance = self.resistance_tolerance_nm + damping
         hold = (opposing - allowance).clamp_min(0.)
         yield_power = (ext * v).clamp_min(0.)
-        excess = (v.abs() / self.max_joint_speed - 1.).clamp_min(0.)
+        # Use excess rad/s so changing the threshold does not rescale the penalty.
+        excess = (v.abs() - self.max_joint_speed).clamp_min(0.)
         bump = (1. - free) * gate * presence
 
         self._power_sum.add_(power * weight)
         self._hold_sum.add_(hold * weight)
         self._yield_sum.add_(yield_power * opened)
+        if self.yield_speed_scale is not None:
+            along = along.clamp_max(self.max_joint_speed)
+            score = self.yield_reward_gain * torch.tanh(along / self.yield_speed_scale)
+            # Use continuous gate mass; keep weak single loads and the limit taper attenuated.
+            gate_mass = gate.sum((1, 2)).clamp_min(1.)
+            self._yield_reward_sum.add_((score * opened).sum((1, 2)) / gate_mass)
         self._speed_sum.add_(excess.square() * opened + bump)
         self._open_sum.add_(opened)
         self.passive_observed_gate.copy_(gate)
+        self.passive_observed_wrist_torque.copy_(ext[..., -1])
         self._substeps += 1
         self._snapshot = None
 
     def reset(self, env_ids=None):
         ids = slice(None) if env_ids is None else env_ids
-        for buf in (self.filtered_force_w, self.filtered_joint_torque, self.activation, self.style_relief,
-                    self.motion_blend, self.passive_observed_gate,
-                    self._power_sum, self._hold_sum, self._yield_sum, self._speed_sum, self._open_sum):
+        for buf in (self.filtered_force_w, self.filtered_joint_torque,
+                    self.motion_blend, self.passive_observed_gate, self.passive_observed_wrist_torque,
+                    self._power_sum, self._hold_sum, self._yield_sum, self._yield_reward_sum, self._speed_sum, self._open_sum):
             buf[ids] = 0
         for force in self._contact_forces:
             force[ids] = 0
         self.joint_return_gate[ids] = 1
 
-    def __call__(self, env, asset_cfg, force_filter_time_s, force_deadband_bw, force_scale_bw,
+    def __call__(self, env, asset_cfg, force_filter_time_s,
                  power_scale_w, torque_scale_nm, damping_allowance, max_joint_speed, limit_margin,
-                 passive_joint_torque_range_nm, yield_scale_w,
+                 passive_joint_torque_range_nm, yield_scale_w=None,
                  resistance_tolerance_nm=0.5, overspeed_weight=0.3,
                  command_name='base_velocity', rest_joint_pos=None, all_arm_links=True,
-                 style_relief_release_s=1.0, arm_style_scale=0.5, body_style_scale=0.5):
+                 yield_speed_scale_rad_s=None, yield_reward_max=None, braking_allowance_cap_nm=None):
         push = env.event_manager.get_term_cfg('sustained_standing_push').func
         self._ensure_contacts(push, all_arm_links)
         data = self.robot.data
-        bw = data.body_mass.torch.sum(-1) * abs(env.cfg.sim.gravity[2])
         command = env.command_manager.get_command(command_name)
         zero_command = (command == 0).all(-1)
         alpha = -math.expm1(-env.step_dt / force_filter_time_s)
@@ -328,47 +411,18 @@ class arm_compliance(ManagerTermBase):
         ext = push.current_compact_wrench()[:, 6:16].reshape(-1, 2, 5)
         self.filtered_joint_torque.lerp_(ext, alpha)
 
-        magnitude = torch.zeros_like(self.activation)
         for side, slots in enumerate(self._contact_slots):
             if slots.numel() == 0:
                 continue
             filtered = self._contact_forces[side]
             filtered.lerp_(push.applied_force[:, slots], alpha)
             self.filtered_force_w[:, side] = filtered.sum(1)
-            magnitude[:, side] = filtered.norm(dim=-1).sum(-1)
 
         if self._substeps == 0:
             self.prepare_passive_substep(env)
             self.finish_passive_substep()
         gate = self.passive_observed_gate
         steps = float(self._substeps)
-
-        excess = (magnitude / bw[:, None].clamp_min(1e-6) - force_deadband_bw).clamp_min(0.)
-        force_act = (excess / force_scale_bw).clamp(0., 1.)
-        joint_act = ((self.filtered_joint_torque.abs() - 0.1) / 0.4).clamp(0., 1.).amax(-1)
-        # At zero command the style relief rises with the load and, after release, fades over the
-        # return instead of snapping back while the body still recovers. Arm loads and whole-body
-        # follow (pull, yaw torque, or a still-ramping follow target) get separate style scales; the
-        # PPOAMP floor (force_style_reward_scale) must equal the smaller one: scale = 1-(1-floor)*act.
-        floor = min(arm_style_scale, body_style_scale)
-        body = env.reward_manager.get_term_cfg('track_lin_vel_xy_exp').func
-        yaw = env.reward_manager.get_term_cfg('track_ang_vel_z_exp').func
-        follow = torch.maximum(
-            torch.maximum(body.force_gate, yaw.force_gate),
-            torch.maximum(_smoothstep(body.force_target_velocity_b.norm(dim=-1), (0.02, 0.10)),
-                          _smoothstep(yaw.force_target_yaw_rate.abs(), (0.05, 0.20))))
-        load = torch.maximum(
-            gate.amax(-1) * (1. - arm_style_scale) / max(1. - floor, 1e-6),
-            follow[:, None] * (1. - body_style_scale) / max(1. - floor, 1e-6))
-        relief = torch.maximum(load, self.style_relief * math.exp(-env.step_dt / style_relief_release_s))
-        self.style_relief.copy_(torch.where(zero_command[:, None], relief, torch.zeros_like(relief)))
-        self.activation.copy_(torch.where(
-            zero_command[:, None], self.style_relief,
-            # Commanded walking keeps the arm-load relief it had (arm_style_scale), not the new floor.
-            torch.maximum(force_act, joint_act) * (1. - arm_style_scale) / max(1. - floor, 1e-6)))
-        env.extras['amp_force_activation'] = self.activation.amax(dim=-1).detach()
-        log_style = env.extras.setdefault('log', {})
-        log_style['Interaction/style_follow_gate'] = (follow * zero_command).mean()
 
         target = torch.where(zero_command[:, None, None], 1. - gate, torch.ones_like(gate))
         recovering = torch.lerp(self.joint_return_gate, target, -math.expm1(-env.step_dt / 0.3))
@@ -382,7 +436,9 @@ class arm_compliance(ManagerTermBase):
         power = self._power_sum / steps
         hold = self._hold_sum / steps
         mass = self._open_sum.sum((1, 2)).clamp_min(1.)
-        yield_w = self._yield_sum.sum((1, 2)) / mass / self.yield_scale_w
+        yield_w = self._yield_sum.sum((1, 2)) / mass
+        yield_reward = (yield_w / self.yield_scale_w if self.yield_speed_scale is None
+                        else self._yield_reward_sum / steps)
         speed = self._speed_sum.sum((1, 2)) / mass
         cost = (power / self.power_scale_w + hold / self.torque_scale_nm).sum((1, 2))
         cost = cost + self.overspeed_weight * speed
@@ -390,7 +446,8 @@ class arm_compliance(ManagerTermBase):
         log = env.extras.setdefault('log', {})
         log['Interaction/arm_positive_power_w'] = power.sum((1, 2)).mean()
         log['Interaction/arm_hold_nm'] = hold.sum((1, 2)).mean()
-        log['Interaction/arm_yield_w'] = (self._yield_sum.sum((1, 2)) / mass).mean()
+        log['Interaction/arm_yield_w'] = yield_w.mean()
+        log['Interaction/arm_yield_reward'] = yield_reward.mean()
         log['Interaction/arm_speed_sq'] = speed.mean()
         log['Interaction/arm_load_fraction'] = gate.mean()
-        return yield_w - cost
+        return yield_reward - cost

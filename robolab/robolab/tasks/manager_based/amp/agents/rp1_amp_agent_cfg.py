@@ -64,7 +64,7 @@ class RP1AmpRunnerCfg(RslRlOnPolicyRunnerCfg):
             grad_penalty_scale=10.0,
             disc_trunk_weight_decay=1.0e-4,
             disc_linear_weight_decay=1.0e-2,
-            disc_learning_rate=1.0e-5,
+            disc_learning_rate=5.0e-5,
             disc_max_grad_norm=1.0,
             disc_num_updates=4,
             amp_discriminator=RslRlAmpCfg.AMPDiscriminatorCfg(

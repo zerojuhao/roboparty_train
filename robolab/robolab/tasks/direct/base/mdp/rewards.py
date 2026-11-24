@@ -82,7 +82,7 @@ def ang_vel_xy_l2(env: BaseEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robo
 
 def energy(env: BaseEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     asset: Articulation = env.scene[asset_cfg.name]
-    reward = torch.sum(torch.abs(asset.data.applied_torque * asset.data.joint_vel), dim=-1)
+    reward = torch.sum(torch.abs(asset.actuators.applied_effort * asset.data.joint_vel), dim=-1)
     return reward
 
 

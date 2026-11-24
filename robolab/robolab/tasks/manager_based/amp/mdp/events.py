@@ -19,10 +19,9 @@ if TYPE_CHECKING:
 class sustained_standing_push(ManagerTermBase):
     """Smooth, finite external loads on the arms and torso of interaction environments.
 
-    Every load event independently draws arm point pulls, a horizontal torso pull, a torso yaw
-    torque and, at zero command, one arm joint torque. Called every control step by a
-    zero-interval event. Owns the robot's permanent wrench buffer; do not combine with another
-    permanent-wrench event.
+    Arm and torso draw on independent start-to-start clocks. Each arrival selects zero
+    or an eligible combination of point force and direct torque. Owns the permanent
+    wrench buffer; do not combine with another permanent-wrench event.
     """
 
     def __init__(self, cfg, env):
@@ -31,15 +30,21 @@ class sustained_standing_push(ManagerTermBase):
         for name, value in p.items():
             if name.endswith('_probability') and not 0 <= value <= 1:
                 raise ValueError(f'{name} must be in [0, 1]')
-            if name.endswith(('_range_s', 'count_range')) and not (
-                    0 < value[0] <= value[1] < math.inf):
-                raise ValueError(f'{name} must contain finite positive ordered bounds')
+            if name == 'duration_range_s':
+                valid_range = 0 <= value[0] <= value[1] < math.inf
+            elif name.endswith(('_range_s', 'count_range')):
+                valid_range = 0 < value[0] <= value[1] < math.inf
+            else:
+                valid_range = True
+            if not valid_range:
+                raise ValueError(f'{name} must contain finite ordered bounds')
             if name.endswith(('_range_n', '_range_nm')) and not (0 <= value[0] <= value[1] < math.inf):
                 raise ValueError(f'{name} must contain finite nonnegative ordered bounds')
         for name in ('arm_joint_limit_margin_rad', 'max_total_force_ratio'):
             if not 0 < p[name] < math.inf:
                 raise ValueError(f'{name} must be finite and positive')
-        if p['ramp_time_range_s'][1] > p['duration_range_s'][0] / 2:
+        if (p['duration_range_s'][0] > 0
+                and p['ramp_time_range_s'][1] > p['duration_range_s'][0] / 2):
             raise ValueError('The longest ramp must fit within half of the shortest load')
         self.robot = env.scene[p['asset_cfg'].name]
         self.body_ids = p['asset_cfg'].body_ids
@@ -52,23 +57,11 @@ class sustained_standing_push(ManagerTermBase):
         n, device = env.num_envs, env.device
         self.ids = torch.arange(n, device=device)
         self.active = torch.zeros(n, dtype=torch.bool, device=device)
-        self.abrupt_release = torch.zeros_like(self.active)
-        self.elapsed = torch.zeros(n, device=device)
-        self.duration = torch.zeros(n, device=device)
-        self.ramp_duration = torch.ones(n, device=device)
-        self.wait = torch.zeros(n, device=device)
-        # Sampled loads: world-frame link forces at link-frame offsets, torque about the torso
-        # link z axis, and generalized arm joint torques in ARM_JOINT_NAMES order.
-        self.force = torch.zeros(n, 11, 3, device=device)
-        self.point_offset = torch.zeros_like(self.force)
-        self.torso_yaw_torque = torch.zeros(n, device=device)
-        self.arm_joint_torque = torch.zeros(n, 10, device=device)
-        # Loads currently applied, after ramping, the force budget and the joint-limit fade.
-        self.applied_force = torch.zeros_like(self.force)
-        self.applied_torque = torch.zeros_like(self.force)
-        self.applied_joint_torque = torch.zeros_like(self.arm_joint_torque)
+        self.applied_force = torch.zeros(n, 11, 3, device=device)
+        self.applied_torque = torch.zeros_like(self.applied_force)
+        self.applied_joint_torque = torch.zeros(n, 10, device=device)
         self.explicit_torso_torque_w = torch.zeros(n, 3, device=device)
-        self.applied_positions = torch.zeros_like(self.force)
+        self.applied_positions = torch.zeros_like(self.applied_force)
         self.compact_labels = torch.zeros(n, COMPACT_FORCE_DIM, device=device)
 
         # Body slots of each arm joint's child link, parent link and same-side wrist link.
@@ -85,45 +78,95 @@ class sustained_standing_push(ManagerTermBase):
         self.bodies = torch.tensor(self.body_ids, device=device)
         self.jacobian_bodies = self.bodies - (1 if fixed else 0)
         self.jacobian_joints = self.arm_joints + (0 if fixed else 6)
+        # Axis 1 is the source (arm points + joint torque; torso point + yaw), not the link.
+        self.channel_age = torch.zeros(n, 2, device=device)
+        self.channel_duration = torch.zeros_like(self.channel_age)
+        self.channel_wait = torch.zeros_like(self.channel_age)
+        self.channel_ramp = torch.ones_like(self.channel_age)
+        self.channel_abrupt = torch.zeros_like(self.channel_age, dtype=torch.bool)
+        self.channel_force = torch.zeros(n, 2, 11, 3, device=device)
+        self.channel_offset = torch.zeros_like(self.channel_force)
+        self.channel_tau = torch.zeros(n, 2, 11, device=device)  # ten joint torques + torso yaw
+        self.channel_live_force = torch.zeros_like(self.channel_force)
+        self.channel_live_moment = torch.zeros_like(self.channel_force)  # world moment about link COM
+        self.channel_live_tau = torch.zeros_like(self.channel_tau)
+        self.tail_force = torch.zeros_like(self.channel_force)
+        self.tail_moment = torch.zeros_like(self.channel_force)
+        self.tail_tau = torch.zeros_like(self.channel_tau)
+        self.channel_budget = torch.ones(n, device=device)
         self.reset()
 
     def reset(self, env_ids=None):
         ids = self.ids if env_ids is None else self.ids[env_ids]
-        for buffer in (self.active, self.abrupt_release, self.elapsed, self.duration, self.force,
-                       self.point_offset, self.torso_yaw_torque, self.arm_joint_torque, self.applied_force,
-                       self.applied_torque, self.applied_joint_torque, self.explicit_torso_torque_w,
-                       self.compact_labels):
-            buffer[ids] = 0
-        self.wait[ids] = torch.empty(len(ids), device=self._env.device).uniform_(
+        for buf in (self.active, self.applied_force, self.applied_torque, self.applied_joint_torque,
+                    self.explicit_torso_torque_w, self.compact_labels, self.channel_age, self.channel_duration,
+                    self.channel_abrupt, self.channel_force, self.channel_offset, self.channel_tau,
+                    self.channel_live_force, self.channel_live_moment, self.channel_live_tau,
+                    self.tail_force, self.tail_moment, self.tail_tau):
+            buf[ids] = 0
+        self.channel_ramp[ids] = 1.
+        self.channel_budget[ids] = 1.
+        self.channel_wait[ids] = torch.empty(len(ids), 2, device=self.ids.device).uniform_(
             *self.cfg.params['initial_rest_range_s'])
         self.robot.permanent_wrench_composer.set_forces_and_torques_index(
             forces=self.applied_force[ids], torques=self.applied_torque[ids],
             body_ids=self.body_ids, env_ids=ids, is_global=True)
 
+    def _renew(self, ids, channel, force, offsets, joints, yaw, duration, ramp, abrupt, next_start):
+        idx = (ids, channel)  # unique pairs, including simultaneous renewals of one environment
+        # Crossfade the outgoing wrench at its current strength, even on a draw of zero.
+        self.tail_force[idx] = self.channel_live_force[idx]
+        self.tail_moment[idx] = self.channel_live_moment[idx]
+        self.tail_tau[idx] = self.channel_live_tau[idx]
+        self.channel_force[idx] = force
+        self.channel_offset[idx] = offsets
+        self.channel_tau[ids, channel, :10] = joints
+        self.channel_tau[ids, channel, 10] = yaw
+        self.channel_duration[idx] = duration
+        self.channel_ramp[idx] = ramp
+        self.channel_abrupt[idx] = abrupt
+        self.channel_age[idx] = 0.
+        # Start-to-start, independent of load, duration, release and the other source.
+        self.channel_wait[idx] = next_start
+
+    def _compose_channels(self, data, body_weight, budget_ratio):
+        age, duration, ramp = self.channel_age, self.channel_duration, self.channel_ramp
+        smooth = lambda x: x.square() * (3 - 2 * x)
+        scale = smooth((torch.where(self.channel_abrupt, age, torch.minimum(age, duration-age))
+                        / ramp).clamp(0, 1)) * (age < duration)
+        tail = (1 - smooth((age / ramp).clamp(0, 1))) * (age < duration)
+        gain, fade = scale[:, :, None, None], tail[:, :, None, None]
+        quat = data.body_quat_w.torch[:, self.body_ids][:, None].expand(-1, 2, -1, -1)
+        offset_w = quat_apply(quat, self.channel_offset)
+        self.channel_live_force = gain * self.channel_force + fade * self.tail_force
+        self.channel_live_moment = (gain * torch.cross(offset_w, self.channel_force, dim=-1)
+                                    + fade * self.tail_moment)
+        self.channel_live_tau = scale[..., None] * self.channel_tau + tail[..., None] * self.tail_tau
+        force = self.channel_live_force.sum(1)
+        self.channel_budget = (body_weight * budget_ratio / force.norm(dim=-1).sum(-1).clamp_min(1e-6)).clamp_max(1.)
+        self.applied_force = force * self.channel_budget[:, None, None]
+        # Coincident sources may load the same link at DIFFERENT points. Apply their equivalent
+        # moment at the COM; current_compact_wrench() then sees exactly the simulated wrench.
+        self.applied_torque = self.channel_live_moment.sum(1) * self.channel_budget[:, None, None]
+        self.active = (age < duration).any(1)
+        return self.channel_live_tau[:, 0, :10], self.channel_live_tau[:, 1, 10]
+
     def __call__(self, env, env_ids, asset_cfg, command_name,
-                 point_force_probability, point_force_range_n, contact_count_range, point_offset_range,
+                 trigger_probability, point_force_range_n, contact_count_range, point_offset_range,
                  coherent_pull_probability, arm_couple_probability, small_horizontal_pull_probability,
-                 torso_horizontal_pull_probability, torso_horizontal_force_range_n,
-                 torso_yaw_probability, zero_command_torso_yaw_probability, torso_yaw_torque_range_nm,
-                 arm_joint_torque_probability, arm_joint_torque_range_nm, arm_joint_limit_margin_rad,
-                 max_total_force_ratio, duration_range_s, long_duration_probability, long_duration_range_s,
-                 rest_range_s, initial_rest_range_s, ramp_time_range_s, abrupt_release_probability,
-                 release_reserve_s):
+                 torso_horizontal_force_range_n, torso_yaw_torque_range_nm, arm_joint_torque_range_nm,
+                 arm_joint_limit_margin_rad, max_total_force_ratio, duration_range_s, start_interval_range_s,
+                 initial_rest_range_s, ramp_time_range_s, abrupt_release_probability, release_reserve_s):
         device, data = env.device, self.robot.data
 
         def uniform(bounds, *shape):
             return torch.empty(shape, device=device).uniform_(*bounds)
 
-        self.elapsed += env.step_dt * self.active
-        finished = self.active & (self.elapsed >= self.duration)
-        self.active &= ~finished
-        self.wait -= env.step_dt * ~self.active
-        self.wait[finished] = uniform(rest_range_s, int(finished.sum()))
-        # Leave an unloaded tail before timeout, including after long loads.
         available = env.max_episode_length_s - env.episode_length_buf * env.step_dt - release_reserve_s
-        start = (env.command_manager.get_term(command_name).interaction_envs & ~self.active
-                 & (self.wait <= 0) & (available >= duration_range_s[0]))
-        ids = self.ids[start]
+        eligible = env.command_manager.get_term(command_name).interaction_envs & (available >= duration_range_s[0])
+        self.channel_age += env.step_dt
+        self.channel_wait -= env.step_dt
+        ids, channel = torch.where(eligible[:, None] & (self.channel_wait <= 0))
         if len(ids):
             k = len(ids)
             rows = torch.arange(k, device=device)
@@ -139,7 +182,14 @@ class sustained_standing_push(ManagerTermBase):
                 heading = uniform((-math.pi, math.pi), k)
                 return uniform(bounds, k)[:, None] * torch.stack((heading.cos(), heading.sin()), dim=-1)
 
-            self.point_offset[ids] = uniform(point_offset_range, k, 11, 3)
+            # At zero command both load kinds are eligible; otherwise only arm force or torso yaw.
+            is_arm = channel == 0
+            triggered = chance(trigger_probability)
+            kind = torch.randint(3, (k,), device=device)  # force only, torque only, both
+            with_force = triggered & torch.where(zero_command, kind != 1, is_arm)
+            with_torque = triggered & torch.where(zero_command, kind != 0, ~is_arm)
+
+            offsets = uniform(point_offset_range, k, 11, 3)
 
             # Arm point pulls on distinct links, in uniformly random directions.
             low, high = contact_count_range
@@ -168,7 +218,7 @@ class sustained_standing_push(ManagerTermBase):
             joint = torch.randint(10, (k,), device=device)
             pair = torch.stack((self.joint_wrist[joint], self.joint_parent[joint]), dim=1)
             offset = quat_apply(data.body_quat_w.torch[ids[:, None], self.bodies[pair]],
-                                self.point_offset[ids[:, None], pair])
+                                offsets[rows[:, None], pair])
             jacobian = data.body_com_jacobian_w.torch[
                 ids[:, None], self.jacobian_bodies[pair], :, self.jacobian_joints[joint][:, None]]
             # Motion of the two pull points per unit joint velocity; the couple acts along their difference.
@@ -190,57 +240,42 @@ class sustained_standing_push(ManagerTermBase):
             single = torch.zeros_like(force)
             single[rows, torch.randint(10, (k,), device=device), :2] = horizontal(point_force_range_n)
             force = torch.where(chance(small_horizontal_pull_probability)[:, None, None], single, force)
-            force *= chance(point_force_probability)[:, None, None]
-
-            # Torso pull and arm joint torque start only at zero command; torso yaw is likelier there.
-            force[:, 10, :2] += horizontal(torso_horizontal_force_range_n) * (
-                zero_command & chance(torso_horizontal_pull_probability))[:, None]
-            self.force[ids] = force
-            self.torso_yaw_torque[ids] = sign() * uniform(torso_yaw_torque_range_nm, k) * chance(
-                torch.where(zero_command, zero_command_torso_yaw_probability, torso_yaw_probability))
+            force *= (is_arm & with_force)[:, None, None]
+            force[:, 10, :2] += horizontal(torso_horizontal_force_range_n) * (~is_arm & with_force)[:, None]
+            yaw_torque = sign() * uniform(torso_yaw_torque_range_nm, k) * (~is_arm & with_torque)
             torque = torch.zeros(k, 10, device=device)
-            torque[rows, torch.randint(10, (k,), device=device)] = sign() * uniform(arm_joint_torque_range_nm, k) * (
-                zero_command & chance(arm_joint_torque_probability))
-            self.arm_joint_torque[ids] = torque
+            torque[rows, torch.randint(10, (k,), device=device)] = (
+                sign() * uniform(arm_joint_torque_range_nm, k) * (is_arm & with_torque))
 
-            long = chance(long_duration_probability) & (available[ids] >= long_duration_range_s[0])
-            duration = torch.where(long, uniform(long_duration_range_s, k), uniform(duration_range_s, k))
-            self.duration[ids] = torch.minimum(duration, available[ids])
-            self.ramp_duration[ids] = uniform(ramp_time_range_s, k)
-            self.abrupt_release[ids] = chance(abrupt_release_probability)
-            self.elapsed[ids] = 0
-            self.active[ids] = True
+            duration = torch.minimum(uniform(duration_range_s, k), available[ids])
+            self._renew(ids, channel, force, offsets, torque, yaw_torque, duration,
+                        uniform(ramp_time_range_s, k), chance(abrupt_release_probability),
+                        uniform(start_interval_range_s, k))
 
-        # Smooth ramp in and, unless released abruptly, out; the summed point force stays within budget.
-        ramp = (torch.where(self.abrupt_release, self.elapsed, torch.minimum(self.elapsed, self.duration - self.elapsed))
-                / self.ramp_duration).clamp(0, 1)
-        scale = ramp.square() * (3 - 2 * ramp) * self.active
         body_weight = data.body_mass.torch.sum(dim=1) * abs(env.cfg.sim.gravity[2])
-        budget = (body_weight * max_total_force_ratio / self.force.norm(dim=-1).sum(-1).clamp_min(1e-6)).clamp_max(1)
-        self.applied_force = self.force * (scale * budget)[:, None, None]
+        joint, torso_yaw = self._compose_channels(data, body_weight, max_total_force_ratio)
+        self.applied_positions = data.body_com_pos_w.torch[:, self.body_ids]
 
         # Like a hand easing off: a joint torque fades to zero as it pushes into the soft limit.
         position = data.joint_pos.torch[:, self.arm_joints]
         limits = data.soft_joint_pos_limits.torch[:, self.arm_joints]
         margin = (.5 * (limits[..., 1] - limits[..., 0])).clamp(1e-6, arm_joint_limit_margin_rad)
-        free = (torch.where(self.arm_joint_torque > 0, limits[..., 1] - position, position - limits[..., 0])
+        free = (torch.where(joint > 0, limits[..., 1] - position, position - limits[..., 0])
                 / margin).clamp(0, 1)
-        self.applied_joint_torque = self.arm_joint_torque * scale[:, None] * free.square() * (3 - 2 * free)
+        self.applied_joint_torque = joint * free.square() * (3 - 2 * free)
 
         # Torso yaw torque, plus equal and opposite child/parent moments realizing each joint torque.
         quat = data.body_quat_w.torch[:, self.body_ids]
         yaw = torch.zeros_like(self.explicit_torso_torque_w)
-        yaw[:, 2] = self.torso_yaw_torque * scale
+        yaw[:, 2] = torso_yaw
         self.explicit_torso_torque_w = quat_apply(quat[:, 10], yaw)
-        self.applied_torque = torch.zeros_like(self.force)
-        self.applied_torque[:, 10] = self.explicit_torso_torque_w
+        self.applied_torque[:, 10] += self.explicit_torso_torque_w
         moments = data.body_com_jacobian_w.torch[
             self.ids[:, None], self.jacobian_bodies[self.joint_child], 3:, self.jacobian_joints
         ] * self.applied_joint_torque[..., None]
         self.applied_torque.index_add_(1, self.joint_child, moments)
         self.applied_torque.index_add_(1, self.joint_parent, -moments)
 
-        self.applied_positions = data.body_com_pos_w.torch[:, self.body_ids] + quat_apply(quat, self.point_offset)
         self.robot.permanent_wrench_composer.set_forces_and_torques_index(
             forces=self.applied_force, torques=self.applied_torque, positions=self.applied_positions,
             body_ids=self.body_ids, env_ids=self.ids, is_global=True)
@@ -305,3 +340,35 @@ def reset_from_ref(
     root_states[:, 10:13] = animation_term.get_root_ang_vel_w(env_ids)[:, 0]
     robot.write_root_pose_to_sim_index(root_pose=root_states[:, :7], env_ids=env_ids)
     robot.write_root_velocity_to_sim_index(root_velocity=root_states[:, 7:13], env_ids=env_ids)
+
+
+def randomize_joint_setpoint_offset(
+    env: ManagerBasedEnv,
+    env_ids,
+    offset_range: tuple[float, float] = (-0.01, 0.01),
+    action_name: str = 'joint_pos',
+):
+    """Hidden per-episode joint zero/calibration error on the position setpoint (SuperMimic-style).
+
+    Resampled on every reset around the nominal action offset (never cumulative). Only the
+    setpoint moves: observations keep the nominal default, so at rest the commanded target and
+    the measured position differ by a small constant the policy cannot see.
+    """
+    lo, hi = offset_range
+    if not (math.isfinite(lo) and math.isfinite(hi) and lo <= hi):
+        raise ValueError('offset_range must be finite and increasing')
+    action = env.action_manager.get_term(action_name)
+    if not torch.is_tensor(getattr(action, '_offset', None)) or action._offset.dim() != 2:
+        raise RuntimeError('joint setpoint offset needs a per-env tensor action offset (use_default_offset=True)')
+    nominal = getattr(action, '_nominal_offset', None)
+    if nominal is None:
+        nominal = action._offset.detach().clone()
+        action._nominal_offset = nominal
+    if env_ids is None or (isinstance(env_ids, slice) and env_ids == slice(None)):
+        env_ids = torch.arange(env.num_envs, device=nominal.device)
+    else:
+        env_ids = torch.as_tensor(env_ids, device=nominal.device, dtype=torch.long)
+    if env_ids.numel() == 0:
+        return
+    offsets = torch.empty(env_ids.numel(), nominal.shape[-1], device=nominal.device, dtype=nominal.dtype).uniform_(lo, hi)
+    action._offset[env_ids] = nominal[env_ids] + offsets

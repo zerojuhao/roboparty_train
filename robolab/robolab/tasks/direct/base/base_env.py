@@ -180,7 +180,7 @@ class BaseEnv(DirectRLEnv):
         )
         feet_height = torch.clamp(feet_height - 0.04, min=0.0, max=1.0)
         feet_height = torch.nan_to_num(feet_height, nan=1.0, posinf=1.0, neginf=0)
-        joint_torque = robot.data.applied_torque
+        joint_torque = robot.actuators.applied_effort
         joint_acc = robot.data.joint_acc
         current_critic_obs = torch.cat(
             [current_actor_obs, root_lin_vel * self.obs_scales.lin_vel, feet_contact.float(), feet_contact_force.flatten(1), feet_air_time.flatten(1), feet_height.flatten(1), joint_acc, joint_torque], dim=-1

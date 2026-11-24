@@ -23,3 +23,5 @@ class AMPModelCfg(RslRlMLPModelCfg):
     force_estimation_multi_contact: bool = False
     force_estimation_compact: bool = False
     enable_force_vel_target_estimation: bool = False
+    # Weight of unloaded samples in the compact load-detection loss (1.0 = balanced, legacy).
+    force_load_negative_weight: float = 1.0

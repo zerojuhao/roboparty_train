@@ -35,6 +35,8 @@ class RP1AmpSoftRunnerCfg(RslRlOnPolicyRunnerCfg):
         force_estimation_multi_contact=True,
         force_estimation_compact=True,
         enable_force_vel_target_estimation=True,
+        # Penalize false load detections 5x (removes ln 5 of the balanced-loss logit bias).
+        force_load_negative_weight=5.0,
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
@@ -58,10 +60,8 @@ class RP1AmpSoftRunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
-        # Floor of the force-dependent style scale; equals min(arm_style_scale, body_style_scale).
-        force_style_reward_scale=0.5,
         symmetry_cfg=RslRlSymmetryCfg(
-            use_data_augmentation=False,
+            use_data_augmentation=True,
             use_mirror_loss=True,
             mirror_loss_coeff=0.2,
             data_augmentation_func=compute_symmetric_states,

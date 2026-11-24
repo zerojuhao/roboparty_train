@@ -40,7 +40,6 @@ from isaaclab.managers import ActionManager, ObservationManager, RecorderManager
 from robolab.tasks.manager_based.amp.managers import MotionDataManager, AnimationManager
 from .animation_env import AnimationEnv
 from .amp_env_cfg import AmpEnvCfg
-from .mdp.motor_load import MotorLoadTracker
 from .mdp.contact_diagnostics import FootContactDiagnostics
 
 class AmpEnv(AnimationEnv):
@@ -61,7 +60,8 @@ class AmpEnv(AnimationEnv):
     def __init__(self, cfg: AmpEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         robot = self.scene["robot"]
-        self.motor_load = MotorLoadTracker(self.num_envs, robot.num_joints, self.device)
+        # Peak |applied torque| / effort limit over the physics substeps of the current policy step.
+        self.torque_ratio_peak = torch.zeros(self.num_envs, robot.num_joints, device=self.device)
         self.foot_contact_diagnostics = (
             FootContactDiagnostics(self)
             if 'feet_contact_force_l2' in self.reward_manager.active_terms else None)
@@ -73,8 +73,6 @@ class AmpEnv(AnimationEnv):
 
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
-        if hasattr(self, "motor_load"):
-            self.motor_load.reset(env_ids)
         if getattr(self, 'foot_contact_diagnostics', None) is not None:
             self.foot_contact_diagnostics.reset(env_ids)
 
@@ -114,7 +112,9 @@ class AmpEnv(AnimationEnv):
         # note: checked here once to avoid multiple checks within the loop
         is_rendering = self.sim.is_rendering
 
-        self.motor_load.begin_step()
+        robot = self.scene["robot"]
+        effort_limits = robot.data.joint_effort_limits.torch.clamp_min(1.0e-6)
+        self.torque_ratio_peak.zero_()
         if self._passive_arm is not None:
             self._passive_arm.begin_passive_step()
         # perform physics stepping
@@ -133,7 +133,11 @@ class AmpEnv(AnimationEnv):
             # simulate
             self.sim.step(render=False)
             # Newton native effort telemetry is written inside the physics step.
-            self.motor_load.sample(self.scene["robot"].data)
+            torch.maximum(
+                self.torque_ratio_peak,
+                robot.actuators.applied_effort.torch.abs() / effort_limits,
+                out=self.torque_ratio_peak,
+            )
             if self._passive_arm is not None:
                 self._passive_arm.finish_passive_substep()
             self.recorder_manager.record_post_physics_decimation_step()

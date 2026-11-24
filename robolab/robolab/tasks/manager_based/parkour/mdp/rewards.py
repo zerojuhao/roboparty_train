@@ -295,7 +295,7 @@ def motors_power_square(
     normalize_by_num_joints: bool = False,
 ):
     asset: Articulation = env.scene[asset_cfg.name]
-    power_j = asset.data.applied_torque * asset.data.joint_vel  # (batch_size, num_joints)
+    power_j = asset.actuators.applied_effort * asset.data.joint_vel  # (batch_size, num_joints)
     if normalize_by_stiffness:
         for _, actuator in asset.actuators.items():
             power_j[:, actuator.joint_indices] /= actuator.stiffness
@@ -316,7 +316,7 @@ def applied_torque_limits_by_ratio(
     joint_effort_limits = asset.data.joint_effort_limits  # (num_envs, num_joints)
     joint_effort_limits = joint_effort_limits[:, asset_cfg.joint_ids]
 
-    applied_torque = asset.data.applied_torque[:, asset_cfg.joint_ids]
+    applied_torque = asset.actuators.applied_effort[:, asset_cfg.joint_ids]
     applied_torque = torch.abs(applied_torque)
 
     out_of_limits = (applied_torque - joint_effort_limits * limit_ratio).clip(min=0)

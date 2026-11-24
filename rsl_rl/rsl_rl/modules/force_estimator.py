@@ -91,6 +91,21 @@ def balanced_contact_mean(error, contact):
     return (positive + negative) / groups.clamp_min(1)
 
 
+def weighted_contact_mean(error, contact, negative_weight=1.0):
+    """Group means with the unloaded group weighted by ``negative_weight``; 1.0 equals balanced_contact_mean.
+
+    Equal group weights shift detection logits up by ln(N_unloaded / N_loaded); weighting the unloaded
+    group by k removes ln(k) of that bias, trading a little recall for fewer false load detections.
+    """
+    positive_count = contact.sum()
+    negative_count = (1 - contact).sum()
+    positive = (error * contact).sum() / positive_count.clamp_min(1)
+    negative = (error * (1 - contact)).sum() / negative_count.clamp_min(1)
+    wp = (positive_count > 0).to(error.dtype)
+    wn = (negative_count > 0).to(error.dtype) * negative_weight
+    return (wp * positive + wn * negative) / (wp + wn).clamp_min(1e-6)
+
+
 def balanced_joint_torque_mean(error, torque_nm):
     """Balance joint-level errors without dropping weak or unloaded joints."""
     fraction = ((torque_nm.detach().abs() - .2) / .8).clamp(0, 1)
@@ -192,7 +207,7 @@ class ForceEstimator(nn.Module):
         }
 
     @staticmethod
-    def compact_loss_terms(raw, target):
+    def compact_loss_terms(raw, target, load_negative_weight=1.0):
         if raw.shape[-1] != COMPACT_FORCE_DIM:
             raise ValueError(
                 f'Compact force layout must be {COMPACT_FORCE_DIM} (fxyz, mxyz, tau10, region9, load3)')
@@ -208,7 +223,7 @@ class ForceEstimator(nn.Module):
             'net_moment': (raw[..., 3:6]-target[..., 3:6]/10.).square().mean(),
             'arm_torque': balanced_joint_torque_mean(arm_error, target[..., 6:16]),
             'regional_force': 0.5 * balanced_contact_mean(region_error.reshape(-1), load.reshape(-1)),
-            'load': 0.1 * balanced_contact_mean(detection.reshape(-1), load.reshape(-1)),
+            'load': 0.1 * weighted_contact_mean(detection.reshape(-1), load.reshape(-1), load_negative_weight),
         }
 
     @staticmethod

@@ -74,11 +74,11 @@ class RP1AmpCurriculumCfg:
 class RP1CommandsCfg(CommandsCfg):
     base_velocity = FilteredUniformVelocityCommandCfg(
         asset_name="robot",
-        min_abs_lin_velocity=0.3,
-        min_abs_ang_velocity=0.5,
-        single_axis_probability=0.6,
+        min_abs_lin_velocity=0.4,
+        min_abs_ang_velocity=0.4,
+        single_axis_probability=0.7,
         resampling_time_range=(5.0, 15.0),
-        rel_standing_envs=0.10,
+        rel_standing_envs=0.05,
         heading_command=False,
         max_lin_velocity=3.0,
         ranges=FilteredUniformVelocityCommandCfg.Ranges(
@@ -98,6 +98,7 @@ class RP1AmpEnvCfg(AmpEnvCfg):
         super().__post_init__()
         self.scene.robot = RP1_24DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.robot.init_state.pos = (0.0, 0.0, 0.78)
+        self.rewards.feet_slide.weight = -0.3
         self.sim.use_newton_actuators = False
         # Add turn overload shaping without weakening peak protection or changing running.
         self.rewards.feet_contact_force_l2.params["in_place_turn_weights"] = (1.0, 0.2, 0.1)
